@@ -1,0 +1,15 @@
+# ignore build artifacts
+*.o
+*.a
+*.so
+*.exe
+*.lib
+*.dll
+
+# build artifact directories
+/build/
+/bin/
+
+# user-specific VSCode directories
+*.code-workspace
+*.vscode
