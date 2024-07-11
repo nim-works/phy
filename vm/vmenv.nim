@@ -26,9 +26,9 @@ type
   ProcIndex*   = distinct uint32
   ProcAddress* = distinct uint32
 
-  ProcEntry* = object
-    ## A procedure table entry. Stores the runtime-relevant information for a
-    ## procedure callable within the VM.
+  ProcHeader* = object
+    ## Stores the various information about a procedure, such as the type,
+    ## locals, body, etc.
     kind*: ProcKind
     isClosure*: bool
       ## whether the closure calling convention is used
@@ -93,7 +93,7 @@ type
     locals*: seq[ValueType]
     globals*: seq[TypedValue]
     constants*: seq[TypedValue]
-    procs*: seq[ProcEntry]
+    procs*: seq[ProcHeader]
     types*: TypeEnv
 
     callbacks*: seq[VmCallback]
@@ -129,7 +129,7 @@ func deref*(x: ProcAddress): ProcIndex {.inline.} =
 
 template isNil*(x: ProcAddress): bool = uint32(x) == 0
 
-template `[]`*(e: VmEnv, i: ProcIndex): ProcEntry =
+template `[]`*(e: VmEnv, i: ProcIndex): ProcHeader =
   e.procs[uint32(i)]
 
 proc initVm*(initial, maxHost: uint): VmEnv =
