@@ -36,3 +36,15 @@ template unreachable*() =
   ## Use ``unreachable`` to mark a point in the program as unreachable. This
   ## is preferred over ``assert false``.
   unreachableImpl(instantiationInfo(-1))
+
+# ------- checked arithmetic
+
+proc checkedAdd*[T: SomeUnsignedInt](a, b: T, o: var T): bool =
+  o = a + b
+  # if adding two non-negative numbers, and the result is smaller than
+  # both operands, the operation overflowed
+  o < a and o < b
+
+proc checkedAdd*[T: SomeSignedInt](a, b: T, o: var T): bool =
+  o = a +% b
+  (o xor a) < T(0) and (o xor b) < T(0)
