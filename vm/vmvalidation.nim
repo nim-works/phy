@@ -136,8 +136,9 @@ proc computeDepth(ctx: ValidationState, start: PrgCtr, target: PrgCtr): int =
   if a == b:
     return 0 # intra-subroutine jump
   elif a == -1:
-    return -1 # fail fast
+    return -1 # a jump *into* a subroutine -> always illegal
   else:
+    # note: if `b` is -1, it means that `target` is not part of a subroutine
     var i = a
     # go upwards in hierarchy until there are no more parents
     while i != -1 and i != b:
