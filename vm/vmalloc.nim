@@ -40,6 +40,7 @@ const
   AddressBias* = 4096
     ## the offset applied when translating a host to a virtual address
   NilAddress* = VirtualAddr(0)
+  ZctFlag = 1'u shl 63
 
 when not defined(debug):
   {.push checks: off.}
@@ -98,10 +99,10 @@ proc register*[T: ref](a: var VmAllocator, r: T): ForeignRef =
   result = (a.nextForeign + 1).ForeignRef
   if a.nextForeign < a.foreign.len.uint:
     let next = a.foreign[a.nextForeign].rc
-    a.foreign[a.nextForeign] = (cast[pointer](r), 1'u shl 63, destroy[T])
+    a.foreign[a.nextForeign] = (cast[pointer](r), ZctFlag, destroy[T])
     a.nextForeign = next
   else:
-    a.foreign.add (cast[pointer](r), 1'u shl 63, destroy[T])
+    a.foreign.add (cast[pointer](r), ZctFlag, destroy[T])
     inc a.nextForeign
 
   # every new foreign ref starts off in the ZCT
@@ -119,7 +120,7 @@ template decRef*(a: var VmAllocator, r: ForeignRef) =
   let s = r.uint64 - 1
   dec a.foreign[s].rc
   if a.foreign[s].rc == 0:
-    a.foreign[s].rc = 1'u shl 63 # mark as being in the ZCT
+    a.foreign[s].rc = ZctFlag # mark as being in the ZCT
     a.zct.add ForeignRef(s+1)
 
 proc free*(a: var VmAllocator, r: ForeignRef) =
@@ -131,13 +132,14 @@ proc free*(a: var VmAllocator, r: ForeignRef) =
   a.nextForeign = idx.uint
 
 proc cleanup*(a: var VmAllocator, r: ForeignRef) =
-  ## If `r` is part of the ZCT and has a refcount of 0, frees it.
+  ## Frees `r` if it's marked as being part of the ZCT and has a refcount of
+  ## 0.
   let i = r.uint64 - 1
-  if a.foreign[i].rc == 1'u shl 63:
+  if a.foreign[i].rc == ZctFlag:
     free(a, r)
   else:
     # non-zero refcount -> remove the ZCT flag
-    a.foreign[i].rc = a.foreign[i].rc and not(1'u shl 63)
+    a.foreign[i].rc = a.foreign[i].rc and not(ZctFlag)
 
 template lookup*[T](a: VmAllocator, id: ForeignRef, _: typedesc[T]): T =
   # a template, to get around the lent or copy
