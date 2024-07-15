@@ -40,7 +40,8 @@ type
     locals*: HOslice[uint32]
       ## the types of the locals (can be empty)
     eh*: HOslice[uint32]
-      ## the EH table slice associated with the proc (can be empty)
+      ## the exception handler (EH) table slice associated with the proc
+      ## (can be empty)
 
   Value* = distinct uint64
     ## Untyped 64-bit value representing a single value.
