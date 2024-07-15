@@ -479,7 +479,7 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
     of opcRaise:
       eh.value = stack.pop()
       break exc # start exception handling
-    of opcCall, opcIndCall, opcIndCallCl:
+    of opcCall, opcIndCall:
       var
         (idx, args) = imm32_16()
         prc: ProcIndex
@@ -492,18 +492,6 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
         check tmp > 0 and tmp < c.procs.len.uint64, ecIllegalProc
         prc = ProcIndex(tmp - 1)
         check TypeId(idx) == c[prc].typ, ecTypeError
-      of opcIndCallCl:
-        let tmp = operand(1).uintVal
-        check tmp > 0 and tmp < c.procs.len.uint64, ecIllegalProc
-        prc = ProcIndex(tmp - 1)
-        check TypeId(idx) == c[prc].typ, ecTypeError
-        if c[prc].isClosure:
-          inc args
-          bias = 1
-        else:
-          bias = 2
-        # the proc and env cannot be popped right away, since the procedure might
-        # be a stub, in which case the VM yields
       else:
         unreachable()
 

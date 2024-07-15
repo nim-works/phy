@@ -296,7 +296,7 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
     pop(vtInt)
     expectEmpty()
     ctx.active = false
-  of opcCall, opcIndCall, opcIndCallCl:
+  of opcCall, opcIndCall:
     let (idx, num) = imm32_16(instr)
     var typ: TypeId
 
@@ -307,11 +307,6 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
       check checked(env.types.types, idx).kind == tkProc, errNotAProcType
       typ = TypeId idx
       pop(vtInt) # callee
-    of opcIndCallCl:
-      check checked(env.types.types, idx).kind == tkProc, errNotAProcType
-      typ = TypeId idx
-      pop(vtInt) # callee
-      pop(vtInt) # environment
     else:
       unreachable()
 
