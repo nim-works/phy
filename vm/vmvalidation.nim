@@ -139,7 +139,7 @@ proc computeDepth(ctx: ValidationState, start: PrgCtr, target: PrgCtr): int =
     return -1 # fail fast
   else:
     var i = a
-    # go upwards in hierarchy until the there are no more parents
+    # go upwards in hierarchy until there are no more parents
     while i != -1 and i != b:
       i = ctx.subroutines[i].parent
       inc result

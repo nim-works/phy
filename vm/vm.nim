@@ -275,7 +275,7 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
     cast[ptr typ](checkmem(pop(int64) + imm32(), sizeof(typ)))[] = val
 
   template mainLoop(label, body: untyped) =
-    # a template in order to visual reduce nesting
+    # a template in order to reduce visual nesting
     while true:
       block label:
         body
