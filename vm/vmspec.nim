@@ -104,7 +104,6 @@ type
     opcRaise      ## val:int
     opcCall       ## callee:imm32 num:imm16
     opcIndCall    ## callee:int typ:imm32 num:imm16
-    opcIndCallCl  ## callee:int typ:imm32 num:imm16
     opcExcept     ## val:int
 
     # sub-routines

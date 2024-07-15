@@ -30,8 +30,6 @@ type
     ## Stores the various information about a procedure, such as the type,
     ## locals, body, etc.
     kind*: ProcKind
-    isClosure*: bool
-      ## whether the closure calling convention is used
     typ*: TypeId
       ## the procedure's type
     code*: Slice[PrgCtr]
