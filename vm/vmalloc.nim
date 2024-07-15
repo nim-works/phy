@@ -75,7 +75,7 @@ proc grow*(a: var VmAllocator, size: uint): bool =
 
 proc checkmem*(a: VmAllocator, address: VirtualAddr, len: uint64,
                o: var HostPointer): bool {.inline.} =
-  ## * if `a` points to `len` bytes all owned by the VM, writes the host
+  ## * if `address` points to `len` bytes all owned by the VM, writes the host
   ##   address to `o` and returns false
   ## * otherwise leaves `o` unchanged an returns true
   let x = uint64(address)
