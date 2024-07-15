@@ -15,7 +15,11 @@ Commands:
   all [args]                  builds all programs
   single <name> [args]        builds the single program with the given name
 """
-  Programs: seq[(string, string)] = @[]
+  Programs: seq[(string, string)] = @[
+    ("vm", "vm/vm.nim"), # XXX: not really a program. Only here to make sure it
+                         #      compiles
+    ("vmvalidation", "vm/vmvalidation.nim")
+  ]
 
 var
   nimExe = findExe("nim")
