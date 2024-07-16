@@ -1,0 +1,4 @@
+discard """
+  description: "An example test file"
+  output: "test\n"
+"""

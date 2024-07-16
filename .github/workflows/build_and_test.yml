@@ -62,3 +62,6 @@ jobs:
 
       - name: Build all programs
         run: bin/koch all -d:nimStrictMode -d:release
+
+      - name: "Run tests"
+        run: bin/tester
