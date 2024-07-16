@@ -97,7 +97,7 @@ if file.len == 0:
   let testDir = currDir / "tests"
   var dirs: seq[tuple[path: string, runnerExe: string]]
 
-  # discover and all test directories and build the associated runner
+  # discover all test directories and build the associated runner
   # executables:
   for it in walkDir(testDir, relative=false):
     if it.kind == pcDir:
