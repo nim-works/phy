@@ -18,7 +18,8 @@ Commands:
   Programs: seq[(string, string)] = @[
     ("vm", "vm/vm.nim"), # XXX: not really a program. Only here to make sure it
                          #      compiles
-    ("vmvalidation", "vm/vmvalidation.nim")
+    ("vmvalidation", "vm/vmvalidation.nim"),
+    ("tester", "tools/tester.nim")
   ]
 
 var
