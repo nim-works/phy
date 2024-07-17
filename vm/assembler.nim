@@ -121,7 +121,7 @@ proc ident(s: Stream): string =
 # -------------------
 
 template scopedParser(s: Stream) =
-  ## Injects a ``SexpParser`` local openend with `s`. It's closed at the end of
+  ## Injects a ``SexpParser`` local `p` opened with `s`. It's closed at the end of
   ## the scope.
   let start = s.getPosition()
   var p {.inject.}: SexpParser
@@ -252,7 +252,7 @@ proc parseEh(s: Stream, a: var AssemblerState): seq[EhInstr] =
   expect p.consumeTok() == tkParensRi
 
 proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
-  ## Parses a the operands for a single instruction with opcode `op`.
+  ## Parses the operands for a single instruction with opcode `op`.
   template makeInstr(a = 0'i32, b = 0'i16, c = 0'i8): Instr =
     Instr((op.InstrType) or
           (a.InstrType shl instrAShift) or
@@ -339,7 +339,7 @@ proc hoSlice[T](old, with: seq[T]): HOslice[uint32] =
 proc process*(a: var AssemblerState, line: sink string, env: var VmEnv) =
   ## Processes `line`, which must be a single line without the line terminator.
   ## An `AssemblerError <#AssemblerError>`_ or ``ValueError`` is raised when
-  ## something goes wrong. The `env` might have been modified alrady in this
+  ## something goes wrong. The `env` might have been modified already in this
   ## case, but not to a point where it's in an invalid state, meaning that both
   ## `a` and `env` can continue to be used after the exception is handled.
   let s = newStringStream(line)
