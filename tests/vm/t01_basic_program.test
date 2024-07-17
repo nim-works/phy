@@ -1,0 +1,11 @@
+discard """
+  description: "
+    The most simple program consists of a single procedure with a single
+    return instruction
+  "
+  output: "(Done)"
+"""
+.type P1 (Proc (Void))
+.start P1 main
+ret
+.end

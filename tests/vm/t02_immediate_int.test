@@ -1,0 +1,8 @@
+discard """
+  output: "(Done 1)"
+"""
+.type P1 (Proc (Int))
+.start P1 main
+LdImmInt 1
+Ret
+.end

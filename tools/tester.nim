@@ -221,7 +221,7 @@ else:
   case res.kind:
   of rkSuccess: discard
   of rkError:
-    echo "Reason: the runner reported an error"
+    echo "The runner reported an error:" + fgYellow
     echo res.output
   of rkMismatch:
     echo "Got:" + fgYellow
@@ -229,4 +229,4 @@ else:
     echo "Expected:" + fgYellow
     echo res.expected
   of rkUnexpectedSuccess:
-    echo "The test was expected to fail, but it didn't"
+    echo "The test was expected to fail, but it didn't" + fgYellow
