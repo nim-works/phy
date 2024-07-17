@@ -409,9 +409,10 @@ proc verify*(hdr: ProcHeader, env: VmEnv): CheckResult =
   of pkDefault:
     check hdr.code.b >= hdr.code.a, Error
     check test(env.code, hdr.code.a) and test(env.code, hdr.code.b), Error
-    check hdr.locals.b > hdr.locals.a, Error
-    check test(env.locals, hdr.locals.a) and test(env.locals, hdr.locals.b-1),
-          Error
+    check hdr.locals.b >= hdr.locals.a, Error
+    if hdr.locals.len > 0:
+      check test(env.locals, hdr.locals.a) and test(env.locals, hdr.locals.b-1),
+            Error
     # the EH table is checked later
   of pkCallback:
     check test(env.callbacks, hdr.code.a), Error
