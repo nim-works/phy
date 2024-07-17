@@ -11,6 +11,7 @@
 
 import
   std/[
+    parseutils,
     strutils,
     streams,
     tables
@@ -94,21 +95,17 @@ proc expectChar(s: Stream, c: char) =
 
 proc parseInt(s: Stream): int =
   var str = ""
-  s.readChar('-', str)
-
-  while s.peekChar() in {'0'..'9'}:
+  while (let c = s.peekChar(); c notin {' ', '\t', '\n', '\r', '\0'}):
     str.add s.readChar()
 
-  result = parseInt(str)
+  expect parseInt(str, result, 0) == str.len, "expected integer value"
 
 proc parseFloat(s: Stream): float =
   var str = ""
-  s.readChar('-', str)
-
-  while s.peekChar() in {'0'..'9', '.'}:
+  while (let c = s.peekChar(); c notin {' ', '\t', '\n', '\r', '\0'}):
     str.add s.readChar()
 
-  result = parseFloat(str)
+  expect parseFloat(str, result, 0) == str.len, "expected float value"
 
 proc ident(s: Stream): string =
   const Allowed = {'a'..'z', 'A'..'Z', '_'}
