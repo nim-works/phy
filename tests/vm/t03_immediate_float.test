@@ -1,0 +1,8 @@
+discard """
+  output: "(Done -0.5)"
+"""
+.type P1 (Proc (Float))
+.start P1 main
+LdImmFloat -0.5
+Ret
+.end
