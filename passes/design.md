@@ -39,7 +39,7 @@ Top ::= ('.extends' Identifier)? (Def | Append | Remove)*
 
 A `Def` defines a named rule, an `Append` appends to an existing named rule,
 and a `Remove` removes the given rule(s) from the named rule. A `Reference`
-is a reference to another name rule. There are two special references: `<int>`
+is a reference to another named rule. There are two special references: `<int>`
 and `<float>`. They refer to a literal integer and float value, respectively.
 
 The idea is to use S-expressions as the serialization format (it's both human
