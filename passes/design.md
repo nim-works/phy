@@ -11,7 +11,7 @@ intended to be very small, only focusing on one small feature or aspect, hence
 the name *nano*pass.
 
 Inspiration for the nanopass design was taken from
-[Racket](https://docs.racket-lang.com/nanopass/index.html).
+[Racket](https://docs.racket-lang.org/nanopass/index.html).
 
 ### Intermediate Language Definition
 
