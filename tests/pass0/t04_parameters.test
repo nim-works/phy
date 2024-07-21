@@ -1,0 +1,30 @@
+discard """
+  description: "Ensure that simple parameter passing works"
+  output: "(Done 2)"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Type 0) (Type 0) (Type 0))
+  (ProcTy (Type 0))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Locals
+      (Type 0)
+      (Type 0)
+    )
+    (Continuations
+      (Continuation (Params) 0
+        (Continue 1 (Copy (Local 1)))
+      )
+      (Continuation (Params (Type 0)))
+    )
+  )
+  (ProcDef (Type 2) (Locals) (Continuations
+    (Continuation (Params) 0
+      (Continue 1 (Call (Proc 0) (IntVal 1) (IntVal 2)))
+    )
+    (Continuation (Params (Type 0)))
+  ))
+)
