@@ -1,5 +1,5 @@
 discard """
-  output: "(Done 1)"
+  output: "(Done 2)"
 """
 (TypeDefs
   (Int 8)
@@ -9,7 +9,7 @@ discard """
 (ProcDefs
   (ProcDef (Type 1) (Locals) (Continuations
     (Continuation (Params) 0
-      (Continue 1 (IntVal 1))
+      (Continue 1 (IntVal 2))
     )
     (Continuation (Params (Type 0)))
   ))
