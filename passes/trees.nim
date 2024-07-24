@@ -7,7 +7,7 @@ import
 
 type
   TreeNode*[T] = object
-    ## A single node. How the val field is interpreted depens on the kind. For
+    ## A single node. How the val field is interpreted depends on the kind. For
     ## leaf nodes, the field's meaning is decided externally, while for non-
     ## leaf nodes, `val` stores how many child nodes the node has.
     kind*: T
