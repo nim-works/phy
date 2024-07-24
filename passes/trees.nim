@@ -23,6 +23,8 @@ type
 
 const
   ExternalFlag = 0x8000_0000'u32
+    ## use the most significant bit to flag whether the value is larger than an
+    ## `max(int32)` and overflows into `PackedTree.numbers`.
 
 proc `[]`*[T](t: PackedTree[T], at: NodeIndex): TreeNode[T] {.inline.} =
   t.nodes[ord at]
