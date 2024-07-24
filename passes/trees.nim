@@ -41,12 +41,15 @@ proc next*(t: PackedTree, i: NodeIndex): NodeIndex =
 
   result = NodeIndex(i)
 
+func first*(t: PackedTree, n: NodeIndex): NodeIndex {.inline.} =
+  ## Returns the index of the first sub-node of `n`.
+  NodeIndex(uint32(n) + 1)
+
 proc child*(t: PackedTree, i: NodeIndex, child: Natural): NodeIndex =
   ## Returns the index of the `child`-th subnode of `i`.
-  var i = uint32(i) + 1
-  for j in 0..<child:
-    i = uint32 t.next(NodeIndex i)
-  result = NodeIndex i
+  result = t.first(i)
+  for _ in 0..<child:
+    result = t.next(result)
 
 proc child*(t: PackedTree, i: NodeIndex, child: BackwardsIndex
            ): NodeIndex {.inline.} =
@@ -69,7 +72,7 @@ proc last*(tree: PackedTree, n: NodeIndex): NodeIndex =
 
 iterator items*(t: PackedTree, at: NodeIndex): NodeIndex =
   ## Returns the index of each child node of the node at `at`.
-  var n = NodeIndex(ord(at) + 1)
+  var n = t.first(at)
   for i in 0..<t.len(at):
     yield n
     n = t.next(n)
@@ -77,7 +80,7 @@ iterator items*(t: PackedTree, at: NodeIndex): NodeIndex =
 iterator items*(t: PackedTree, at: NodeIndex; start: int; last = ^1): NodeIndex =
   ## Returns the index of each child node of the node at `at`, only
   ## including subnode in slice ``start..last``.
-  var n = NodeIndex(ord(at) + 1)
+  var n = t.first(at)
   var i = 0
   while i < start:
     n = t.next(n)
@@ -91,7 +94,7 @@ iterator items*(t: PackedTree, at: NodeIndex; start: int; last = ^1): NodeIndex 
 
 iterator pairs*(t: PackedTree, at: NodeIndex): (int, NodeIndex) =
   ## Returns the child number + child node index for all child nodes of `at`.
-  var n = NodeIndex(ord(at) + 1)
+  var n = t.first(at)
   for i in 0..<t.len(at):
     yield (i, n)
     n = t.next(n)
