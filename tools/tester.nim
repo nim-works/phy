@@ -21,11 +21,19 @@ import
   ]
 
 type
+  OutputSpec = object
+    fromFile: bool
+      ## whether the expected output is provided by a file
+    output: string
+      ## either a file path or the expected output
+
   TestSpec = object
     ## A test specification. Contains information about a test and what to
     ## expect from it.
-    expected: Option[string]
-      ## the output expected from the runner (if any)
+    arguments: seq[string]
+      ## extra arguments to pass to the runner
+    expected: seq[OutputSpec]
+      ## the output(s) expected from the runner (if any)
     knownIssue: Option[string]
       ## whether the test is currently expected to fail due to a known issue
 
@@ -62,6 +70,38 @@ proc exec(cmd: string, args: openArray[string]): tuple[output: string,
 
   result.code = p.peekExitCode()
   p.close()
+
+proc content(s: OutputSpec): string =
+  ## Returns the string to compare the actual runner output against.
+  if s.fromFile:
+    let f = open(s.output, fmRead)
+    defer: f.close()
+    readAll(f)
+  else:
+    s.output
+
+proc compare(res: tuple[output: string, code: int], spec: TestSpec): TestResult =
+  ## Compares the runner output `res` against the `spec`.
+  if res.code == 0:
+    var i = 0
+    for got in split(res.output, "!BREAK!"):
+      if i < spec.expected.len:
+        let expect = content(spec.expected[i])
+        if got != expect:
+          return TestResult(kind: rkMismatch, got: got, expected: expect)
+
+      inc i
+
+    if i >= spec.expected.len:
+      # more output fragments being provided than there exist expectations for
+      # is fine
+      result = TestResult(kind: rkSuccess)
+    else:
+      # not enough output fragments
+      result = TestResult(kind: rkMismatch, got: "",
+                          expected: content(spec.expected[i]))
+  else:
+    result = TestResult(kind: rkError, output: res.output)
 
 var
   nimExe = findExe("nim")
@@ -154,6 +194,13 @@ else:
     quit(1)
 
   var spec: TestSpec
+
+  block:
+    # check for and register files storing expected output
+    let expectedFile = changeFileExt(file, "expected")
+    if fileExists(expectedFile):
+      spec.expected.add OutputSpec(fromFile: true, output: expectedFile)
+
   # parse the specification, if any:
   if s.readLine() == "discard \"\"\"":
     var lines: string
@@ -176,7 +223,11 @@ else:
         of "knownIssue":
           spec.knownIssue = some evt.value
         of "output":
-          spec.expected = some strip(evt.value, leading=true, trailing=false)
+          spec.expected.add:
+            OutputSpec(fromFile: false,
+                       output: strip(evt.value, leading=true, trailing=false))
+        of "arguments":
+          spec.arguments = split(evt.value, ' ')
         else:
           echo "unknown key: ", evt.key
           quit(1)
@@ -192,16 +243,11 @@ else:
   else:
     s.close()
 
-  # execute the runner:
-  let execRes = exec(runner, [file])
+  var args = spec.arguments
+  args.add file
 
-  var res = TestResult(kind: rkSuccess) # start with success
-  if execRes.code == 0:
-    if spec.expected.isSome and spec.expected.get != execRes.output:
-      res = TestResult(kind: rkMismatch, got: execRes.output,
-                       expected: spec.expected.get)
-  else:
-    res = TestResult(kind: rkError, output: execRes.output)
+  # execute the runner and check the output:
+  var res = compare(exec(runner, args), spec)
 
   # handle the "known issue" specification:
   if spec.knownIssue.isSome:
