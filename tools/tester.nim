@@ -30,6 +30,8 @@ type
   TestSpec = object
     ## A test specification. Contains information about a test and what to
     ## expect from it.
+    arguments: seq[string]
+      ## extra arguments to pass to the runner
     expected: seq[OutputSpec]
       ## the output(s) expected from the runner (if any)
     knownIssue: Option[string]
@@ -224,6 +226,8 @@ else:
           spec.expected.add:
             OutputSpec(fromFile: false,
                        output: strip(evt.value, leading=true, trailing=false))
+        of "arguments":
+          spec.arguments = split(evt.value, ' ')
         else:
           echo "unknown key: ", evt.key
           quit(1)
@@ -239,8 +243,11 @@ else:
   else:
     s.close()
 
+  var args = spec.arguments
+  args.add file
+
   # execute the runner and check the output:
-  var res = compare(exec(runner, [file]), spec)
+  var res = compare(exec(runner, args), spec)
 
   # handle the "known issue" specification:
   if spec.knownIssue.isSome:
