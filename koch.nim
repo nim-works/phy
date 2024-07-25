@@ -16,7 +16,10 @@ Commands:
   single <name> [args]        builds the single program with the given name
 """
   Programs: seq[(string, string)] = @[
-    ("tester", "tools/tester.nim")
+    ("tester", "tools/tester.nim"),
+    ("disasm", "vm/disasm.nim")
+    # XXX: ^^ not a real program; only here temporarily to make sure it
+    #      compiles
   ]
 
 var
