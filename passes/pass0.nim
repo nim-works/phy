@@ -117,16 +117,23 @@ proc loadFloat(c; f: float) =
   else:
     c.instr(opcLdConst, c.addConst(cast[Value](f), vtFloat))
 
+proc prepareJump(c; target: int): int32 =
+  ## Returns the operand to use for a jump instruction, where `target` is the
+  ## target continuation. The next emitted instruction must be the jump
+  ## instruction.
+  if target <= c.current:
+    # backwards jump; the target continuation has a start already
+    result = int32(c.starts[target] - c.code.len)
+  else:
+    # forward jump; fill in the target later
+    result = 0
+    c.patch.add (target, c.code.len)
+
 proc jump(c; op: Opcode, target: int; extra = 0'i8) =
   ## Emits a jump-like instruction targetting the given continuation
   ## (`target`).
-  if target <= c.current:
-    # backwards jump; the target continuation has a start already
-    c.instr(op, int32(c.starts[target] - c.code.len), extra)
-  else:
-    # forward jump; fill in the target later
-    c.instr(op, int32 0, extra)
-    c.patch.add (target, c.code.high)
+  let target = c.prepareJump(target)
+  c.instr(op, target, extra)
 
 proc xjump(c; op: Opcode): int =
   ## Emits a jump-like instruction with opcode `op` and returns its
@@ -471,7 +478,8 @@ proc genExit(c; tree; exit: NodeIndex) =
     c.jump(opcJmp, tree[exit, 1].imm)
   of Leave:
     # TODO: merge subsequent leaves into a single instruction
-    c.jump(opcLeave, tree[exit, 0].imm, 1)
+    let target = c.prepareJump(tree[exit, 0].imm)
+    c.instr(opcLeave, target, int16 1)
   of SelectBool:
     let (sel, a, b) = triplet(tree, exit)
     c.genExpr(tree, sel)
