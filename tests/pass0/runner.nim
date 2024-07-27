@@ -1,13 +1,34 @@
 ## The test runner for the pass0 tests. Parses the test files content, invokes
 ## pass0 with it, and runs the resulting code with the VM.
+##
+## For the convenience of writing tests, the top-level ``Module`` node is
+## inserted by the tester.
 
 import
-  std/[os, streams, strutils],
-  experimental/[sexp],
-  passes/[pass0, spec, trees],
-  vm/[utils, vm, vmenv, vmvalidation, vmtypes]
+  std/[
+    os,
+    streams,
+    strutils
+  ],
+  experimental/[
+    sexp
+  ],
+  passes/[
+    pass0,
+    spec,
+    trees
+  ],
+  vm/[
+    disasm,
+    utils,
+    vm,
+    vmenv,
+    vmvalidation,
+    vmtypes
+  ]
 
-let s = openFileStream(getExecArgs()[0], fmRead)
+let args = getExecArgs()
+let s = openFileStream(args[^1], fmRead)
 # skip the test specification:
 if s.readLine() == "discard \"\"\"":
   while not s.readLine().endsWith("\"\"\""):
@@ -27,6 +48,10 @@ if errors.len > 0:
     echo it
   echo "validation failure"
   quit(1)
+
+# output the disassembled code:
+stdout.write(disassemble(env))
+stdout.write("!BREAK!")
 
 var
   thread = vm.initThread(env, env.procs.high.ProcIndex, 1024, @[])
