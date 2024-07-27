@@ -1,0 +1,4 @@
+.type t0 (Proc (Void))
+.start t0 p0
+  Ret
+.end
