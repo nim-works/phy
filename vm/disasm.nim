@@ -145,7 +145,7 @@ proc disassemble*(env: VmEnv, prc: ProcHeader, result: var string) =
 proc disassemble*(env: VmEnv): string =
   ## Returns the text representation for the full `env`. The text
   ## representation only roundtrips in terms of meaning (re-assembling
-  ## the output results in a program beahving exactly the same); some
+  ## the output results in a program behaving exactly the same); some
   ## information may be lost.
   # emit the type directives:
   for i in 1..<env.types.types.len:
