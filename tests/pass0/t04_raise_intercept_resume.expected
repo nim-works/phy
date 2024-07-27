@@ -1,0 +1,10 @@
+.type t0 (Proc (Void))
+.start t0 p0
+  LdImmInt 100
+  Raise
+.eh ((Subroutine L2) End)
+.label L2
+  Begin
+  End
+  Ret
+.end

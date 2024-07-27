@@ -1,0 +1,14 @@
+.type t0 (Int)
+.type t1 (Proc t0)
+.start t1 p0
+.local lo0 int
+  StackAlloc 8
+  PopLocal lo0
+  GetLocal lo0
+  LdImmInt -2
+  WrInt8 0
+  GetLocal lo0
+  LdInt8 0
+  SignExtend 56
+  Ret
+.end

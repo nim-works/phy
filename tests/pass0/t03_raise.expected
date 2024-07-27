@@ -1,0 +1,6 @@
+.type t0 (Int)
+.type t1 (Proc (Void))
+.start t1 p0
+  LdImmInt 1
+  Raise
+.end

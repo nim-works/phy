@@ -1,0 +1,21 @@
+.type t0 (Int)
+.type t1 (Float)
+.type t2 (Proc t0)
+.start t2 p0
+  LdImmFloat 15.0
+  LdImmFloat 20.0
+  LeFloat
+  Branch L8 0
+  LdImmFloat 20.0
+  LdImmFloat 25.0
+  LeFloat
+  Branch L9 1
+.label L8
+  Jmp L11
+.label L9
+  LdImmInt 1
+  Ret
+.label L11
+  LdImmInt 2
+  Ret
+.end
