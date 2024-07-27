@@ -53,6 +53,11 @@ if errors.len > 0:
 stdout.write(disassemble(env))
 stdout.write("!BREAK!")
 
+# don't run the code if explicitly disabled:
+if args.len > 1 and args[0] == "--noRun":
+  stdout.write("(Done)")
+  quit(0)
+
 var
   thread = vm.initThread(env, env.procs.high.ProcIndex, 1024, @[])
   res = run(env, thread, nil)

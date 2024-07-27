@@ -1,0 +1,16 @@
+discard """
+  arguments: "--noRun"
+"""
+(TypeDefs
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0) (Locals)
+    (Continuations
+      (Continuation (Params) 0
+        (Loop 0)
+      )
+    )
+  )
+)
