@@ -1,0 +1,25 @@
+discard """
+  output: "(Done 2)"
+"""
+(TypeDefs
+  (Int 8)
+  (Float 8)
+  (ProcTy (Type 0))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 2) (Locals) (Continuations
+    (Continuation (Params) 0
+      (Select (Type 1) (FloatVal 20.0)
+        (Choice (FloatVal 19.0) (Continue 1))
+        (Choice (FloatVal 20.0) (Continue 2)))
+    )
+    (Continuation (Params) 0
+      (Continue 3 (IntVal 1))
+    )
+    (Continuation (Params) 0
+      (Continue 3 (IntVal 2))
+    )
+    (Continuation (Params (Type 0)))
+  ))
+)

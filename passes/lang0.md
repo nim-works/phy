@@ -45,8 +45,11 @@ rvalue ::= (Load <type_id> <value>)
         |  (Call <proc> <value>*)
         |  (Call <type_id> <value>+)
 
-simple ::= (IntVal <int>)
-        |  (FloatVal <float>)
+intVal ::= (IntVal <int>)
+floatVal ::= (FloatVal <float>)
+
+simple ::= <intVal>
+        |  <floatVal>
         |  (ProcVal <int>)
         |  (Copy <local>)
         |  (Copy (Global <int>))
@@ -58,10 +61,10 @@ goto ::= (Continue <cont_name>)
 err_goto ::= (Unwind)
           |  (List (Continue <cont_name>)* (Unwind)?)
 
-choice ::= (Choice <int> <goto>)
-        |  (Choice <float> <goto>)
-        |  (Choice <int> <int> <goto>)
-        |  (Choice <float> <float> <goto>)
+choice ::= (Choice <intVal> <goto>)
+        |  (Choice <floatVal> <goto>)
+        |  (Choice <intVal> <intVal> <goto>)
+        |  (Choice <floatVal> <floatVal> <goto>)
 
 exit ::= (Continue)
       |  (Continue <cont_name>)

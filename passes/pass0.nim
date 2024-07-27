@@ -394,7 +394,7 @@ proc genChoice(c; tree; typ: Type0, val, choice: NodeIndex) =
   ## `typ` the selector's type.
   if tree.len(choice) == 2:
     c.genExpr(tree, val)
-    c.loadInt(tree.getInt(tree.child(choice, 0)))
+    c.genExpr(tree, tree.child(choice, 0))
     case typ.kind
     of t0kInt:   c.instr(opcEqInt)
     of t0kUInt:  c.instr(opcEqInt)
@@ -403,23 +403,23 @@ proc genChoice(c; tree; typ: Type0, val, choice: NodeIndex) =
   else:
     let op =
       case typ.kind
-      of t0kInt:   opcLtInt
-      of t0kUInt:  opcLtu
-      of t0kFloat: opcLtFloat
+      of t0kInt:   opcLeInt
+      of t0kUInt:  opcLeu
+      of t0kFloat: opcLeFloat
 
     # lower bound comparison:
+    c.genExpr(tree, tree.child(choice, 0))
     c.genExpr(tree, val)
-    c.loadInt(tree.getInt(tree.child(choice, 0)))
     c.instr(op)
     # if not in range, jump to the next choice:
     let x = c.xjump(opcBranch)
     # upper bound comparison:
-    c.loadInt(tree.getInt(tree.child(choice, 1)))
     c.genExpr(tree, val)
+    c.genExpr(tree, tree.child(choice, 1))
     c.instr(op)
     # if in range, jump to the target continuation:
     c.jump(opcBranch, tree[tree.child(choice, 2), 0].imm, 1)
-    # fall through to the next choice otherwise:
+    # fall through to the next choice otherwise
     c.join(x)
 
 proc genEh(c; tree; exit: NodeIndex) =
