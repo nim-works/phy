@@ -12,6 +12,6 @@ discard """
       (Asgn (Local 0) (IntVal 1))
       (Continue 1 (Copy (Local 0)))
     )
-    (Continuation (Params (Type 1)))
+    (Continuation (Params (Type 0)))
   ))
 )
