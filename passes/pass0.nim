@@ -623,7 +623,7 @@ proc translate(tree; types, def: NodeIndex): ProcResult =
     #      the stack could also be grown/shrunken on a per-continuation base,
     #      which would reduce stack-space requirements in case of nested
     #      calls
-    # XXX: maybe move stack-managment to a higher-level IL?
+    # XXX: maybe move stack-management to a higher-level IL?
     c.locals.add(vtInt)
     c.sp = c.locals.high.int32
     c.instr(opcStackAlloc, int32 maxStack)
