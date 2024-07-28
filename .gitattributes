@@ -1,0 +1,3 @@
+# force LF line endings for all text files in order to prevent issues with
+# line-ending conversion on Windows systems
+* text=auto eol=lf
