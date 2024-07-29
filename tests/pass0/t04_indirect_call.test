@@ -7,8 +7,7 @@ discard """
 )
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1)
-    (Locals (Type 0))
+  (ProcDef (Type 1) (Locals)
     (Continuations
       (Continuation (Params) 0
         (Continue 1 (IntVal 100))
@@ -16,8 +15,7 @@ discard """
       (Continuation (Params (Type 0)))
     )
   )
-  (ProcDef (Type 1)
-    (Locals (Type 0))
+  (ProcDef (Type 1) (Locals)
     (Continuations
       (Continuation (Params) 0
         (Continue 1 (Call (Type 1) (ProcVal 0)))
