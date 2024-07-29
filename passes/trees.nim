@@ -15,7 +15,7 @@ type
 
   PackedTree*[T] = object
     ## Stores a node tree packed together in a single sequence.
-    nodes: seq[TreeNode[T]]
+    nodes*: seq[TreeNode[T]]
     numbers: seq[uint64]
     # TODO: use a BiTable for the numbers
 
