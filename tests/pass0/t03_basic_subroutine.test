@@ -1,0 +1,26 @@
+discard """
+  description: "
+    The most basic subroutine consists of a single, empty continuation
+  "
+  output: "(Done)"
+"""
+(TypeDefs
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0) (Locals)
+    (Continuations
+      (Continuation (Params) 0
+        (Enter 1 2)
+      )
+      (Subroutine (Params) 0
+        (Continue)
+      )
+      (Continuation (Params) 0
+        (Continue 3)
+      )
+      (Continuation (Params))
+    )
+  )
+)

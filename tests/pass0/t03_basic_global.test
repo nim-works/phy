@@ -1,0 +1,18 @@
+discard """
+  output: "(Done 1)"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Type 0))
+)
+(GlobalDefs
+  (IntVal 1)
+)
+(ProcDefs
+  (ProcDef (Type 1) (Locals) (Continuations
+    (Continuation (Params) 0
+      (Continue 1 (Copy (Global 0)))
+    )
+    (Continuation (Params (Type 0)))
+  ))
+)

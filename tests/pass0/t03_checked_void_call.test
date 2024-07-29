@@ -1,0 +1,22 @@
+discard """
+  output: "(Done)"
+"""
+(TypeDefs
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0) (Locals)
+    (Continuations
+      (Continuation (Params))
+    )
+  )
+  (ProcDef (Type 0) (Locals)
+    (Continuations
+      (Continuation (Params) 0
+        (CheckedCall (Proc 0) (Continue 1) (Unwind))
+      )
+      (Continuation (Params))
+    )
+  )
+)

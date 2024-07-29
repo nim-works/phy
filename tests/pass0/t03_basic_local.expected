@@ -1,0 +1,9 @@
+.type t0 (Int)
+.type t1 (Proc t0)
+.start t1 p0
+.local lo0 int
+  LdImmInt 1
+  PopLocal lo0
+  GetLocal lo0
+  Ret
+.end

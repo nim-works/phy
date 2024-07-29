@@ -1,0 +1,9 @@
+.type t0 (Int)
+.type t1 (Proc (Void))
+.start t1 p0
+  LdImmInt 8
+  Drop
+  Jmp L3
+.label L3
+  Ret
+.end

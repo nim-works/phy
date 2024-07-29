@@ -1,0 +1,13 @@
+.type t0 (Proc (Void))
+.start t0 p0
+  Enter L2
+  Jmp L5
+.label L2
+  Begin
+  Leave L5 1
+  End
+.label L5
+  Jmp L6
+.label L6
+  Ret
+.end

@@ -1,0 +1,17 @@
+discard """
+  output: "(UnhandledException 1)"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) (Locals)
+    (Continuations
+      (Continuation (Params) 0
+        (Raise (IntVal 1) (Unwind))
+      )
+    )
+  )
+)

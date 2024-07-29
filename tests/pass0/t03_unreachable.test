@@ -1,0 +1,16 @@
+discard """
+  description: "An Unreachable exit translates to nothing"
+  output: "(Done)"
+"""
+(TypeDefs
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0) (Locals) (Continuations
+    (Continuation (Params) 0
+      (Unreachable)
+    )
+    (Continuation (Params))
+  ))
+)
