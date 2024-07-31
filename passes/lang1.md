@@ -10,7 +10,7 @@ Blob types describe arbitrarily-sized untyped binary data:
 type += (Blob size:<int>)
 ```
 
-The `Addr` operation takes applies to locals instead of address offsets. Only
+The `Addr` operation only applies to locals instead of address offsets. Only
 blob locals are allowed as `Addr` operands.
 
 ```grammar
