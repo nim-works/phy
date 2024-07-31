@@ -1,0 +1,29 @@
+Module
+  TypeDefs
+    UInt
+      Immediate 8
+    ProcTy
+      Void
+  GlobalDefs
+  ProcDefs
+    ProcDef
+      Type 1
+      Locals
+        Type 0
+        Type 0
+      Continuations
+        Continuation
+          Params
+          Immediate 32
+          Asgn
+            Local 0
+            Addr
+              IntVal 0
+          Asgn
+            Local 1
+            Addr
+              IntVal 16
+          Continue
+            Immediate 1
+        Continuation
+          Params

@@ -1,0 +1,22 @@
+discard """
+  description: "Test a single continuation with a single blob local"
+"""
+(TypeDefs
+  (Blob 16)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Locals
+      (Type 0)
+    )
+    (Continuations
+      (Continuation (Params) (Locals (Local 0))
+        (Drop (Addr (Local 1)))
+        (Continue 1)
+      )
+      (Continuation (Params))
+    )
+  )
+)
