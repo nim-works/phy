@@ -1,39 +1,28 @@
-Module
-  TypeDefs
-    UInt
-      Immediate 8
-    ProcTy
-      Void
-  GlobalDefs
-  ProcDefs
-    ProcDef
-      Type 1
-      Locals
-        Type 0
-        Type 0
-      Continuations
-        Continuation
-          Params
-          Immediate 16
-          Asgn
-            Local 0
-            Addr
-              IntVal 0
-          Asgn
-            Local 1
-            Addr
-              IntVal 16
-          Continue
-            Immediate 1
-        Continuation
-          Params
-          Immediate 32
-          Continue
-            Immediate 2
-        Continuation
-          Params
-          Immediate 32
-          Continue
-            Immediate 3
-        Continuation
-          Params
+(TypeDefs
+  (UInt 8)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Locals (Type 0) (Type 0))
+    (Continuations
+      (Continuation (Params) 16
+        (Asgn (Local 0)
+          (Addr (IntVal 0))
+        )
+        (Asgn (Local 1)
+          (Addr (IntVal 16))
+        )
+        (Continue 1)
+      )
+      (Continuation (Params) 32
+        (Continue 2)
+      )
+      (Continuation (Params) 32
+        (Continue 3)
+      )
+      (Continuation (Params))
+    )
+  )
+)

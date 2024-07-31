@@ -41,10 +41,12 @@ let transformation = pass1.lower(tree, 8)
 tree = tree.apply(transformation)
 
 # output the lowered code:
-# TODO: output the *difference* (as an S-expression) instead; it's much easier
-#       to process for the human reader
-writeFile(changeFileExt(args[^1], "expected"), treeRepr(tree))
-stdout.write(treeRepr(tree))
+# TODO: instead of the whole tree, only the *difference* (as an S-expression)
+#       should be returned, which would make it easier for a human reader to
+#       validate the output
+stdout.writeLine(pretty(tree, tree.child(0)))
+stdout.writeLine(pretty(tree, tree.child(1)))
+stdout.writeLine(pretty(tree, tree.child(2)))
 
 # translate to VM bytecode:
 var env = initVm(1024, 1024 * 1024)
