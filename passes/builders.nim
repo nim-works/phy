@@ -16,7 +16,7 @@ func initBuilder*[T](buf: sink seq[TreeNode[T]]): Builder[T] =
 func initBuilder*[T](): Builder[T] =
   Builder[T](parent: -1)
 
-template open*[T](bu: var Builder[T], k: T, body: untyped) =
+template subTree*[T](bu: var Builder[T], k: T, body: untyped) =
   ## Starts a new subtree of kind `k`.
   assert not isAtom(k)
   if bu.parent != -1:

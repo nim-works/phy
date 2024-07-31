@@ -44,7 +44,7 @@ template replace*[T](c: var ChangeSet[T], n: NodeIndex, k: T,
       at = n # uphold the expected evaluation order
       start = c.nodes.len
     var bu {.inject.} = initBuilder(c.nodes)
-    bu.open(k): body
+    bu.subTree(k): body
     c.nodes = finish(bu)
 
     c.actions.add Action[T](at: at, kind: Replace,
@@ -72,7 +72,7 @@ template insert*[T](c: var ChangeSet[T], tree: PackedTree[T], n: NodeIndex,
       idx = i
       start = c.nodes.len
     var bu {.inject.} = initBuilder(c.nodes)
-    bu.open(k): body
+    bu.subTree(k): body
     c.nodes = finish(bu)
 
     c.actions.add Action[T](at: at, kind: ChangeLen, by: 1)
