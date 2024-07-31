@@ -18,6 +18,11 @@ rvalue -= (Addr (IntVal <int>))
 rvalue += (Addr <local>)
 ```
 
+Locals of `Blob` type cannot be anywhere except for `Addr` operands. The `Blob`
+type is also disallowed for parameters or the return type of procedures.
+
+*Rationale:* keeps the pass simpler.
+
 Each continuation names the locals alive for the duration of it:
 
 ```grammar
