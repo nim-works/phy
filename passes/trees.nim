@@ -101,6 +101,19 @@ iterator pairs*(t: PackedTree, at: NodeIndex): (int, NodeIndex) =
     yield (i, n)
     n = t.next(n)
 
+iterator flat*(t: PackedTree, at: NodeIndex): NodeIndex =
+  ## Returns all nodes spanned by the tree node at `at`, including `at`
+  ## itself.
+  mixin isAtom
+  var
+    i = uint32(at)
+    last = i
+  while i <= last:
+    yield NodeIndex(i)
+    if not isAtom(t.nodes[i].kind):
+      last += t.nodes[i].val
+    inc i
+
 func pair*(tree: PackedTree, n: NodeIndex): (NodeIndex, NodeIndex) =
   ## Returns the index of the first and second subnode of `n`.
   result[0] = tree.child(n, 0)
