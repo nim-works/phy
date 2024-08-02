@@ -65,3 +65,28 @@ jobs:
 
       - name: "Run tests"
         run: bin/tester
+
+  languages:
+    name: "Check and generate languages"
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: tree:0
+
+      # always use the most recent NimSkull version
+      - uses: nim-works/setup-nimskull@0.1.2
+        with:
+          nimskull-version: "*"
+
+      - name: Build koch
+        run: nim c -d:nimStrictMode --outdir:bin koch.nim
+
+      - name: Build passtool
+        run: bin/koch single passtool -d:nimStrictMode -d:release
+
+      # run the passtool for the highest-level language:
+      - name: "Check the grammar"
+        run: bin/passtool passes lang0
