@@ -68,6 +68,9 @@ proc exec(cmd: string, args: openArray[string]): tuple[output: string,
       result.output.setLen(start + len)
       copyMem(addr result.output[start], addr buf[0], len)
 
+  # read the remaining output, if any:
+  result.output.add readAll(stream)
+
   result.code = p.peekExitCode()
   p.close()
 
