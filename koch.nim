@@ -17,9 +17,10 @@ Commands:
 """
   Programs: seq[(string, string)] = @[
     ("tester", "tools/tester.nim"),
-    ("disasm", "vm/disasm.nim")
+    ("disasm", "vm/disasm.nim"),
     # XXX: ^^ not a real program; only here temporarily to make sure it
     #      compiles
+    ("passtool", "tools/passtool/passtool.nim")
   ]
 
 var
