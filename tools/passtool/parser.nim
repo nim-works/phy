@@ -18,7 +18,7 @@ type
     tkMinusEq
     tkQMark
     tkStar
-    tkSharpLe, tkSharpRi
+    tkAngleLe, tkAngleRi
     tkSeparator
 
   Token = object
@@ -126,8 +126,8 @@ proc getTok(L: var Lexer): TokenKind =
 
   case L.buf[L.bufpos]
   of ' ', '\t': single(tkSpace)
-  of '<': single(tkSharpLe)
-  of '>': single(tkSharpRi)
+  of '<': single(tkAngleLe)
+  of '>': single(tkAngleRi)
   of '|': single(tkSeparator)
   of '?': single(tkQMark)
   of '*': single(tkStar)
@@ -226,11 +226,11 @@ proc parseRule(L: var Lexer): ParsedRule =
 proc parseRuleCore(L: var Lexer): ParsedRule =
   result = ParsedRule(line: L.currLine, col: L.currCol)
   case L.curr.kind
-  of tkSharpLe:
+  of tkAngleLe:
     L.expectNext(tkIdent)
     result.kind = Reference
     result.sym = toLowerAscii L.consumeIdent()
-    L.skip(tkSharpRi)
+    L.skip(tkAngleRi)
   of tkParensLe:
     discard L.getTok()
     L.space()
