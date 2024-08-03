@@ -28,11 +28,11 @@ RuleCore ::= SexpMatcher | Reference | (Identifier ':' Rule)
 Rule ::= RuleCore ('*' | '+' | '?')?
 SexprRule ::= '(' Identifier Rule* ')'
 
-TopRule = Reference | SexprRule
+Production = Reference | SexprRule
 
-Def ::= Identifier '::=' TopMatcher ('|' TopMatcher)*
-Append ::= Identifier '+=' TopMatcher ('|' TopMatcher)*
-Remove ::= Identifier '-=' TopMatcher ('|' TopMatcher)*
+Def ::= Identifier '::=' Production ('|' Production)*
+Append ::= Identifier '+=' Production ('|' Production)*
+Remove ::= Identifier '-=' Production ('|' Production)*
 
 Top ::= ('.extends' Identifier)? (Def | Append | Remove)*
 ```
