@@ -89,4 +89,4 @@ jobs:
 
       # run the passtool for the highest-level language:
       - name: "Check the grammar"
-        run: bin/passtool passes lang0
+        run: bin/passtool passes lang1
