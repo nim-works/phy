@@ -1,0 +1,30 @@
+discard """
+  description: "
+    Test a linear continuation sequence where there's more than one blob local
+  "
+"""
+(TypeDefs
+  (Blob 16)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Locals
+      (Type 0)
+      (Type 0)
+    )
+    (Continuations
+      (Continuation (Params) (Locals (Local 0))
+        (Continue 1)
+      )
+      (Continuation (Params) (Locals (Local 0) (Local 1))
+        (Continue 2)
+      )
+      (Continuation (Params) (Locals (Local 1))
+        (Continue 3)
+      )
+      (Continuation (Params))
+    )
+  )
+)

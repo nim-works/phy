@@ -15,7 +15,7 @@ type
 
   PackedTree*[T] = object
     ## Stores a node tree packed together in a single sequence.
-    nodes: seq[TreeNode[T]]
+    nodes*: seq[TreeNode[T]]
     numbers: seq[uint64]
     # TODO: use a BiTable for the numbers
 
@@ -100,6 +100,19 @@ iterator pairs*(t: PackedTree, at: NodeIndex): (int, NodeIndex) =
   for i in 0..<t.len(at):
     yield (i, n)
     n = t.next(n)
+
+iterator flat*(t: PackedTree, at: NodeIndex): NodeIndex =
+  ## Returns all nodes spanned by the tree node at `at`, including `at`
+  ## itself.
+  mixin isAtom
+  var
+    i = uint32(at)
+    last = i
+  while i <= last:
+    yield NodeIndex(i)
+    if not isAtom(t.nodes[i].kind):
+      last += t.nodes[i].val
+    inc i
 
 func pair*(tree: PackedTree, n: NodeIndex): (NodeIndex, NodeIndex) =
   ## Returns the index of the first and second subnode of `n`.
