@@ -1,0 +1,4 @@
+discard """
+  output: "-1.5: float"
+"""
+(FloatVal -1.5)
