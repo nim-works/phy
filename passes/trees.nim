@@ -13,11 +13,13 @@ type
     kind*: T
     val*: uint32
 
+  Numbers* = seq[uint64]
+  # TODO: use a BiTable for the numbers
+
   PackedTree*[T] = object
     ## Stores a node tree packed together in a single sequence.
     nodes*: seq[TreeNode[T]]
-    numbers: seq[uint64]
-    # TODO: use a BiTable for the numbers
+    numbers: Numbers
 
   NodeIndex* = distinct uint32
 
@@ -25,6 +27,10 @@ const
   ExternalFlag = 0x8000_0000'u32
     ## use the most significant bit to flag whether the value is larger than an
     ## `max(int32)` and overflows into `PackedTree.numbers`.
+
+proc initTree*[T](nodes: sink seq[TreeNode[T]],
+                  numbers: sink Numbers): PackedTree[T] =
+  PackedTree[T](nodes: nodes, numbers: numbers)
 
 proc `[]`*[T](t: PackedTree[T], at: NodeIndex): TreeNode[T] {.inline.} =
   t.nodes[ord at]
@@ -157,6 +163,10 @@ proc pack*(tree: var PackedTree, f: float64): uint32 =
   ## Packs `f` into an ``uint32`` value that can be stored in a ``TreeNode``.
   result = tree.numbers.len.uint32
   tree.numbers.add(cast[uint64](f))
+
+proc numbers*(tree: PackedTree): lent Numbers {.inline.} =
+  ## Returns the storage of the numeric data.
+  tree.numbers
 
 # TODO: move the S-expression serialization/deserialization elsewhere
 

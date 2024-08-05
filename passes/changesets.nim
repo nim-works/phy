@@ -86,34 +86,39 @@ func apply*[T](tree: PackedTree[T], c: sink ChangeSet[T]): PackedTree[T] =
     a.at.int - b.at.int
   )
 
-  var source = 0 ## cursor into the source node sequence
+  var
+    nodes: seq[TreeNode[T]]
+    source = 0 ## cursor into the source node sequence
+
   for it in c.actions.items:
     if it.at.int > source:
-      result.nodes.add toOpenArray(tree.nodes, source, it.at.int - 1)
+      nodes.add toOpenArray(tree.nodes, source, it.at.int - 1)
       source = it.at.int # move to the action position
 
     case it.kind
     of ChangeKind:
       var n = tree[it.at]
       n.kind = it.newKind
-      result.nodes.add n
+      nodes.add n
       inc source
     of ChangeLen:
       # multiple "change length" actions per node are supported; only copy
       # the target node once
       if source <= it.at.int:
-        result.nodes.add tree[it.at]
+        nodes.add tree[it.at]
         inc source
 
-      result.nodes[^1].val += it.by
+      nodes[^1].val += it.by
     of Skip:
       source = tree.next(it.at).int
     of Insert:
-      result.nodes.add c.nodes.toOpenArray(it.slice.a, it.slice.b)
+      nodes.add c.nodes.toOpenArray(it.slice.a, it.slice.b)
     of Replace:
       source = tree.next(it.at).int
-      result.nodes.add c.nodes.toOpenArray(it.slice.a, it.slice.b)
+      nodes.add c.nodes.toOpenArray(it.slice.a, it.slice.b)
 
   # copy the remaining nodes, if any:
   if source < tree.nodes.len:
-    result.nodes.add toOpenArray(tree.nodes, source, tree.nodes.high)
+    nodes.add toOpenArray(tree.nodes, source, tree.nodes.high)
+
+  result = initTree(nodes, tree.numbers)
