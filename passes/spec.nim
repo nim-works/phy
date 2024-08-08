@@ -12,11 +12,12 @@ type
   NodeKind* = enum
     Immediate, IntVal, FloatVal, ProcVal, Proc, Type, Local, Global
 
-    Void, Int, UInt, Float, ProcTy, Blob
+    Void, Int, UInt, Float, ProcTy, Blob, Record, Array
 
     Copy, Asgn, Drop, Clear
 
     Load, Store, Addr, Call
+    Deref, Field, At
 
     Neg, Add, Sub, Mul, Div, Mod
     AddChck, SubChck

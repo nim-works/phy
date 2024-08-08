@@ -1,0 +1,11 @@
+(TypeDefs
+  (Int 4)
+  (Record 16 (Field 0 (Type 0)) (Field 0 (Type 0)))
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 2) (Locals) (Continuations
+    (Continuation (Params)))
+  )
+)

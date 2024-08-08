@@ -35,6 +35,18 @@ func add*[T](bu: var Builder[T], n: TreeNode[T]) =
   inc bu.buf[bu.parent].val
   bu.buf.add n
 
+func copyFrom*[T](bu: var Builder[T], tree: PackedTree[T], n: NodeIndex) =
+  ## Inserts the whole subtree from `tree` at `n` at the current buffer
+  ## position. `tree` has to use the same underlying storage for literal
+  ## data as the target tree.
+  # TODO: this procedure is misguided. The builder should not handle
+  #       things such as tree copies -- that's better left to ``ChangeSet``.
+  if bu.parent != -1:
+    inc bu.buf[bu.parent].val
+
+  for it in tree.flat(n):
+    bu.buf.add tree[it]
+
 func finish*[T](bu: sink Builder[T]): seq[TreeNode[T]] =
   ## Finishes building the tree and returns the node buffer.
   result = bu.buf

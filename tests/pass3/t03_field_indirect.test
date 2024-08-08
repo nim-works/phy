@@ -1,0 +1,20 @@
+discard """
+  output: "(Error)" # load from 0 address triggers an access violation
+"""
+(TypeDefs
+  (Int 4)
+  (Record 8 (Field 0 (Type 0)) (Field 4 (Type 0)))
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 2) (Locals)
+    (Continuations
+      (Continuation (Params) (Locals)
+        (Drop (Copy (Field (Deref (Type 1) (IntVal 0)) 0)))
+        (Continue 1)
+      )
+      (Continuation (Params))
+    )
+  )
+)
