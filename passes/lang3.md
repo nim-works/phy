@@ -42,11 +42,8 @@ Path expressions are only allowed in a restricted set of contexts:
 
 ```grammar
 rvalue += (Addr <path>)
-
 value += (Copy <path>)
-       | (Load <type_id> <path>)
 stmt += (Asgn <path> <value>)
-      | (Store <type_id> <path> <value>)
 ```
 
 Storing, loading, or assignments full aggregate values is not supported as
