@@ -184,9 +184,6 @@ proc lowerExpr(c; tree; n; bu: var BuilderOrChangeset) =
     else:
       # can only be ``(Addr <local>)``, which doesn't need any lowering
       bu.keep(tree, n)
-  else:
-    # TODO: properly traverse all the other nested expressions
-    bu.keep(tree, n)
 
   elif isAtom(tree[n].kind):
     bu.keep(tree, n)
