@@ -56,6 +56,10 @@ template replace(bu: var Builder[NodeKind], n; k: NodeKind, body: untyped) =
 template keep(bu: var Builder[NodeKind], tree; n) =
   bu.copyFrom(tree, n)
 
+template keep(bu: var Builder[NodeKind], tree; n; body: untyped) =
+  bu.subTree tree[n].kind:
+    body
+
 template skipTree(bu: var Builder[NodeKind], n; body: untyped) =
   discard n
   body # nothing to do, just eval body
@@ -63,6 +67,11 @@ template skipTree(bu: var Builder[NodeKind], n; body: untyped) =
 template keep(changes; tree; n) =
   # a no-op; just evaluate `n`
   discard n
+
+template keep(changes; tree; n; body: untyped) =
+  # a no-op; just evaluate `n`
+  discard n
+  body
 
 template skipTree(changes; n; body: untyped) =
   changes.replace(n):
@@ -179,6 +188,15 @@ proc lowerExpr(c; tree; n; bu: var BuilderOrChangeset) =
     # TODO: properly traverse all the other nested expressions
     bu.keep(tree, n)
 
+  elif isAtom(tree[n].kind):
+    bu.keep(tree, n)
+  else:
+    # XXX: for simplicity, just traverse everything else, even the parts that
+    #      aren't really expressions (such as the type references)
+    bu.keep(tree, n):
+      for it in tree.items(n):
+        c.lowerExpr(tree, it, bu)
+
 proc lowerStmt(c; tree; n; changes) =
   case tree[n].kind
   of Asgn:
@@ -209,9 +227,10 @@ proc lowerStmt(c; tree; n; changes) =
     c.lowerExpr(tree, b, changes)
   of Drop:
     c.lowerExpr(tree, tree.child(n, 0), changes)
+  of Call:
+    c.lowerCall(tree, n, 0, changes)
   else:
-    # TODO: properly traverse all the nested expressions
-    discard
+    unreachable()
 
 proc lowerExit(c; tree; n; changes) =
   case tree[n].kind
@@ -222,10 +241,10 @@ proc lowerExit(c; tree; n; changes) =
     c.lowerCall(tree, n, 1, changes)
   of CheckedCall:
     c.lowerCall(tree, n, 0, changes)
-  of SelectBool, Select:
+  of SelectBool, Raise:
     c.lowerExpr(tree, tree.child(n, 0), changes)
   else:
-    discard
+    discard "nothing to do"
 
 proc lowerType(tree; n; changes) =
   case tree[n].kind
