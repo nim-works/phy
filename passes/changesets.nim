@@ -34,21 +34,29 @@ func changeKind*[T](c: var ChangeSet[T], n: NodeIndex, kind: T) =
   ## Records changing the kind of node `n` to `kind`.
   c.actions.add Action[T](at: n, kind: ChangeKind, newKind: kind)
 
+template replace*[T](c: var ChangeSet[T], n: NodeIndex, body: untyped) =
+  ## Records replacing the node/sub-tree at `n` with a node/sub-tree created
+  ## by `body`. For this, a builder instance named ``bu`` is available to the
+  ## body.
+  if true:
+    let
+      at = n # uphold the expected evaluation order
+      start = c.nodes.len
+
+    var bu {.inject.} = initBuilder(c.nodes)
+    body
+    c.nodes = finish(bu)
+
+    c.actions.add Action[T](at: at, kind: Replace,
+                            slice: start .. c.nodes.high)
+
 template replace*[T](c: var ChangeSet[T], n: NodeIndex, k: T,
                      body: untyped) =
   ## Records replacing the node/subtree at `n` with a new tree of kind `k`. The
   ## new tree is built by `body`, with a builder named ``bu`` injected into the
   ## scope.
-  if true:
-    let
-      at = n # uphold the expected evaluation order
-      start = c.nodes.len
-    var bu {.inject.} = initBuilder(c.nodes)
+  replace(c, n):
     bu.subTree(k): body
-    c.nodes = finish(bu)
-
-    c.actions.add Action[T](at: at, kind: Replace,
-                            slice: start .. c.nodes.high)
 
 func replace*[T](c: var ChangeSet[T], n: NodeIndex, with: TreeNode[T]) =
   ## Records replacing the node/subtree at `n` with `with`.

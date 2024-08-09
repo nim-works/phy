@@ -56,9 +56,17 @@ template replace(bu: var Builder[NodeKind], n; k: NodeKind, body: untyped) =
 template keep(bu: var Builder[NodeKind], tree; n) =
   bu.copyFrom(tree, n)
 
+template skipTree(bu: var Builder[NodeKind], n; body: untyped) =
+  discard n
+  body # nothing to do, just eval body
+
 template keep(changes; tree; n) =
   # a no-op; just evaluate `n`
   discard n
+
+template skipTree(changes; n; body: untyped) =
+  changes.replace(n):
+    body
 
 func imm(n: Node): uint32 {.inline.} =
   assert n.kind == Immediate
@@ -156,6 +164,16 @@ proc lowerExpr(c; tree; n; bu: var BuilderOrChangeset) =
         bu.add Node(kind: Type, val: typ.uint32)
         c.lowerExpr(tree, a, bu)
     else:
+      bu.keep(tree, n)
+  of Addr:
+    let a = tree.child(n, 0)
+    if tree[a].kind in {Field, At}:
+      # drop the ``Addr`` operation. The whole path expression will be turned
+      # into pointer arithmetic
+      bu.skipTree(n):
+        c.lowerExpr(tree, a, bu)
+    else:
+      # can only be ``(Addr <local>)``, which doesn't need any lowering
       bu.keep(tree, n)
   else:
     # TODO: properly traverse all the other nested expressions
