@@ -14,12 +14,16 @@ type
     val*: uint32
 
   Numbers* = seq[uint64]
-  # TODO: use a BiTable for the numbers
+
+  Literals* = object
+    numbers: Numbers
+    strings: seq[string]
+    # TODO: use a BiTable for both numbers and strings
 
   PackedTree*[T] = object
     ## Stores a node tree packed together in a single sequence.
     nodes*: seq[TreeNode[T]]
-    numbers: Numbers
+    literals: Literals
 
   NodeIndex* = distinct uint32
 
@@ -29,8 +33,8 @@ const
     ## `max(int32)` and overflows into `PackedTree.numbers`.
 
 proc initTree*[T](nodes: sink seq[TreeNode[T]],
-                  numbers: sink Numbers): PackedTree[T] =
-  PackedTree[T](nodes: nodes, numbers: numbers)
+                  literals: sink Literals): PackedTree[T] =
+  PackedTree[T](nodes: nodes, literals: literals)
 
 proc `[]`*[T](t: PackedTree[T], at: NodeIndex): TreeNode[T] {.inline.} =
   t.nodes[ord at]
@@ -135,7 +139,7 @@ proc getInt*(tree: PackedTree, n: NodeIndex): int64 =
   ## Returns the number stored by `n` as a signed integer.
   let val = tree[n].val
   if (val and ExternalFlag) != 0:
-    cast[int64](tree.numbers[val and not(ExternalFlag)])
+    cast[int64](tree.literals.numbers[val and not(ExternalFlag)])
   else:
     int64(val)
 
@@ -143,30 +147,38 @@ proc getUInt*(tree: PackedTree, n: NodeIndex): uint64 =
   ## Returns the number stored by `n` as an unsigned integer.
   let val = tree[n].val
   if (val and ExternalFlag) != 0:
-    tree.numbers[val or not(ExternalFlag)]
+    tree.literals.numbers[val or not(ExternalFlag)]
   else:
     val
 
 proc getFloat*(tree: PackedTree, n: NodeIndex): float64 =
   ## Returns the number stored by `n` as a float.
-  cast[float64](tree.numbers[tree[n].val])
+  cast[float64](tree.literals.numbers[tree[n].val])
+
+proc getString*(tree: PackedTree, n: NodeIndex): lent string =
+  ## Returns the string value stored by `n`.
+  tree.literals.strings[tree[n].val]
 
 proc pack*(tree: var PackedTree, i: int64): uint32 =
   ## Packs `i` into an ``uint32`` value that can be stored in a ``TreeNode``.
   if i >= 0 and i < int64(ExternalFlag):
     result = uint32(i) # fits into a uint32
   else:
-    result = tree.numbers.len.uint32 or ExternalFlag
-    tree.numbers.add(cast[uint64](i))
+    result = tree.literals.numbers.len.uint32 or ExternalFlag
+    tree.literals.numbers.add(cast[uint64](i))
 
 proc pack*(tree: var PackedTree, f: float64): uint32 =
   ## Packs `f` into an ``uint32`` value that can be stored in a ``TreeNode``.
-  result = tree.numbers.len.uint32
-  tree.numbers.add(cast[uint64](f))
+  result = tree.literals.numbers.len.uint32
+  tree.literals.numbers.add(cast[uint64](f))
 
-proc numbers*(tree: PackedTree): lent Numbers {.inline.} =
-  ## Returns the storage of the numeric data.
-  tree.numbers
+proc pack*(tree: var PackedTree, s: sink string): uint32 =
+  result = tree.literals.strings.len.uint32
+  tree.literals.strings.add(s)
+
+func literals*(tree: PackedTree): lent Literals {.inline.} =
+  ## Returns the storage for the literal data.
+  tree.literals
 
 # TODO: move the S-expression serialization/deserialization elsewhere
 
