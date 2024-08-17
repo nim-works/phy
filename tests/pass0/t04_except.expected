@@ -4,7 +4,7 @@
 .local lo0 int
   LdImmInt 10
   Raise
-.eh ((Except L2))
+.eh L2
 .label L2
   Except
   PopLocal lo0
