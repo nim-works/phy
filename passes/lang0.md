@@ -59,7 +59,7 @@ cont_name ::= <int>
 
 goto ::= (Continue <cont_name>)
 err_goto ::= (Unwind)
-          |  (List (Continue <cont_name>)* (Unwind)?)
+          |  (Continue <cont_name>)
 
 choice ::= (Choice <intVal> <goto>)
         |  (Choice <floatVal> <goto>)
@@ -91,7 +91,6 @@ stmt ::= (Asgn <local> <value>)
 
 continuation ::= (Continuation (Params) stack:<int> <stmt>* <exit>)
               |  (Continuation (Params <type_id>?)) # return continuation
-              |  (Subroutine (Params) stack:<int> <stmt>* <exit>)
               |  (Except <local> stack:<int> <stmt>* <exit>)
 
 procdef ::= (ProcDef <type_id> (Locals <type_id>*) (Continuations <continuation>+))

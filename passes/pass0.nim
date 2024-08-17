@@ -21,8 +21,7 @@ type
     code: seq[Instr]
     locals: seq[ValueType]
     constants: seq[TypedValue]
-    ehCode: seq[EhInstr]
-    ehTable: seq[HandlerTableEntry]
+    ehTable: seq[EhMapping]
 
     # per-procedure temporary state:
     current: int
@@ -47,8 +46,7 @@ type
     ## needed for the procedure.
     code: seq[Instr]
     locals: seq[ValueType]
-    ehTable: seq[HandlerTableEntry]
-    ehCode: seq[EhInstr]
+    ehTable: seq[EhMapping]
     constants: seq[TypedValue]
 
 # shorten some common parameter definitions:
@@ -430,25 +428,14 @@ proc genChoice(c; tree; typ: Type0, val, choice: NodeIndex) =
     c.join(x)
 
 proc genEh(c; tree; exit: NodeIndex) =
-  ## Generates the EH code for the `exit` and registers an EH mapping entry.
+  ## Registers an EH table entry corresponding to `exit`, if necessary.
   case tree[exit].kind
   of Unwind:
     discard "attach nothing"
-  of List:
+  of Continue:
     # register an EH mapping:
-    c.ehTable.add (c.code.high.uint32, c.ehCode.len.uint32)
-
-    let L = tree.len(exit)
-    for i, it in tree.pairs(exit):
-      case tree[it].kind
-      of Continue:
-        c.ehCode.add ((if i == L-1: ehoExcept else: ehoSubroutine), 0'u16)
-        # the jump destination is filled in later:
-        c.ehPatch.add (tree[it, 0].imm.int, c.ehCode.high)
-      of Unwind:
-        c.ehCode.add (ehoEnd, 0'u16)
-      else:
-        unreachable()
+    c.ehTable.add (c.code.high.uint32, 0'u32) # patched later
+    c.ehPatch.add (tree[exit, 0].imm.int, c.ehTable.high)
   else:
     unreachable()
 
@@ -457,8 +444,6 @@ proc genExit(c; tree; exit: NodeIndex) =
   case tree[exit].kind
   of Continue:
     case tree.len(exit)
-    of 0:
-      c.instr(opcEnd) # end the subroutine
     of 1:
       c.jump(opcJmp, tree[exit, 0].imm)
     of 2:
@@ -473,13 +458,6 @@ proc genExit(c; tree; exit: NodeIndex) =
     c.genExpr(tree, tree.child(exit, 0))
     c.instr(opcRaise)
     c.genEh(tree, tree.child(exit, 1))
-  of Enter:
-    c.jump(opcEnter, tree[exit, 0].imm)
-    c.jump(opcJmp, tree[exit, 1].imm)
-  of Leave:
-    # TODO: merge subsequent leaves into a single instruction
-    let target = c.prepareJump(tree[exit, 0].imm)
-    c.instr(opcLeave, target, int16 1)
   of SelectBool:
     let (sel, a, b) = triplet(tree, exit)
     c.genExpr(tree, sel)
@@ -518,10 +496,10 @@ proc start(c; idx: int) =
       inc i
 
   i = 0
-  # patch EH instructions:
+  # patch EH mappings:
   while i < c.ehPatch.len:
     if c.ehPatch[i][0] == idx:
-      c.ehCode[c.ehPatch[i][1]].a = c.code.len.uint16
+      c.ehTable[c.ehPatch[i][1]].dst = c.code.len.uint16
       c.ehPatch.del(i)
     else:
       inc i
@@ -582,8 +560,6 @@ proc gen(c; tree; n: NodeIndex) =
     c.instr(opcExcept)
     # assign the passed-along value to the provided local
     c.instr(opcPopLocal, tree[n, 0].id)
-  of Subroutine:
-    c.instr(opcBegin)
   of Continuation:
     discard "no special instruction needed"
   else:
@@ -642,8 +618,8 @@ proc translate(tree; types, def: NodeIndex): ProcResult =
         c.start(i)
         c.instr(opcRet)
 
-  result = ProcResult(code: c.code, locals: c.locals, ehCode: c.ehCode,
-                      ehTable: c.ehTable, constants: c.constants)
+  result = ProcResult(code: c.code, locals: c.locals, ehTable: c.ehTable,
+                      constants: c.constants)
 
 proc slice[T](old, with: seq[T]): Slice[uint32] =
   old.len.uint32 .. uint32(old.len + with.len - 1)
@@ -717,10 +693,5 @@ proc translate*(module: PackedTree[NodeKind], env: var VmEnv) =
     env.procs[i].locals = hoSlice(env.locals, prc.locals)
     env.locals.add prc.locals
 
-    # patch the EH table:
-    for it in prc.ehTable.mitems:
-      it.offset += env.ehCode.len.uint32
-
     env.procs[i].eh = hoSlice(env.ehTable, prc.ehTable)
     env.ehTable.add prc.ehTable
-    env.ehCode.add prc.ehCode
