@@ -78,7 +78,7 @@ proc verify(lang: Grammar, e: Expr, errors: var Errors) =
   ## that don't.
   case e.isRef
   of true:
-    if e.name notin lang and e.name notin ["int", "float"]:
+    if e.name notin lang and e.name notin ["int", "float", "string"]:
       errors.emit(e.pos, "no rule with name " & e.name & " exists")
   of false:
     for it in e.rules.items:
@@ -150,7 +150,7 @@ proc sem(parsed: seq[Parsed], name, dir: string, langs: var Languages,
     of pkDef:
       if it.name in lang:
         errors.emit(it.line, it.col, "redefinition of " & it.name)
-      elif it.name in ["int", "float"]:
+      elif it.name in ["int", "float", "string"]:
         errors.emit(it.line, it.col):
           it.name & " is already the name of a built-in rule"
       else:

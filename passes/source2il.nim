@@ -84,4 +84,4 @@ proc exprToIL*(t: InTree): (TypeKind, PackedTree[NodeKind]) =
             bu.subTree Params:
               bu.add Node(kind: Type, val: 0)
 
-  result = (typ, initTree(bu.finish(), t.numbers))
+  result = (typ, initTree(bu.finish(), t.literals))

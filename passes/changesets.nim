@@ -129,4 +129,4 @@ func apply*[T](tree: PackedTree[T], c: sink ChangeSet[T]): PackedTree[T] =
   if source < tree.nodes.len:
     nodes.add toOpenArray(tree.nodes, source, tree.nodes.high)
 
-  result = initTree(nodes, tree.numbers)
+  result = initTree(nodes, tree.literals)
