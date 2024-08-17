@@ -2,7 +2,6 @@
 ## `VmThread <#VmThread>`_ API.
 
 import
-  std/options,
   vm/[
     utils,
     vmalloc,
@@ -52,14 +51,8 @@ type
       args*: int          ## the number of stack operands that need to be
                           ## popped
 
-  FrameKind* = enum
-    fkCall   ## normal procedure call frame
-    fkSub    ## subroutine call frame
-    fkErrSub ## frame of subroutine invocation from exception handling
-
   Frame* = object
     ## Call stack frame.
-    kind: FrameKind
     prc: ProcIndex
     comesFrom: PrgCtr ## caller PC
     start: int        ## first local
@@ -74,15 +67,6 @@ type
     sp: uint       ## stack pointer; current top of stack
     stackEnd: uint ## upper bound of stack memory
 
-    pc: PrgCtr
-
-  EhState = object
-    active: bool  ## whether an EH thread is active
-    pc: uint32    ## program-counter of the EH thread
-    value: Value  ## additional value passed along to exception handling
-
-  EhResult = object
-    errPc: uint32
     pc: PrgCtr
 
 proc `=copy`*(x: var VmThread, y: VmThread) {.error.}
@@ -101,7 +85,7 @@ proc findEh(c: VmEnv, t: VmThread, at: PrgCtr, frame: int): (int, uint32) =
   ## the call frame `frame`. The call stack is walked upwards until either an
   ## EH instruction is found or there are no more frames.
   ##
-  ## On success, the target call frame and the EH instruction position are
+  ## On success, the target call frame and EH instruction position are
   ## returned. The frame being -1 signals that no EH instruction was found.
   var
     pc = at
@@ -115,12 +99,8 @@ proc findEh(c: VmEnv, t: VmThread, at: PrgCtr, frame: int): (int, uint32) =
 
     # search for the instruction's asscoiated exception handler:
     for i in handlers.items:
-      if c.ehTable[i].offset == offset:
-        return (frame, c.ehTable[i].instr)
-
-    # ignore subroutine frames:
-    while t.frames[frame].kind != fkCall:
-      dec frame
+      if c.ehTable[i].src == offset:
+        return (frame, c[prc].code.a + c.ehTable[i].dst)
 
     # no handler was found, try the above frame:
     pc = t.frames[frame].comesFrom
@@ -128,59 +108,6 @@ proc findEh(c: VmEnv, t: VmThread, at: PrgCtr, frame: int): (int, uint32) =
 
   # no handler exists
   result = (-1, 0'u32)
-
-proc runEh(c: VmEnv, at: uint32): EhResult {.raises: [].} =
-  ## Runs the EH instructions starting at `at`.
-  var pc = at
-  while true:
-    let instr = c.ehCode[pc]
-    case instr.opcode
-    of ehoExcept:
-      result = EhResult(pc: instr.a.PrgCtr)
-      break
-    of ehoSubroutine:
-      result = EhResult(errPc: pc + 1, pc: instr.a.PrgCtr)
-      break
-    of ehoNext:
-      pc += instr.a
-    of ehoEnd:
-      result = EhResult(pc: c.code.len.PrgCtr)
-      break
-
-proc resumeEh(c: VmEnv, t: var VmThread, frame: var int,
-              errPc: uint32): EhResult =
-  ## Continues exception handling and returns either:
-  ## * the first subroutine to enter
-  ## * the except instruction to resume at
-  ##
-  ## `frame` being negative aftewards indicates that no exception handler
-  ## was found, meaning that the exception is unhandled.
-  var pc = errPc
-  while frame >= 0:
-    let r = runEh(c, pc)
-    if r.pc != c.code.len.PrgCtr:
-      # a subroutine/except to enter was found
-      return r
-    else:
-      while t.frames[frame].kind != fkCall:
-        dec frame
-      # no subroutine/except to enter exists on the current frame, try the
-      # frame above
-      (frame, pc) = findEh(c, t, t.frames[frame].comesFrom, frame - 1)
-
-proc startSubroutine(t: var VmThread, c: VmEnv, kind: FrameKind, src: PrgCtr) =
-  ## Pushes a new subroutine frame to the call stack.
-  var frame = t.frames[^1]
-  frame.kind = kind
-  frame.sp = t.sp
-  frame.comesFrom = src
-  t.frames.add frame
-
-proc popCount(t: VmThread, target: int): int =
-  ## Computes the number of stack operands that need to be popped when
-  ## unwdining to target frame `target`.
-  for i in (target + 1)..<t.frames.len:
-    result += ord(t.frames[i].kind == fkErrSub)
 
 proc gc(c: var VmEnv, stack: seq[Value], t: VmThread) =
   ## Garbage collections for foreign references. A deferred refcounting
@@ -224,7 +151,6 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
   # an optimizing compiler from putting them into registers
   var
     stack: seq[Value]
-    eh: EhState
     pc = t.pc
     fp = t.frames[^1].start # points to the current local head
   swap(t.stack, stack)
@@ -281,35 +207,14 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
         body
         continue
       # --- exception handling
-      var frame = t.frames.high
-      if not eh.active:
-        # find an EH thread to execute for the current instruction
-        (frame, eh.pc) = findEh(c, t, pc, frame)
-        # frame is set to -1 if none was found
-      eh.active = false
-
-      # try to run the EH thread:
-      let res = resumeEh(c, t, frame, eh.pc)
+      let value = stack.pop()
+      # find the instruction and frame to jump to:
+      let (frame, dest) = findEh(c, t, pc, t.frames.high)
+      # `frame` is -1 if none was found
       if unlikely(frame < 0):
-        return YieldReason(kind: yrkUnhandledException, exc: eh.value)
-
-      let dest = res.pc + c[t.frames[frame].prc].code.a
-
-      if t.frames[frame].kind != fkCall:
-        # unwind the subroutine frames, if there are any
-        var scan =
-          if frame != t.frames.high: t.frames[frame + 1].comesFrom
-          else:                      pc
-
-        # note: the target is always ahead of the start PC
-        while scan < dest:
-          let opc = c.code[scan].opcode
-          frame += ord(opc == opcBegin) - ord(opc == opcEnd)
-          inc scan
+        return YieldReason(kind: yrkUnhandledException, exc: value)
 
       if frame != t.frames.high:
-        # pop exception values:
-        stack.setLen(stack.len - popCount(t, frame))
         # restore the target frame's context:
         t.sp = t.frames[frame + 1].sp
         fp = t.frames[frame].start
@@ -317,9 +222,7 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
         t.locals.setLen(fp + c[t.frames[frame].prc].locals.len)
         t.frames.setLen(frame + 1)
 
-      stack.add eh.value # push the exception value to the stack
-      if c.code[dest].opcode == opcBegin:
-        startSubroutine(t, c, fkErrSub, PrgCtr(res.errPc))
+      stack.add value # push the exception value to the stack (again)
       pc = dest + 1
 
   mainLoop exc:
@@ -477,7 +380,6 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
         else:
           return YieldReason(kind: yrkDone, typ: ret, result: stack.pop())
     of opcRaise:
-      eh.value = stack.pop()
       break exc # start exception handling
     of opcCall, opcIndCall:
       var
@@ -524,28 +426,8 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
         # unlikely case
         return YieldReason(kind: yrkStubCalled, stub: prc)
 
-    of opcBegin, opcExcept:
+    of opcExcept:
       unreachable() # never executed
-    of opcEnd:
-      let frame = t.frames.pop()
-      if frame.kind == fkErrSub: # invoked from exception handling
-        eh.active = true
-        eh.pc = frame.comesFrom
-        eh.value = pop(Value)
-        break exc # resume exception handling
-      else:
-        pc = frame.comesFrom
-    of opcEnter:
-      startSubroutine(t, c, fkSub, pc)
-      pc = pc + cast[PrgCtr](imm32()) # skip the opcBegin instruction
-    of opcLeave:
-      let
-        (rel, count) = imm32_16()
-        frame = t.frames.len - count
-      stack.setLen(stack.len - popCount(t, frame))
-      t.sp = t.frames[frame + 1].sp
-      t.frames.setLen(frame)
-      pc = pc + cast[PrgCtr](rel - 1)
 
     of opcStackAlloc:
       let next = t.sp + cast[uint32](imm32())

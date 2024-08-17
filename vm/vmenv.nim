@@ -68,26 +68,18 @@ type
   VmCallback* = proc(env: var VmEnv, args: openArray[Value],
                      cl: RootRef): CallbackResult {.nimcall, raises: [].}
 
-  HandlerTableEntry* = tuple
-    offset: uint32 ## instruction offset, relative to current proc start
-    instr:  uint32 ## position of the EH instruction to execute
-
-  EhInstr* = tuple
-    ## Exception handling instruction. 4-byte in size.
-    opcode: EhOpcode
-    a: uint16 ## meaning depends on the opcode
+  EhMapping* = tuple
+    src: uint32 ## relative offset of the raising instruction
+    dst: uint32 ## relative offset of the instruction to jump to
 
   VmEnv* = object
     ## The total VM execution environment. An instance of this type represents
     ## a full VM instance.
     code*: seq[Instr]
 
-    ehTable*: seq[HandlerTableEntry]
-      ## stores the instruction-to-EH mappings. Used to look up the EH
-      ## instruction to start exception handling with in case of a normal
-      ## instruction raising
-    ehCode*: seq[EhInstr]
-      ## stores the instructions for the exception handling (EH) mechanism
+    ehTable*: seq[EhMapping]
+      ## stores the instruction-to-EH mappings. Used to look up where to jump
+      ## to when an instruction raises an exception
 
     locals*: seq[ValueType]
     globals*: seq[TypedValue]
