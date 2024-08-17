@@ -29,10 +29,10 @@ type
     Conv, Reinterp
 
     Continue, Loop, Enter, Leave, Raise, Unreachable, Select, SelectBool
-    CheckedCall, CheckedCallAsgn, Unwind, Choice, List
+    CheckedCall, CheckedCallAsgn, Unwind, Choice
 
     Module, TypeDefs, ProcDefs, ProcDef, Locals, Continuations, Continuation,
-    Subroutine, Except, Params, GlobalDefs, GlobalDef
+    Except, Params, GlobalDefs, GlobalDef
 
 template isAtom*(x: NodeKind): bool =
   ord(x) <= ord(Global)
