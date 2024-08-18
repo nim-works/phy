@@ -27,11 +27,9 @@ Each continuation names the locals alive for the duration of it:
 
 ```grammar
 continuation -= (Continuation (Params) stack:<int> <stmt>* <exit>)
-              | (Subroutine (Params) stack:<int> <stmt>* <exit>)
               | (Except <local> stack:<int> <stmt>* <exit>)
 
 continuation += (Continuation (Params) (Locals <local>*) <stmt>* <exit>)
-              | (Subroutine (Params) (Locals <local>*) <stmt>* <exit>)
               | (Except <local> (Locals <local>*) <stmt>* <exit>)
 ```
 

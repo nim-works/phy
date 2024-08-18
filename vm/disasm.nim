@@ -37,22 +37,6 @@ proc formatValue(result: var string, t: ValueType, specifier: string) =
   of vtFloat: result.add "float"
   of vtRef:   result.add "ref"
 
-iterator ehInstrs(env: VmEnv, start: uint32): EhInstr =
-  ## Returns all EH instructions in the sequence starting at `start`.
-  var i = start
-  var stop = false
-  while not stop:
-    let instr = env.ehCode[i]
-    case instr.opcode
-    of ehoEnd, ehoExcept: stop = true
-    of ehoSubroutine:
-      inc i
-    of ehoNext:
-      i += instr.a.uint32
-      continue # don't return 'next' instructions
-
-    yield instr
-
 
 proc disassemble*(env: VmEnv, prc: ProcHeader, result: var string) =
   ## Turns the given `prc` into its text representation, appending the result
@@ -65,14 +49,12 @@ proc disassemble*(env: VmEnv, prc: ProcHeader, result: var string) =
 
   # gather the jump targets for all jump-like instructions:
   for i, instr in env.code.toOpenArray(prc.code).pairs:
-    if instr.opcode in {opcEnter, opcLeave, opcJmp, opcBranch}:
+    if instr.opcode in {opcJmp, opcBranch}:
       targets.incl i + imm32(instr).int
 
   # gather the jump targets for all EH instructions:
   for e in env.ehTable.toOpenArray(prc.eh):
-    for instr in ehInstrs(env, e.instr):
-      if instr.opcode in {ehoSubroutine, ehoExcept}:
-        targets.incl instr.a.int
+    targets.incl e.dst.int
 
   for i, instr in env.code.toOpenArray(prc.code).pairs:
     if i in targets:
@@ -107,14 +89,11 @@ proc disassemble*(env: VmEnv, prc: ProcHeader, result: var string) =
     of opcIndCall:
       let (t, args) = imm32_16(instr)
       result.add fmt" {TypeId t} {args}"
-    of opcEnter, opcJmp:
+    of opcJmp:
       result.add " L"
       result.add $(i + instr.imm32.int)
     of opcBranch:
       let (a, b) = imm32_8(instr)
-      result.add fmt" L{i + a.int} {b}"
-    of opcLeave:
-      let (a, b) = imm32_16(instr)
       result.add fmt" L{i + a.int} {b}"
     of opcYield:
       let (a, b) = imm32_16(instr)
@@ -126,20 +105,8 @@ proc disassemble*(env: VmEnv, prc: ProcHeader, result: var string) =
 
     # emit the .eh directive for the attached exception handler, if any
     for e in prc.eh.items:
-      if env.ehTable[e].offset - prc.code.a == i.uint32:
-        var first = true
-        result.add ".eh ("
-        for instr in ehInstrs(env, env.ehTable[e].instr):
-          if not first: result.add " "
-          else:         first = false
-
-          case instr.opcode
-          of ehoExcept:     result.add fmt"(Except L{instr.a})"
-          of ehoSubroutine: result.add fmt"(Subroutine L{instr.a})"
-          of ehoEnd:        result.add "End"
-          of ehoNext:       unreachable()
-
-        result.add ")\n"
+      if env.ehTable[e].src == i.uint32:
+        result.add &".eh L{env.ehTable[e].dst}\n"
         break
 
 proc disassemble*(env: VmEnv): string =

@@ -39,8 +39,7 @@ type
     # productions:
     code: seq[Instr]
     locals: seq[ValueType]
-    ehTable: seq[HandlerTableEntry]
-    ehCode: seq[EhInstr]
+    ehTable: seq[EhMapping]
 
     # working state:
     labels: seq[PrgCtr]
@@ -213,44 +212,6 @@ proc getLabel(a: var AssemblerState, name: string): int32 =
 proc parseLabel(s: Stream, a: var AssemblerState): int32 =
   getLabel(a, s.ident())
 
-proc parseEh(s: Stream, a: var AssemblerState): seq[EhInstr] =
-  ## Parses the definition of an exception handler from `s`. Exception handlers
-  ## are defined using S-expressions.
-  scopedParser(s)
-  discard p.getTok() # get the first token
-  p.space()
-  expect p.getTok() == tkParensLe
-  p.space()
-  while p.currToken != tkParensRi:
-    var instr: EhInstr
-    case p.currToken
-    of tkSymbol:
-      expect p.consumeSym() == "End"
-      instr = (ehoEnd, 0'u16)
-    of tkParensLe:
-      discard p.getTok()
-      p.space()
-      let name = p.consumeSym()
-      p.space()
-      let label = p.consumeSym()
-      case name
-      of "Subroutine":
-        instr = (ehoSubroutine, uint16 getLabel(a, label))
-      of "Except":
-        instr = (ehoExcept, uint16 getLabel(a, label))
-      else:
-        expect false
-
-      p.space()
-      expect p.consumeTok() == tkParensRi
-    else:
-      expect false
-
-    p.space()
-    result.add instr
-
-  expect p.consumeTok() == tkParensRi
-
 proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
   ## Parses the operands for a single instruction with opcode `op`.
   template makeInstr(a = 0'i32, b = 0'i16, c = 0'i8): Instr =
@@ -277,16 +238,14 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
      opcBitXor, opcBitNot, opcShr, opcAshr, opcShl, opcRet, opcAddFloat,
      opcSubFloat, opcMulFloat, opcDivFloat, opcNegFloat, opcEqInt, opcLtInt,
      opcLeInt, opcLtu, opcLeu, opcEqFloat, opcLtFloat, opcLeFloat, opcNot,
-     opcReinterpF32, opcReinterpF64, opcReinterpI32, opcReinterpI64, opcBegin,
-     opcEnd, opcExcept, opcRaise, opcMemCopy, opcMemClear, opcGrow:
+     opcReinterpF32, opcReinterpF64, opcReinterpI32, opcReinterpI64,
+     opcExcept, opcRaise, opcMemCopy, opcMemClear, opcGrow:
     Instr(op) # instruction with no immediate operands
   of opcAddImm, opcLdConst, opcLdImmInt, opcOffset,
      opcLdInt8, opcLdInt16, opcLdInt32, opcLdInt64, opcLdFlt32, opcLdFlt64,
      opcWrInt8, opcWrInt16, opcWrInt32, opcWrInt64, opcWrFlt32, opcWrFlt64,
      opcWrRef, opcStackAlloc, opcStackFree:
     instrA()
-  of opcLeave:
-    makeInstr(s.parseLabel(a), (s.space(); int16 s.parseInt()))
   of opcLdImmFloat:
     makeInstr(cast[int32](float32(s.parseFloat())))
   of opcMask, opcSignExtend, opcAddChck, opcSubChck, opcUIntToFloat,
@@ -294,7 +253,7 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
     instrC()
   of opcBranch:
     makeInstr(s.parseLabel(a), c = (s.space(); int8 s.parseInt()))
-  of opcJmp, opcEnter:
+  of opcJmp:
     makeInstr(s.parseLabel(a))
   of opcCall:
     makeInstr(int32 a.procs[s.ident()], (s.space(); int16 s.parseInt()))
@@ -314,21 +273,16 @@ proc patch(prc: var ProcState, c: VmEnv) =
     expect prc.labels[it] < high(PrgCtr), "missing label: " & name
 
   for i, it in prc.code.mpairs:
-    if it.opcode in {opcBranch, opcJmp, opcEnter, opcLeave}:
+    if it.opcode in {opcBranch, opcJmp}:
       let label = int(prc.labels[imm32(it)]) - i
       # clear out the old operand:
       it = Instr(it.InstrType and not(instrAMask shl instrAShift))
       # set the new operand value:
       it = Instr(it.InstrType or (label.InstrType shl instrAShift))
 
-  # patch the EH code:
-  for it in prc.ehCode.mitems:
-    if it.opcode in {ehoExcept, ehoSubroutine}:
-      it.a = prc.labels[it.a].uint16
-
   # patch the EH table:
   for it in prc.ehTable.mitems:
-    it.instr += c.ehCode.len.uint32
+    it.dst = prc.labels[it.dst].uint32
 
 proc slice[T](old, with: seq[T]): Slice[uint32] =
   old.len.uint32 .. uint32(old.len + with.len - 1)
@@ -374,7 +328,6 @@ proc process*(a: var AssemblerState, line: sink string, env: var VmEnv) =
       env.locals.add prc.locals
       env.code.add prc.code
       env.ehTable.add prc.ehTable
-      env.ehCode.add prc.ehCode
     of dirConst:
       # .const <name> <type> <value>
       s.space()
@@ -413,11 +366,10 @@ proc process*(a: var AssemblerState, line: sink string, env: var VmEnv) =
       let id = s.parseLabel(a)
       a.prc.labels[id] = a.prc.code.len.PrgCtr
     of dirEh:
-      # .eh <eh>
+      # .eh <name>
       expect a.stack.len > 0, "only allowed in procedure"
-      let code = s.parseEh(a)
-      a.prc.ehTable.add (a.prc.code.high.uint32, a.prc.ehCode.len.uint32)
-      a.prc.ehCode.add code
+      let id = s.parseLabel(a)
+      a.prc.ehTable.add (a.prc.code.high.uint32, id.uint32)
 
   else:
     expect a.stack.len > 0, "instruction must be part of procedure"

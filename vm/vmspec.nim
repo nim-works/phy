@@ -106,21 +106,9 @@ type
     opcIndCall    ## callee:int typ:imm32 num:imm16
     opcExcept     ## val:int
 
-    # sub-routines
-    opcBegin
-    opcEnd
-    opcEnter      ## target:imm32 num:imm16
-    opcLeave      ## target:imm32 num:imm16
-
     # memory management
     opcStackAlloc ## size:imm32
     opcStackFree  ## size:imm32
     opcGrow       ## to:int
 
     opcYield      ## args:imm32 reason:imm8
-
-  EhOpcode* = enum
-    ehoExcept     ## enter an exception handler
-    ehoSubroutine ## enter a subroutine
-    ehoNext       ## forward jump to another EH instruction
-    ehoEnd        ## end of current EH thread
