@@ -1,0 +1,24 @@
+discard """
+  description: "
+    `CheckedCall`s that return something can continue with the procedure exit
+  "
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Type 0))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) (Continuations
+    (Continuation (Params) (Locals)
+      (Continue 1 (IntVal 100) (List) (List))
+    )
+    (Continuation (Params (Type 0)))
+  ))
+  (ProcDef (Type 1) (Continuations
+    (Continuation (Params) (Locals)
+      (CheckedCall (Proc 0) (Continue 1 (List) (List)) (Unwind))
+    )
+    (Continuation (Params (Type 0)))
+  ))
+)

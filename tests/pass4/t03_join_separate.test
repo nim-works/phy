@@ -1,0 +1,30 @@
+discard """
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) (Continuations
+    (Continuation (Params) (Locals)
+      (SelectBool (IntVal 0)
+        (Continue 1 (List) (List))
+        (Continue 2 (List) (List)))
+    )
+    (Continuation (Params) (Locals (Type 0))
+      (Continue 3
+        (List (Move (Local 0)))
+        (List))
+    )
+    (Continuation (Params) (Locals (Type 0))
+      (Continue 3
+        (List (Move (Local 0)))
+        (List))
+    )
+    (Continuation (Params (Type 0)) (Locals)
+      (Continue 4 (List) (List))
+    )
+    (Continuation (Params)))
+  )
+)

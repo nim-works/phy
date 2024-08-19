@@ -1,0 +1,21 @@
+discard """
+  description: "A copy is introduced when no move (i.e., rename) is possible"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) (Continuations
+    (Continuation (Params) (Locals (Type 0) (Type 0))
+      (SelectBool (IntVal 0)
+        (Continue 1 (List (Move (Local 0))) (List (Local 1)))
+        (Continue 1 (List (Move (Local 1))) (List (Local 0))))
+    )
+    (Continuation (Params (Type 0)) (Locals)
+      (Continue 2 (List) (List))
+    )
+    (Continuation (Params)))
+  )
+)
