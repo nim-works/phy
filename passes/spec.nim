@@ -28,7 +28,7 @@ type
 
     Conv, Reinterp
 
-    Continue, Loop, Enter, Leave, Raise, Unreachable, Select, SelectBool
+    Continue, Loop, Raise, Unreachable, Select, SelectBool
     CheckedCall, CheckedCallAsgn, Unwind, Choice
 
     Module, TypeDefs, ProcDefs, ProcDef, Locals, Continuations, Continuation,
