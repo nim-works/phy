@@ -8,10 +8,12 @@ import
 
 type
   ActionKind = enum
+    # **important**: the enum order informs precedence. If enum field A is
+    # defined before B, A is applied first
+    Insert     ## insert a new tree; source cursor doesn't change
     ChangeKind ## change the kind of a node
     ChangeLen  ## change the length of a subtree
     Skip       ## skip over the subtree at the source cursor
-    Insert     ## insert a new tree; source cursor doesn't change
     Replace    ## Insert + Skip
 
   Action[T] = object
@@ -97,9 +99,11 @@ template insert*[T](c: var ChangeSet[T], tree: PackedTree[T], n: NodeIndex,
 
 func apply*[T](tree: PackedTree[T], c: sink ChangeSet[T]): PackedTree[T] =
   ## Applies the changeset `c` to `tree`.
-  # sort the actions by source position:
+  # sort the actions by source position and action:
   sort(c.actions, proc(a, b: auto): int =
-    a.at.int - b.at.int
+    result = a.at.int - b.at.int
+    if result == 0:
+      result = ord(a.kind) - ord(b.kind)
   )
 
   var
