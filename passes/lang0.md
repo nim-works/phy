@@ -66,7 +66,7 @@ choice ::= (Choice <intVal> <goto>)
         |  (Choice <intVal> <intVal> <goto>)
         |  (Choice <floatVal> <floatVal> <goto>)
 
-exit ::= (Continue <cont_name>)
+exit ::= <goto>
       |  (Continue <cont_name> <value>)
       |  (Loop <cont_name>)
       |  (Unreachable)
