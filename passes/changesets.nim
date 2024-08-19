@@ -69,6 +69,14 @@ func remove*[T](c: var ChangeSet[T], tree: PackedTree[T], n: NodeIndex, i: int) 
   c.actions.add Action[T](at: n, kind: ChangeLen, by: 0xFFFF_FFFF'u32) # -1
   c.actions.add Action[T](at: tree.child(n, i), kind: Skip)
 
+func insert*[T](c: var ChangeSet[T], tree: PackedTree[T], n: NodeIndex,
+                i: int, node: TreeNode[T]) =
+  ## Records the insertion of `node` at the `i`-th child node of `n`.
+  c.actions.add Action[T](at: n, kind: ChangeLen, by: 1)
+  c.actions.add Action[T](at: tree.child(n, i), kind: Insert,
+                          slice: c.nodes.len .. c.nodes.len)
+  c.nodes.add node
+
 template insert*[T](c: var ChangeSet[T], tree: PackedTree[T], n: NodeIndex,
                     i: int, k: T, body: untyped) =
   ## Records the insertion of a new subtree at the `i`-th child node of `n`.
