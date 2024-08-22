@@ -8,7 +8,7 @@ discard """
 (ProcDefs
   (ProcDef (Type 1) (Continuations
     (Continuation (Params) (Locals (Type 0))
-      (Continue 1 (List) (List (Local 0)))
+      (Continue 1 (List))
     )
     (Continuation (Params)))
   )

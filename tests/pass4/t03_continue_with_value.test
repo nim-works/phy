@@ -1,6 +1,6 @@
 discard """
   description: "
-    Continuation exits can move the value of locals into the target
+    `Continue` can also be used to pass a value on to the target continuation
   "
 """
 (TypeDefs
@@ -10,11 +10,11 @@ discard """
 (GlobalDefs)
 (ProcDefs
   (ProcDef (Type 1) (Continuations
-    (Continuation (Params) (Locals (Type 0))
-      (Continue 1 (List (Move (Local 0))) (List))
+    (Continuation (Params) (Locals)
+      (Continue 1 (IntVal 100) (List))
     )
     (Continuation (Params (Type 0)) (Locals)
-      (Continue 2 (List) (List (Local 0)))
+      (Continue 2 (List))
     )
     (Continuation (Params)))
   )

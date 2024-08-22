@@ -1,6 +1,3 @@
-discard """
-  description: "`CheckedCall` is also used for procedures that return a value"
-"""
 (TypeDefs
   (Int 8)
   (ProcTy (Type 0))
@@ -15,12 +12,13 @@ discard """
     (Continuation (Params (Type 0)))
   ))
   (ProcDef (Type 2) (Continuations
-    (Continuation (Params) (Locals)
+    (Continuation (Params)
+      (Locals (Type 0))
       (CheckedCall (Proc 0)
-        (Continue 1 (List))
+        (Continue 1 (List (Move (Local 0))))
         (Unwind))
     )
-    (Continuation (Params (Type 0)) (Locals)
+    (Continuation (Params (Type 0) (Type 0)) (Locals)
       (Continue 2 (List))
     )
     (Continuation (Params))

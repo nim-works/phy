@@ -1,5 +1,3 @@
-discard """
-"""
 (TypeDefs
   (Int 8)
   (ProcTy (Type 0))
@@ -7,8 +5,9 @@ discard """
 (GlobalDefs)
 (ProcDefs
   (ProcDef (Type 1) (Continuations
-    (Continuation (Params) (Locals (Type 0))
-      (Continue 1 (Copy (Local 0)) (List) (List))
+    (Continuation (Params)
+      (Locals (Type 0))
+      (Continue 1 (Copy (Local 0)) (List))
     )
     (Continuation (Params (Type 0))))
   )

@@ -1,24 +1,19 @@
-discard """
-  description: "`CheckedCall` is also used for procedures that return a value"
-"""
 (TypeDefs
   (Int 8)
-  (ProcTy (Type 0))
   (ProcTy (Void))
 )
 (GlobalDefs)
 (ProcDefs
   (ProcDef (Type 1) (Continuations
     (Continuation (Params) (Locals)
-      (Continue 1 (IntVal 100) (List))
+      (Raise (IntVal 100) (Unwind))
     )
-    (Continuation (Params (Type 0)))
   ))
-  (ProcDef (Type 2) (Continuations
+  (ProcDef (Type 1) (Continuations
     (Continuation (Params) (Locals)
       (CheckedCall (Proc 0)
-        (Continue 1 (List))
-        (Unwind))
+        (Continue 2 (List))
+        (Continue 1 (List)))
     )
     (Continuation (Params (Type 0)) (Locals)
       (Continue 2 (List))
