@@ -58,9 +58,5 @@ exit -= (CheckedCallAsgn <local> <proc> <value>* <goto> <err_goto>)
       | (CheckedCallAsgn <local> <type_id> <value>+ <goto> <err_goto>)
 ```
 
-Exits via exceptional control-flow always pass the exception to the first `Continuation` parameter.
-
-```grammar
-err_goto -= (Continue <cont_name>)
-err_goto += (Continue <cont_name> (List <cont_arg>*) drop:(List <local>*))
-```
+Exits via exceptional control-flow always pass the exception to the first
+`Continuation` parameter.

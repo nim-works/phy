@@ -59,7 +59,7 @@ cont_name ::= <int>
 
 goto ::= (Continue <cont_name>)
 err_goto ::= (Unwind)
-          |  (Continue <cont_name>)
+          |  <goto>
 
 choice ::= (Choice <intVal> <goto>)
         |  (Choice <floatVal> <goto>)
