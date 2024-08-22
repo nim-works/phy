@@ -20,7 +20,7 @@ type
 
     Load, Store, Addr, Call
     Deref, Field, At
-    Move, MoveAddr
+    Move, Rename
 
     Neg, Add, Sub, Mul, Div, Mod
     AddChck, SubChck

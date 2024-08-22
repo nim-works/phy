@@ -31,8 +31,8 @@ all others refer to a spawned local.
 Values are passed explicitly to continuations:
 
 ```grammar
-cont_arg ::= (Move <local>)     # move the value
-          |  (MoveAddr <local>) # the identity (read, address) must stay the same
+cont_arg ::= (Move <local>)   # move the value
+          |  (Rename <local>) # the identity (read, address) must stay the same
 ```
 
 Every jump to another `Continuation`s must specify which locals are moved
