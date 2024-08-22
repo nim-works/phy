@@ -35,19 +35,18 @@ cont_arg ::= (Move <local>)   # move the value
           |  (Rename <local>) # the identity (read, address) must stay the same
 ```
 
-Every jump to another `Continuation`s must specify which locals are moved
-across and which ones are dropped/killed; arity and types need to match the
-target continuation:
+Every jump to another `Continuation` must specify which locals are moved
+across; arity and types need to match those of the target continuation:
 
 ```grammar
 exit -= (Continue <cont_name> <value>)
       | (Loop <cont_name>)
 
-exit += (Continue <cont_name> <value> (List <cont_arg>*) drop:(List <local>*))
-      | (Loop <cont_name> (List <cont_arg>*) drop:(List <local>*))
+exit += (Continue <cont_name> <value> (List <cont_arg>*))
+      | (Loop <cont_name> (List <cont_arg>*))
 
 goto -= (Continue <cont_name>)
-goto += (Continue <cont_name> (List <cont_arg>*) drop:(List <local>*))
+goto += (Continue <cont_name> (List <cont_arg>*))
 ```
 
 There are no `CheckedCallAsgn`. Checked calls that return something use
