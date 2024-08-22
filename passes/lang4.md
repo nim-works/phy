@@ -50,7 +50,7 @@ goto += (Continue <cont_name> (List <cont_arg>*))
 ```
 
 There are no `CheckedCallAsgn`. Checked calls that return something use
-`CheckedCall`s.
+`CheckedCall`s. They cannot pass something directly to the exit continuation.
 
 ```grammar
 exit -= (CheckedCallAsgn <local> <proc> <value>* <goto> <err_goto>)
