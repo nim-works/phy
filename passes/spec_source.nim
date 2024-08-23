@@ -28,11 +28,12 @@ proc fromSexp*(tree: var PackedTree[NodeKind], kind: NodeKind,
   else:
     unreachable()
 
-proc toSexp*(n: TreeNode[NodeKind]): SexpNode =
+proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
+             n: TreeNode[NodeKind]): SexpNode =
   case n.kind
   of Immediate: sexp(n.val.int)
-  of IntVal:    sexp([newSSymbol("IntVal"), sexp n.val.int])
-  of FloatVal:  sexp([newSSymbol("FloatVal"), sexp n.val.int])
+  of IntVal:    sexp([newSSymbol("IntVal"), sexp tree.getInt(idx)])
+  of FloatVal:  sexp([newSSymbol("FloatVal"), sexp tree.getFloat(idx)])
 
 proc fromSexp*(i: BiggestInt): TreeNode[NodeKind] =
   TreeNode[NodeKind](kind: Immediate, val: i.uint32)
