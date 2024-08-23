@@ -178,19 +178,27 @@ proc buildGraph(tree; n): Graph =
 
 proc colorGraph(gr: var Graph) =
   ## Assigns a color to every node in the graph.
-  var next = 1'u32
+  var
+    next    = 1'u32
+    markers = newSeq[PackedSet[uint32]](gr.conts.len)
+      ## for each node group (i.e., continuation) the already seen colors.
+      ## Used to prevent invalid color propagation
 
   # pre-color nodes pairs that are forced to share the same register:
-  for e in gr.edges.items:
-    if e.noCopy:
-      if gr.nodes[e.src].color == 0:
-        gr.nodes[e.src] = (true, next)
-        inc next
+  for g in gr.groups.items:
+    for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
+      if e.noCopy:
+        if gr.nodes[e.src].color == 0:
+          gr.nodes[e.src] = (true, next)
+          inc next
 
-      if gr.nodes[e.dst].color != gr.nodes[e.src].color:
-        # TODO: use proper error reporting
-        doAssert gr.nodes[e.dst].color == 0, "cannot satisfy constraints"
-        gr.nodes[e.dst] = (true, gr.nodes[e.src].color)
+        let color = gr.nodes[e.src].color
+        if gr.nodes[e.dst].color != color:
+          # TODO: use proper error reporting
+          doAssert gr.nodes[e.dst].color == 0, "cannot satisfy constraints"
+          doAssert not containsOrIncl(markers[g.target], color),
+                   "cannot satisfy constraints"
+          gr.nodes[e.dst] = (true, color)
 
   # assign unique colors to the rest:
   for n in gr.nodes.mitems:
@@ -210,22 +218,22 @@ proc colorGraph(gr: var Graph) =
       nodes[b] = (true, color)
 
   # propagate colors forward:
-  block:
-    var map = newSeq[PackedSet[uint32]](gr.conts.len)
-    for g in gr.groups.items:
-      for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
-        mark(gr.nodes, map[g.target], e.src, e.dst)
+  for g in gr.groups.items:
+    for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
+      mark(gr.nodes, markers[g.target], e.src, e.dst)
+
+  reset markers # free the memory already
 
   # propagate colors backward:
   for cont in gr.conts.ritems:
-    var map: PackedSet[uint32]
+    var marker: PackedSet[uint32]
 
     for it in cont.nodes.items:
-      map.incl gr.nodes[it].color
+      marker.incl gr.nodes[it].color
 
     for g in gr.groups.toOpenArray(cont.groups.a, cont.groups.b):
       for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
-        mark(gr.nodes, map, e.dst, e.src)
+        mark(gr.nodes, marker, e.dst, e.src)
 
 proc alloc(c; typ: TypeId): Register =
   ## Returns a free register and marks it occupied.
