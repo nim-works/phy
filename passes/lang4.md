@@ -16,13 +16,9 @@ a list of new locals it spawns:
 
 ```grammar
 continuation -= (Continuation (Params) (Locals <local>*) <stmt>* <exit>)
+              | (Except <local> (Locals <local>*) <stmt>* <exit>)
 continuation += (Continuation (Params <type_id>*) (Locals <type_id>*) <stmt>* <exit>)
-```
-
-There are no special `Except` continuations:
-
-```grammar
-continuation -= (Except <local> (Locals <local>*) <stmt>* <exit>)
+              | (Except       (Params <type_id>*) (Locals <type_id>*) <stmt>* <exit>)
 ```
 
 A `Local` with an ID < *number of parameters* refers to a parameter --

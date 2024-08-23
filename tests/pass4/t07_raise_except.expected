@@ -12,7 +12,7 @@
           (Continue 1)
         )
       )
-      (Except (Local 0))
+      (Except (Local 0)
         (Locals (Local 0))
         (Continue 2)
       )

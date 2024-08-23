@@ -388,14 +388,11 @@ proc lowerCont(c; tree; gr; cont: Cont, self: int, changes) =
   else:
     discard "nothing to do"
 
-  if false: # is exception handler?
-    # TODO: implement exception handler tracking
-    # turn into an exception handler
-    changes.changeKind(n, Except)
+  # rewrite the parameter list:
+  if tree[n].kind == Except:
     changes.replace(tree.child(n, 0)):
       localRef(active[0])
   else:
-    # remove the parameters from the list
     changes.replace(tree.child(n, 0), Params):
       discard
 

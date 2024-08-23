@@ -15,7 +15,7 @@
         (Continue 2 (List))
         (Continue 1 (List)))
     )
-    (Continuation (Params (Type 0)) (Locals)
+    (Except (Params (Type 0)) (Locals)
       (Continue 2 (List))
     )
     (Continuation (Params))
