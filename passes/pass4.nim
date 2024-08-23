@@ -23,6 +23,13 @@
 ## 4. rewrite the code, injecting assignments (i.e. copies) for all edges
 ##    where the source and destination register differs
 
+# XXX: consider splitting this pass into two:
+#      * one that does the register allocation and mapping and figuring out
+#        where copies are needed
+#      * one that injects the new continuations and rewrites checked calls
+#      This would reduce complexity, at the cost of (likely) being less run-
+#      time efficient
+
 import
   std/[intsets, tables],
   passes/[builders, changesets, trees, spec]
@@ -76,6 +83,11 @@ type
       ## maps every node to a register
     contMap: seq[uint32]
       ## maps continuations to their new ID. Empty, if no patching is needed
+
+    temps: Table[int32, Register]
+      ## node -> intermediate temporary to assign to first
+      ## XXX: this is a massive hack. The table is only needed for the duration
+      ##      of on a ``lowerCont`` call, yet it's stored in the pass' context
 
 # shorten some common procedure signatures:
 using
@@ -228,17 +240,14 @@ proc alloc(c; typ: TypeId): Register =
 proc insertCopies(c; tree; gr; g: EdgeGroup, at: int, exit: NodeKind, changes) =
   ## Inserts the copies for the edge group `g`. `at` is the index of the
   ## continuation where the new continuation is to be inserted.
-  var
-    copies: seq[tuple[src, dst: uint32]]
-    late:   seq[tuple[src, dst: uint32]]
-  var active = newSeq[uint32](g.edges.len)
+  let arity = gr.conts[g.target].numParams
+  var copies: seq[tuple[src, dst, tmp: Register]]
+  var active = newSeq[uint32](arity)
 
   # gather the set of input registers and mark them occupied:
   for i, it in gr.edges.toOpenArray(g.edges.a, g.edges.b).pairs:
     active[i] = c.nodeToReg[it.src]
     c.locals[active[i]].free = false # mark as occupied
-
-  # FIXME: the arity-mismatch case currently spells doom for copy handling
 
   # gather the output registers and produce the list of copy operations:
   for i, it in gr.edges.toOpenArray(g.edges.a, g.edges.b).pairs:
@@ -249,43 +258,84 @@ proc insertCopies(c; tree; gr; g: EdgeGroup, at: int, exit: NodeKind, changes) =
         # okay, can copy directly
         c.locals[reg].free = false
         active.add reg
-        copies.add (active[i], reg)
+        copies.add (active[i], reg, reg)
       else:
-        # the output is also part of the input set; an intermediate temporary
-        # is needed
-        let tmp = c.alloc(c.locals[reg].typ).uint32
-        active.add tmp
-        copies.add (active[i], tmp)
-        late.add (tmp, reg)
+        # needs an intermediate temporary, but don't allocate one until the
+        # full output set was marked as active
+        copies.add (active[i], reg, active[i])
 
   # XXX: the way temporaries are used is inefficient. Consider ``{a=b, b=a}``.
   #      Here, two temporaries and a total of 4 assignments would be used,
   #      even though 1 temporary and 3 assignments would suffice
 
-  # mark registers as free again:
+  let targetNode = gr.conts[g.target].n
+
+  if arity > g.edges.len:
+    # handle the implicit argument
+    let
+      n   = gr.conts[g.target].nodes.a
+      reg = c.nodeToReg[n]
+
+    if c.locals[reg].free:
+      # not part of the input set, no temporary no copy are needed
+      c.locals[reg].free = false
+      active[arity - 1] = reg
+    else:
+      # needs a temporary + copy
+      let tmp = c.alloc(c.locals[reg].typ)
+      active[arity - 1] = tmp
+      c.temps[n] = tmp # remember that a temporary is needed
+      # no copy is necessary for the exception handler; the Raise takes care
+      # of that
+      if tree[targetNode].kind != Except:
+        copies.add (tmp, reg, reg)
+
+  # allocate the temporaries:
+  for (src, dst, tmp) in copies.mitems:
+    if src == tmp:
+      tmp = c.alloc(c.locals[tmp].typ)
+      active.add tmp
+
+  # mark used registers as free again:
   for it in active.items:
     c.locals[it].free = true
 
   # emit the actual code:
-  changes.insert(tree, c.conts, at, Continuation):
-    bu.subTree Params: discard
+  changes.insert(tree, c.conts, at, tree[targetNode].kind):
+    # if the target is an exception handler, the intermediate continuation has
+    # to be one too
+    if tree[targetNode].kind == Except:
+      bu.add localRef(active[arity - 1])
+    else:
+      bu.subTree Params: discard
+
     bu.subTree Locals:
       for it in active.items:
         bu.add localRef(it)
 
-    template copy() =
+    template copy(src, dst) =
       bu.subTree Asgn:
         bu.add localRef(dst)
         bu.subTree Copy:
           bu.add localRef(src)
 
     # emit the copies:
-    for (src, dst) in copies.items: copy()
-    for (src, dst) in late.items:   copy()
+    for (src, dst, tmp) in copies.items:
+      copy(src, tmp)
+    for (src, dst, tmp) in copies.items:
+      if dst != tmp:
+        copy(tmp, dst)
 
     # emit the exit:
-    bu.subTree exit:
-      bu.add Node(kind: Immediate, val: c.contMap[g.target])
+    if tree[targetNode].kind == Except:
+      bu.subTree Raise:
+        bu.subTree Copy:
+          bu.add localRef(active[arity - 1])
+        bu.subTree exit:
+          bu.add Node(kind: Immediate, val: c.contMap[g.target])
+    else:
+      bu.subTree exit:
+        bu.add Node(kind: Immediate, val: c.contMap[g.target])
 
 proc lowerExpr(tree; n; active: seq[uint32], changes) =
   for it in tree.flat(n):
@@ -320,7 +370,10 @@ func isExit(tree; n): bool =
 func getDest(c: PassCtx, gr; cont: Cont, g: int32): uint32 {.inline.} =
   ## Returns the register for the first parameter of the continuation targeted
   ## by edge group `g`.
-  c.nodeToReg[gr.conts[gr.groups[g].target].nodes.a]
+  let node = gr.conts[gr.groups[g].target].nodes.a
+  # use the temporary if available
+  if node in c.temps: c.temps[node]
+  else:               c.nodeToReg[node]
 
 proc lowerCont(c; tree; gr; cont: Cont, self: int, changes) =
   let n = cont.n
