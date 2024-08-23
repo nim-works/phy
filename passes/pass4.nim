@@ -63,6 +63,8 @@ type
     edges: seq[Edge]
     nodes: seq[GraphNode]
 
+  Register = uint32 ## ID of a register
+
   PassCtx = object
     types: NodeIndex
 
@@ -70,7 +72,7 @@ type
     conts: NodeIndex
     locals: seq[tuple[typ: TypeId, free: bool]]
       ## all allocated registers
-    nodeToReg: seq[uint32]
+    nodeToReg: seq[Register]
       ## maps every node to a register
     contMap: seq[uint32]
       ## maps continuations to their new ID. Empty, if no patching is needed
@@ -213,14 +215,14 @@ proc colorGraph(gr: var Graph) =
       for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
         mark(gr.nodes, map, e.dst, e.src)
 
-proc alloc(c; typ: TypeId): int =
+proc alloc(c; typ: TypeId): Register =
   ## Returns a free register and marks it occupied.
   for i, it in c.locals.mpairs:
     if it.free and it.typ == typ:
       it.free = false
-      return i
+      return i.Register
 
-  result = c.locals.len
+  result = c.locals.len.Register
   c.locals.add (typ, false)
 
 proc insertCopies(c; tree; gr; g: EdgeGroup, at: int, exit: NodeKind, changes) =
@@ -422,12 +424,12 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
   block:
     c.nodeToReg.setLen(gr.nodes.len)
 
-    var colorToReg: Table[uint32, int]
+    var colorToReg: Table[uint32, Register]
     for cont in gr.conts.items:
       # 1. fill already allocated ones
       for id in cont.nodes.items:
-        var reg = colorToReg.getOrDefault(gr.nodes[id].color, -1)
-        if reg != -1:
+        var reg = colorToReg.getOrDefault(gr.nodes[id].color, high(Register))
+        if reg != high(Register):
           c.locals[reg].free = false
           c.nodeToReg[id] = reg.uint32
         else:
@@ -437,7 +439,7 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
       for id in cont.nodes.items:
         if c.nodeToReg[id] == high(uint32):
           let reg = c.alloc(getType(tree, cont.n, id - cont.nodes.a))
-          c.nodeToReg[id] = reg.uint32
+          c.nodeToReg[id] = reg
           colorToReg[gr.nodes[id].color] = reg
 
       # 3. mark all registers as free again
