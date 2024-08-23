@@ -6,6 +6,7 @@
 ## * a directed cyclic graph
 ##   * nodes represent continuation locals
 ##   * edges represent moves
+##   * edges are in pre-order
 ## * constraints requiring some nodes to share the same register
 ##
 ## **What we want:**
@@ -22,6 +23,9 @@
 ##    are never part of the same continuation
 ## 4. rewrite the code, injecting assignments (i.e. copies) for all edges
 ##    where the source and destination register differs
+##
+## The graph being able to contain cycles is irrelevant for the algorithm,
+## thanks to the pre-established order.
 
 # XXX: consider splitting this pass into two:
 #      * one that does the register allocation and mapping and figuring out
@@ -162,8 +166,8 @@ proc buildGraph(tree; n): Graph =
         EdgeGroup(n: g, target: target,
                   edges: slice(result.edges.len, numEdges))
 
-      # handle checked-calls and continues-with-value, where the arity doesn't
-      # match, by subtracting from the last parameter position
+      # implicit arguments are passed to the first parameter, but don't have
+      # an edge in the graph; handle this case by shifting the start
       let start = result.conts[target].nodes.a +
                   (result.conts[target].numParams - numEdges)
 
@@ -285,7 +289,7 @@ proc insertCopies(c; tree; gr; g: EdgeGroup, at: int, exit: NodeKind, changes) =
       reg = c.nodeToReg[n]
 
     if c.locals[reg].free:
-      # not part of the input set, no temporary no copy are needed
+      # not part of the input set, no temporary or copy are needed
       c.locals[reg].free = false
       active[arity - 1] = reg
     else:
@@ -293,7 +297,7 @@ proc insertCopies(c; tree; gr; g: EdgeGroup, at: int, exit: NodeKind, changes) =
       let tmp = c.alloc(c.locals[reg].typ)
       active[arity - 1] = tmp
       c.temps[n] = tmp # remember that a temporary is needed
-      # no copy is necessary for the exception handler; the Raise takes care
+      # no copy is necessary for an exception handler; the Raise takes care
       # of that
       if tree[targetNode].kind != Except:
         copies.add (tmp, reg, reg)
@@ -336,6 +340,7 @@ proc insertCopies(c; tree; gr; g: EdgeGroup, at: int, exit: NodeKind, changes) =
 
     # emit the exit:
     if tree[targetNode].kind == Except:
+      # re-raise the exception
       bu.subTree Raise:
         bu.subTree Copy:
           bu.add localRef(active[arity - 1])

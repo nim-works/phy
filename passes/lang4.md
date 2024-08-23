@@ -16,7 +16,7 @@ a list of new locals it spawns:
 
 ```grammar
 continuation -= (Continuation (Params) (Locals <local>*) <stmt>* <exit>)
-              | (Except <local> (Locals <local>*) <stmt>* <exit>)
+              | (Except       <local>  (Locals <local>*) <stmt>* <exit>)
 continuation += (Continuation (Params <type_id>*) (Locals <type_id>*) <stmt>* <exit>)
               | (Except       (Params <type_id>*) (Locals <type_id>*) <stmt>* <exit>)
 ```
@@ -46,12 +46,14 @@ goto += (Continue <cont_name> (List <cont_arg>*))
 ```
 
 There are no `CheckedCallAsgn`. Checked calls that return something use
-`CheckedCall`s. They cannot pass something directly to the exit continuation.
+`CheckedCall`s, with the result implicitly passed to the follow-up
+continuation's first parameter. The target continuation must not be the
+procedure exit continuation.
 
 ```grammar
 exit -= (CheckedCallAsgn <local> <proc> <value>* <goto> <err_goto>)
       | (CheckedCallAsgn <local> <type_id> <value>+ <goto> <err_goto>)
 ```
 
-Exits via exceptional control-flow always pass the exception to the first
-`Continuation` parameter.
+Exits via exceptional control-flow always implicitly pass the exception to the
+first `Continuation` parameter.
