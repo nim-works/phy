@@ -39,7 +39,8 @@ else:
 var (typ, tree) = exprToIL(fromSexp[NodeKind](parseSexp(readAll(s))))
 # don't continue if there was an error:
 if typ == tkError:
-  quit(0)
+  echo "exprToIL failed"
+  quit(1)
 
 # lower to the L0 language:
 tree = tree.apply(pass1.lower(tree, 8))
