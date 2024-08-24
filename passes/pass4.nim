@@ -356,8 +356,16 @@ proc lowerExpr(tree; n; active: seq[uint32], changes) =
       changes.replace(it, localRef(active[tree[it].val]))
 
 proc lowerExpr(tree; n; active: seq[uint32], bu: var Builder[NodeKind]) =
-  # TODO: implement properly; the local ID patching is missing
-  bu.copyFrom(tree, n)
+  # XXX: due to the lack of stacked changesets/trees, we have to copy
+  #      everything
+  var buf: seq[Node]
+  for it in tree.flat(n):
+    if tree[it].kind == Local:
+      buf.add localRef(active[tree[it].val])
+    else:
+      buf.add tree[it]
+
+  bu.add buf
 
 proc lowerStmt(tree; n; active: seq[uint32], changes) =
   # patch all references to locals:
