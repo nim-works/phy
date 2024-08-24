@@ -1,0 +1,6 @@
+discard """
+  output: "10: int"
+"""
+(Call (Ident "+")
+  (Call (Ident "+") (IntVal 1) (IntVal 2))
+  (Call (Ident "+") (IntVal 3) (IntVal 4)))

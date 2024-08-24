@@ -209,7 +209,7 @@ func literals*(tree: PackedTree): lent Literals {.inline.} =
 proc toSexp*[T](tree: PackedTree[T], at: NodeIndex): SexpNode =
   mixin isAtom, toSexp
   if isAtom(tree[at].kind):
-    result = toSexp(tree[at])
+    result = toSexp(tree, at, tree[at])
   else:
     result = newSList()
     result.add newSSymbol($tree[at].kind)

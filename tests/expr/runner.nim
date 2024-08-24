@@ -18,6 +18,7 @@ import
     trees
   ],
   vm/[
+    utils,
     vm,
     vmenv,
     vmvalidation
@@ -36,6 +37,11 @@ else:
 
 # parse the S-expression and translate the source language to the L1:
 var (typ, tree) = exprToIL(fromSexp[NodeKind](parseSexp(readAll(s))))
+# don't continue if there was an error:
+if typ == tkError:
+  echo "exprToIL failed"
+  quit(1)
+
 # lower to the L0 language:
 tree = tree.apply(pass1.lower(tree, 8))
 
@@ -67,3 +73,5 @@ of tkInt:
   stdout.write($res.result.intVal & ": int")
 of tkFloat:
   stdout.write($res.result.floatVal & ": float")
+of tkError:
+  unreachable()
