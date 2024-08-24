@@ -5,6 +5,9 @@ of the parse-tree, not the grammar of the textual representation (i.e., how
 the parse-tree is constructed from tokens).
 
 ```grammar
+ident ::= (Ident <string>)
+
 expr ::= (IntVal <int>)
       |  (FloatVal <float>)
+      |  (Call <ident> <expr>*)
 ```
