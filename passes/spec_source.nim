@@ -10,13 +10,15 @@ import
 type
   NodeKind* {.pure.} = enum
     Immediate, IntVal, FloatVal
+    Ident
+    Call
 
 const
-  ExprNodes* = {IntVal, FloatVal}
+  ExprNodes* = {IntVal, FloatVal, Call}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 
 template isAtom*(x: NodeKind): bool =
-  ord(x) <= ord(FloatVal)
+  ord(x) <= ord(Ident)
 
 proc fromSexp*(tree: var PackedTree[NodeKind], kind: NodeKind,
                n: SexpNode): TreeNode[NodeKind] =
@@ -25,14 +27,19 @@ proc fromSexp*(tree: var PackedTree[NodeKind], kind: NodeKind,
     TreeNode[NodeKind](kind: kind, val: tree.pack(n[1].num))
   of FloatVal:
     TreeNode[NodeKind](kind: FloatVal, val: tree.pack(n[1].fnum))
+  of Ident:
+    TreeNode[NodeKind](kind: Ident, val: tree.pack(n[1].str))
   else:
     unreachable()
 
-proc toSexp*(n: TreeNode[NodeKind]): SexpNode =
+proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
+             n: TreeNode[NodeKind]): SexpNode =
   case n.kind
   of Immediate: sexp(n.val.int)
-  of IntVal:    sexp([newSSymbol("IntVal"), sexp n.val.int])
-  of FloatVal:  sexp([newSSymbol("FloatVal"), sexp n.val.int])
+  of IntVal:    sexp([newSSymbol("IntVal"), sexp tree.getInt(idx)])
+  of FloatVal:  sexp([newSSymbol("FloatVal"), sexp tree.getFloat(idx)])
+  of Ident:     sexp([newSSymbol("Ident"), sexp tree.getString(idx)])
+  else:         unreachable()
 
 proc fromSexp*(i: BiggestInt): TreeNode[NodeKind] =
   TreeNode[NodeKind](kind: Immediate, val: i.uint32)

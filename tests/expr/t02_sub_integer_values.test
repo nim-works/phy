@@ -1,0 +1,4 @@
+discard """
+  output: "-1: int"
+"""
+(Call (Ident "-") (IntVal 1) (IntVal 2))
