@@ -8,10 +8,12 @@ import
 
 type
   ActionKind = enum
+    # **important**: the enum order informs precedence. If enum field A is
+    # defined before B, A is applied first
+    Insert     ## insert a new tree; source cursor doesn't change
     ChangeKind ## change the kind of a node
     ChangeLen  ## change the length of a subtree
     Skip       ## skip over the subtree at the source cursor
-    Insert     ## insert a new tree; source cursor doesn't change
     Replace    ## Insert + Skip
 
   Action[T] = object
@@ -69,6 +71,14 @@ func remove*[T](c: var ChangeSet[T], tree: PackedTree[T], n: NodeIndex, i: int) 
   c.actions.add Action[T](at: n, kind: ChangeLen, by: 0xFFFF_FFFF'u32) # -1
   c.actions.add Action[T](at: tree.child(n, i), kind: Skip)
 
+func insert*[T](c: var ChangeSet[T], tree: PackedTree[T], n: NodeIndex,
+                i: int, node: TreeNode[T]) =
+  ## Records the insertion of `node` at the `i`-th child node of `n`.
+  c.actions.add Action[T](at: n, kind: ChangeLen, by: 1)
+  c.actions.add Action[T](at: tree.child(n, i), kind: Insert,
+                          slice: c.nodes.len .. c.nodes.len)
+  c.nodes.add node
+
 template insert*[T](c: var ChangeSet[T], tree: PackedTree[T], n: NodeIndex,
                     i: int, k: T, body: untyped) =
   ## Records the insertion of a new subtree at the `i`-th child node of `n`.
@@ -89,9 +99,11 @@ template insert*[T](c: var ChangeSet[T], tree: PackedTree[T], n: NodeIndex,
 
 func apply*[T](tree: PackedTree[T], c: sink ChangeSet[T]): PackedTree[T] =
   ## Applies the changeset `c` to `tree`.
-  # sort the actions by source position:
+  # sort the actions by source position and action:
   sort(c.actions, proc(a, b: auto): int =
-    a.at.int - b.at.int
+    result = a.at.int - b.at.int
+    if result == 0:
+      result = ord(a.kind) - ord(b.kind)
   )
 
   var

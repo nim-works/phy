@@ -124,6 +124,30 @@ iterator flat*(t: PackedTree, at: NodeIndex): NodeIndex =
       last += t.nodes[i].val
     inc i
 
+iterator filter*[T](t: PackedTree[T], at: NodeIndex,
+                    filter: static set[T]): NodeIndex =
+  ## Returns all nodes matching `filter` in the tree at `at`. The returned
+  ## nodes/trees are *not* recursed into.
+  # a static set is used for the sake of run-time efficiency; the sets can
+  # become quite large
+  # XXX: this iterator should move to a separate module focused on a tree
+  #      pattern matching API
+  mixin isAtom
+  var
+    i = uint32(at)
+    last = i
+  while i <= last:
+    let n = t.nodes[i]
+    if n.kind in filter:
+      yield NodeIndex(i)
+      let ne = t.next(NodeIndex i).uint32
+      last += ne - i - 1
+      i = ne
+    else:
+      if not isAtom(n.kind):
+        last += n.val
+      inc i
+
 func pair*(tree: PackedTree, n: NodeIndex): (NodeIndex, NodeIndex) =
   ## Returns the index of the first and second subnode of `n`.
   result[0] = tree.child(n, 0)

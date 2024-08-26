@@ -1,0 +1,31 @@
+discard """
+  description: "Renaming back-propagates where possible"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) (Continuations
+    (Continuation (Params) (Locals)
+      (SelectBool (IntVal 0)
+        (Continue 1 (List))
+        (Continue 2 (List)))
+    )
+    (Continuation (Params)
+      (Locals (Type 0))
+      (Continue 3
+        (List (Move (Local 0))))
+    )
+    (Continuation (Params)
+      (Locals (Type 0))
+      (Continue 3
+        (List (Move (Local 0))))
+    )
+    (Continuation (Params (Type 0)) (Locals)
+      (Continue 4 (List))
+    )
+    (Continuation (Params)))
+  )
+)

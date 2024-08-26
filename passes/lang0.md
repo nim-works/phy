@@ -59,14 +59,14 @@ cont_name ::= <int>
 
 goto ::= (Continue <cont_name>)
 err_goto ::= (Unwind)
-          |  (Continue <cont_name>)
+          |  <goto>
 
 choice ::= (Choice <intVal> <goto>)
         |  (Choice <floatVal> <goto>)
         |  (Choice <intVal> <intVal> <goto>)
         |  (Choice <floatVal> <floatVal> <goto>)
 
-exit ::= (Continue <cont_name>)
+exit ::= <goto>
       |  (Continue <cont_name> <value>)
       |  (Loop <cont_name>)
       |  (Unreachable)
