@@ -1,0 +1,18 @@
+discard """
+  description: "
+    Locals used without a preceding definition (i.e., assignment) are spawned.
+
+    Note: it's not yet clear whether a dangling use with no def should be
+    allowed in the first place
+  "
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Locals (Type 0))
+    (Stmts
+      (Drop (Copy (Local 0)))
+      (Return))))

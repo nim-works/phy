@@ -1,0 +1,40 @@
+(TypeDefs
+  (Int 8)
+  (Record 8
+    (Field 0 (Type 0)))
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 2)
+    (Continuations
+      (Continuation (Params) (Locals)
+        (SelectBool (IntVal 0)
+          (Continue 2 (List))
+          (Continue 1 (List))))
+      (Continuation (Params) (Locals)
+        (Drop (IntVal 100))
+        (Continue 2 (List)))
+      (Continuation (Params)
+        (Locals (Type 1))
+        (Drop
+          (Addr
+            (Field (Local 0) 0)))
+        (SelectBool (IntVal 0)
+          (Continue 4
+            (List
+              (Rename (Local 0))))
+          (Continue 3
+            (List
+              (Rename (Local 0))))))
+      (Continuation
+        (Params (Type 1))
+        (Locals)
+        (Drop (IntVal 200))
+        (Continue 4
+          (List
+            (Rename (Local 0)))))
+      (Continuation
+        (Params (Type 1))
+        (Locals)
+        (Continue 5 (List)))
+      (Continuation (Params)))))

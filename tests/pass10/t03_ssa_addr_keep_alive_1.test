@@ -1,0 +1,18 @@
+discard """
+  description: "
+    Taking the address of a local anywhere in the procedure keeps it alive in
+    basic-blocks reachable from the address operation.
+  "
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Locals (Type 0))
+    (Stmts
+      (If (IntVal 0) (Drop (IntVal 100)))
+      (Drop (Addr (Local 0)))
+      (If (IntVal 0) (Drop (IntVal 200)))
+      (Return))))

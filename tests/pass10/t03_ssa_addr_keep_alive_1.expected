@@ -1,0 +1,37 @@
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Continuations
+      (Continuation (Params) (Locals)
+        (SelectBool (IntVal 0)
+          (Continue 2 (List))
+          (Continue 1 (List))))
+      (Continuation (Params) (Locals)
+        (Drop (IntVal 100))
+        (Continue 2 (List)))
+      (Continuation (Params)
+        (Locals (Type 0))
+        (Drop
+          (Addr (Local 0)))
+        (SelectBool (IntVal 0)
+          (Continue 4
+            (List
+              (Rename (Local 0))))
+          (Continue 3
+            (List
+              (Rename (Local 0))))))
+      (Continuation
+        (Params (Type 0))
+        (Locals)
+        (Drop (IntVal 200))
+        (Continue 4
+          (List
+            (Rename (Local 0)))))
+      (Continuation
+        (Params (Type 0))
+        (Locals)
+        (Continue 5 (List)))
+      (Continuation (Params)))))

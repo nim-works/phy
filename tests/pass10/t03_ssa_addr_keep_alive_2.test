@@ -1,0 +1,14 @@
+(TypeDefs
+  (Int 8)
+  (Record 8
+    (Field 0 (Type 0)))
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 2)
+    (Locals (Type 1))
+    (Stmts
+      (If (IntVal 0) (Drop (IntVal 100)))
+      (Drop (Addr (Field (Local 0) 0)))
+      (If (IntVal 0) (Drop (IntVal 200)))
+      (Return))))

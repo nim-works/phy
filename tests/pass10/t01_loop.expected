@@ -1,0 +1,11 @@
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Continuations
+      (Continuation (Params) (Locals)
+        (Continue 1 (List)))
+      (Continuation (Params) (Locals)
+        (Loop 1 (List))))))

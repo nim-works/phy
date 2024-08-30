@@ -1,0 +1,8 @@
+(TypeDefs
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0) (Locals)
+    (Stmts
+      (Drop (IntVal 100))
+      (Unreachable))))
