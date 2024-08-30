@@ -32,6 +32,8 @@ const
     ## use the most significant bit to flag whether the value is larger than an
     ## `max(int32)` and overflows into `PackedTree.numbers`.
 
+func `==`*(a, b: NodeIndex): bool {.borrow.}
+
 proc initTree*[T](nodes: sink seq[TreeNode[T]],
                   literals: sink Literals): PackedTree[T] =
   PackedTree[T](nodes: nodes, literals: literals)
