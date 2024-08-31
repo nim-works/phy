@@ -23,12 +23,11 @@ type
     termBranch
     termSelect
     termCheckedCall
+    termCheckedCallAsgn
 
   BBlock = object
     params: seq[LocalId]
       ## the locals passed to the block as parameters
-    hasImplicit: bool
-      ## whether the first parameter is passed implicitly
 
     needs: PackedSet[LocalId]
       ## all locals the block needs access to
@@ -140,11 +139,6 @@ proc computeBranch(c; tree; n) =
   if not c.computeBlocks(tree, n):
     c.leave(c.finishBlock(termGoto, tree.next(n)), 1)
 
-proc setImplicit(c; blk: int, id: uint32) =
-  assert not c.bblocks[blk].hasImplicit
-  c.bblocks[blk].hasImplicit = true
-  c.bblocks[blk].params.add id
-
 proc computeBlocks(c; tree; n): bool =
   ## Computes the basic-block representation for statement `n`. Returns whether
   ## the trailing basic-block has a terminator already.
@@ -179,16 +173,16 @@ proc computeBlocks(c; tree; n): bool =
         # use the SSA form for the local
         let prev = c.finishBlock(termPass, n)
         c.startBlock(tree.next(n), prev)
-        c.setImplicit(c.bblocks.len - 1, id)
+        c.bblocks[^1].params.add id
   of CheckedCall:
     c.scanUsages(tree, n)
     let prev = c.finishBlock(termCheckedCall, n)
     c.startBlock(tree.next(n), prev)
   of CheckedCallAsgn:
     c.scanUsages(tree, n)
-    let prev = c.finishBlock(termCheckedCall, n)
+    let prev = c.finishBlock(termCheckedCallAsgn, n)
     c.startBlock(tree.next(n), prev)
-    c.setImplicit(c.bblocks.len - 1, tree[n, 0].id)
+    c.bblocks[^1].params.add tree[n, 0].id
   of Block:
     # not a terminator by itself
     c.pushContext()
@@ -272,12 +266,17 @@ proc translateStmt(tree; n; locals: Table[LocalId, uint32], bu): NodeIndex =
   else:
     result = copyAndPatch(tree, n, locals, bu)
 
-proc genList(c; src: Table[uint32, uint32], dst: int, bu) =
+proc genList(c; src: Table[uint32, uint32], bb: BBlock, edge: int, bu) =
   ## Emits the move-list for a ``Continue`` targeting `dst`.
+  let dst = bb.outgoing[edge]
   bu.subTree List:
     if dst < c.bblocks.len: # ignore the exit continuation
-      let dst = addr c.bblocks[dst]
-      for i in ord(dst.hasImplicit)..<dst.params.len:
+      let
+        dst = addr c.bblocks[dst]
+        hasImplicit = bb.term == termPass or
+                      (bb.term == termCheckedCallAsgn and edge == 0)
+
+      for i in ord(hasImplicit)..<dst.params.len:
         # pinned locals must be renamed
         let op =
           if dst.params[i] in c.disabled: Rename
@@ -285,14 +284,14 @@ proc genList(c; src: Table[uint32, uint32], dst: int, bu) =
         bu.subTree op:
           bu.add localRef(src[dst.params[i]])
 
-proc genContinue(c; src: Table[uint32, uint32], dst: int, bu) =
+proc genContinue(c; src: Table[uint32, uint32], bb: BBlock, edge: int, bu) =
   bu.subTree Continue:
-    bu.add Node(kind: Immediate, val: dst.uint32)
-    c.genList(src, dst, bu)
+    bu.add Node(kind: Immediate, val: bb.outgoing[edge].uint32)
+    c.genList(src, bb, edge, bu)
 
 proc genBlock(c; tree; bb: BBlock, bu) =
   ## Emits the code for the given basic block.
-  var locals: Table[uint32, uint32]
+  var locals: Table[LocalId, uint32]
 
   bu.subTree Continuation:
     bu.subTree Params:
@@ -304,11 +303,9 @@ proc genBlock(c; tree; bb: BBlock, bu) =
       # every local not passed via a block parameter needs to be spawned
       var i = bb.params.len
       for it in items(bb.needs - bb.has):
-        # watch out! the implicit parameter is not part of the `has` set
-        if not bb.hasImplicit or bb.params[0] != it:
-          bu.add Node(kind: Type, val: getType(c, tree, it).uint32)
-          locals[it] = i.uint32 # add a mapping
-          inc i
+        bu.add Node(kind: Type, val: getType(c, tree, it).uint32)
+        locals[it] = i.uint32 # add a mapping
+        inc i
 
     block:
       # translate and emit all statements part of the block
@@ -322,16 +319,16 @@ proc genBlock(c; tree; bb: BBlock, bu) =
     of termNone:
       unreachable()
     of termGoto:
-      c.genContinue(locals, bb.outgoing[0], bu)
+      c.genContinue(locals, bb, 0, bu)
     of termLoop:
       bu.subTree Loop:
         bu.add Node(kind: Immediate, val: bb.outgoing[0].uint32)
-        c.genList(locals, bb.outgoing[0], bu)
+        c.genList(locals, bb, 0, bu)
     of termRaise:
       bu.subTree Raise:
         copyAndPatch(tree, tree.child(last, 0), locals, bu)
         if bb.outgoing.len > 0:
-          c.genContinue(locals, bb.outgoing[0], bu)
+          c.genContinue(locals, bb, 0, bu)
         else:
           bu.subTree Unwind: discard
     of termPass:
@@ -344,33 +341,33 @@ proc genBlock(c; tree; bb: BBlock, bu) =
           else:      unreachable()
 
         copyAndPatch(tree, e, locals, bu)
-        c.genList(locals, bb.outgoing[0], bu)
+        c.genList(locals, bb, 0, bu)
     of termUnreachable:
       bu.subTree Unreachable: discard
     of termBranch:
       bu.subTree SelectBool:
         copyAndPatch(tree, tree.child(last, 0), locals, bu)
-        c.genContinue(locals, bb.outgoing[1], bu) # if false
-        c.genContinue(locals, bb.outgoing[0], bu) # if true
+        c.genContinue(locals, bb, 1, bu) # if false
+        c.genContinue(locals, bb, 0, bu) # if true
     of termSelect:
       bu.subTree Select:
         bu.copyFrom(tree, tree.child(last, 0)) # type
         copyAndPatch(tree, tree.child(last, 1), locals, bu) # selector
         var branch = tree.child(last, 2)
-        for it in bb.outgoing.items:
+        for edge in 0..<bb.outgoing.len:
           bu.subTree Choice:
             bu.copyFrom(tree, tree.child(branch, 0))
-            c.genContinue(locals, it, bu)
+            c.genContinue(locals, bb, edge, bu)
           branch = tree.next(branch)
-    of termCheckedCall:
+    of termCheckedCall, termCheckedCallAsgn:
       bu.subTree CheckedCall:
         # ignore the destination local
-        for it in tree.items(last, ord(tree[last].kind == CheckedCallAsgn)):
+        for it in tree.items(last, ord(bb.term == termCheckedCallAsgn)):
           copyAndPatch(tree, it, locals, bu)
 
-        c.genContinue(locals, bb.outgoing[0], bu)
+        c.genContinue(locals, bb, 0, bu)
         if bb.outgoing.len > 1:
-          c.genContinue(locals, bb.outgoing[1], bu)
+          c.genContinue(locals, bb, 1, bu)
         else:
           bu.subTree Unwind: discard
 
@@ -403,11 +400,11 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
   # TODO: only iterate the content of loops two times (at max)
   for _ in 0..1: # two iterations for loops
     for it in c.bblocks.mitems:
-      for o in it.outgoing.items:
-        if it.hasImplicit:
-          it.has.excl it.params[0]
-          c.bblocks[o].has.incl it.params[0]
+      for param in it.params.items:
+        it.needs.excl param
+        it.has.incl param
 
+      for o in it.outgoing.items:
         c.bblocks[o].has.incl it.has
         if c.disabled.len > 0:
           # pinned locals must be part of the alive set of all continuations
@@ -428,11 +425,14 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
         var other = c.bblocks[o].needs * c.bblocks[o].has
         it.needs.incl other
 
+      # exclude the parameters again
+      for param in it.params.items:
+        it.needs.excl param
+
   # fill-in the parameters:
   for it in c.bblocks.mitems:
     for x in items(it.needs * it.has):
-      if not it.hasImplicit or it.params[0] != x:
-        it.params.add x
+      it.params.add x
 
   # patch all return edges. Do this after the has/needs propagation
   for it in c.returns.mitems:
