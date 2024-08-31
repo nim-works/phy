@@ -34,6 +34,9 @@ type
     has: PackedSet[LocalId]
       ## all locals available to the block
 
+    isLoopStart: bool
+      ## whether this block is the target of a loop back-edge
+
     stmts: Slice[NodeIndex]
 
     term: Terminator
@@ -92,10 +95,6 @@ func returnType(c: PassCtx, tree; n): NodeIndex =
 func getType(c: PassCtx, tree; local: LocalId): TypeId =
   ## Returns the type ID for `local`.
   tree[c.locals, ord(local)].typ
-
-iterator mritems[T](s: var seq[T]): var T =
-  for i in countdown(s.high, 0):
-    yield s[i]
 
 proc scanUsages(c; tree; n) =
   # register all locals *used* within the sub-tree with the current BB:
@@ -201,6 +200,7 @@ proc computeBlocks(c; tree; n): bool =
     if not c.computeBlocks(tree, tree.child(n, 0)):
       # add a back edge:
       c.bblocks[^1].outgoing.add blk
+      c.bblocks[blk].isLoopStart = true
       discard c.finishBlock(termLoop, tree.next(n))
 
     result = c.popContext(tree.next(n))
@@ -399,10 +399,20 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
            "control-flow falls out of the body"
   assert c.blocks.len == 0
 
-  # propagate which locals are available where:
-  # TODO: only iterate the content of loops two times (at max)
-  for _ in 0..1: # two iterations for loops
-    for it in c.bblocks.mitems:
+  block:
+    var
+      loopStart = -1
+      inLoop = false
+      i = 0
+
+    # forward propagation pass. Outermost loops are iterated twice
+    while i < c.bblocks.len:
+      let it = addr c.bblocks[i]
+
+      if not inLoop and i > loopStart and it.isLoopStart:
+        inLoop = true
+        loopStart = i
+
       for param in it.params.items:
         it.needs.excl param
         it.has.incl param
@@ -419,18 +429,38 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
           #      that locals that have their address taken need to stay alive
           #      for the rest of the procedure :(
 
-  # propagate the needs
-  # TODO: only iterate the content of loops two times (at max)
-  for _ in 0..1: # two iterations for loops
-    # iterate backward
-    for it in c.bblocks.mritems:
+      if it.term == termLoop and it.outgoing[0] == loopStart:
+        # got back to the start of the loop
+        swap(i, loopStart) # prevent inner loops from being repeated
+        inLoop = false
+      else:
+        inc i
+
+    loopStart = i
+    i = c.bblocks.high
+
+    # backward propagation pass. Outermost loops are processed twice
+    while i >= 0:
+      let it = addr c.bblocks[i]
+
+      if not inLoop and i < loopStart and it.term == termLoop:
+        inLoop = true
+        loopStart = i
+
+      # a block needs access to every locals its targets need access to:
       for o in it.outgoing.items:
-        var other = c.bblocks[o].needs * c.bblocks[o].has
-        it.needs.incl other
+        it.needs.incl c.bblocks[o].needs * c.bblocks[o].has
 
       # exclude the parameters again
       for param in it.params.items:
         it.needs.excl param
+
+      if i == loopStart and inLoop:
+        # jump back to the end of the loop
+        swap(i, loopStart)
+        inLoop = false
+      else:
+        dec i
 
   # fill-in the parameters:
   for it in c.bblocks.mitems:
