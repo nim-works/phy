@@ -1,3 +1,6 @@
+discard """
+  arguments: "--compileOnly"
+"""
 (TypeDefs
   (ProcTy (Void)))
 (GlobalDefs)

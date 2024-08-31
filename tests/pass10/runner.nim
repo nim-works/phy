@@ -57,6 +57,11 @@ tree = tree.apply(pass1.lower(tree, 8))
 var env = initVm(1024, 1024 * 1024)
 translate(tree, env)
 
+if args.len == 2 and args[0] == "--compileOnly":
+  # don't check or run anything
+  stdout.write("(Done)")
+  quit(0)
+
 # make sure the environment is correct:
 let errors = validate(env)
 if errors.len > 0:
