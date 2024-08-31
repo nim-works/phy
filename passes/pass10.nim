@@ -429,7 +429,7 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
           #      that locals that have their address taken need to stay alive
           #      for the rest of the procedure :(
 
-      if it.term == termLoop and it.outgoing[0] == loopStart:
+      if inLoop and it.term == termLoop and it.outgoing[0] == loopStart:
         # got back to the start of the loop
         swap(i, loopStart) # prevent inner loops from being repeated
         inLoop = false
