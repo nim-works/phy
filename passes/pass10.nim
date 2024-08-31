@@ -172,6 +172,8 @@ proc computeBlocks(c; tree; n): bool =
         c.bblocks[^1].needs.incl id
       else:
         # use the SSA form for the local
+        # TODO: an ``x = copy y`` should be turned into a goto + remapping. It'd
+        #       result in more efficient code, possibly eliminating the copy
         let prev = c.finishBlock(termPass, n)
         c.startBlock(tree.next(n), prev)
         c.bblocks[^1].params.add id
