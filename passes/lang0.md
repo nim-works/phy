@@ -100,5 +100,5 @@ top-level node, in dedicated sections, to allow for easy and fast access to
 them.
 
 ```grammar
-module ::= (Module (TypeDefs <type>*) (GlobalDefs <type_id>*) (ProcDefs <procdef>*))
+top ::= (Module (TypeDefs <type>*) (GlobalDefs <type_id>*) (ProcDefs <procdef>*))
 ```
