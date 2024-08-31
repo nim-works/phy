@@ -17,10 +17,17 @@ import
     streams
   ],
   experimental/[
-    colortext
+    colortext,
+    sexp,
+    sexp_parse
   ]
 
 type
+  Content = object
+    case isSexp: bool
+    of true:  sexp: SexpNode
+    of false: text: string
+
   OutputSpec = object
     fromFile: bool
       ## whether the expected output is provided by a file
@@ -53,6 +60,16 @@ type
     of rkMismatch:
       got, expected: string
 
+proc `$`(x: sink Content): string =
+  case x.isSexp
+  of true:  $x.sexp
+  of false: x.text
+
+proc `==`(a, b: Content): bool =
+  case a.isSexp
+  of true:  a.sexp == b.sexp
+  of false: a.text == b.text
+
 proc exec(cmd: string, args: openArray[string]): tuple[output: string,
                                                        code: int] =
   ## Similar to ``execProcess``, but also returns the exit code.
@@ -74,14 +91,82 @@ proc exec(cmd: string, args: openArray[string]): tuple[output: string,
   result.code = p.peekExitCode()
   p.close()
 
-proc content(s: OutputSpec): string =
-  ## Returns the string to compare the actual runner output against.
+proc parseSexp(p: var SexpParser): SexpNode =
+  ## Parses an S-expression node from the input stream.
+  template next() =
+    discard p.getTok() # fetch the next token
+
+  p.space()
+  case p.currToken
+  of tkString:
+    result = sexp(captureCurrString(p))
+    next()
+  of tkInt:
+    result = sexp(parseBiggestInt(p.currString))
+    next()
+  of tkFloat:
+    result = sexp(parseFloat(p.currString))
+    next()
+  of tkSymbol:
+    result = newSSymbol(p.currString)
+    next()
+  of tkParensLe:
+    result = newSList()
+    next()
+    p.space()
+
+    while p.currToken != tkParensRi:
+      result.add parseSexp(p)
+      p.space()
+
+    next() # skip the closing parenthesis
+  of tkError:
+    raiseParseErr(p, $p.error)
+  of tkSpace, tkDot, tkNil, tkKeyword, tkParensRi, tkEof:
+    raiseParseErr(p, "unexpected token: " & $p.currToken)
+
+proc parseSexprs(s: Stream): SexpNode =
+  ## Parses all S-expressions from `s`. If there are more than one, they're
+  ## wrapped in a list.
+  var p: SexpParser
+  p.open(s)
+  discard p.getTok() # fetch the first token
+
+  while p.currToken != tkEof:
+    let r = parseSexp(p)
+    if result.isNil:
+      result = newSList(r)
+    else:
+      result.add r
+    p.space()
+
+  # unwrap single nodes:
+  if result.len == 1:
+    result = result[0]
+
+  # don't close the parser; doing so would also close `s`
+
+proc parseSexprs(s: sink string): SexpNode =
+  var s = newStringStream(s)
+  result = parseSexprs(s)
+  s.close()
+
+proc content(s: OutputSpec): Content =
+  ## Returns the content to compare the actual runner output against.
   if s.fromFile:
-    let f = open(s.output, fmRead)
+    let f = openFileStream(s.output, fmRead)
     defer: f.close()
-    readAll(f)
+
+    let first = f.readLine()
+    if first.startsWith(";$sexp"):
+      # interpret the rest as an S-expression
+      Content(isSexp: true, sexp: parseSexprs(f))
+    else:
+      # interpret as just text
+      f.setPosition(0)
+      Content(isSexp: false, text: readAll(f))
   else:
-    s.output
+    Content(isSexp: false, text: s.output)
 
 proc compare(res: tuple[output: string, code: int], spec: TestSpec): TestResult =
   ## Compares the runner output `res` against the `spec`.
@@ -89,9 +174,15 @@ proc compare(res: tuple[output: string, code: int], spec: TestSpec): TestResult 
     var i = 0
     for got in split(res.output, "!BREAK!"):
       if i < spec.expected.len:
-        let expect = content(spec.expected[i])
+        let
+          expect = content(spec.expected[i])
+          # interpret the actual output in the same way as the expected output:
+          got =
+            if expect.isSexp: Content(isSexp: true, sexp: parseSexprs(got))
+            else:             Content(isSexp: false, text: got)
+
         if got != expect:
-          return TestResult(kind: rkMismatch, got: got, expected: expect)
+          return TestResult(kind: rkMismatch, got: $got, expected: $expect)
 
       inc i
 
@@ -102,7 +193,7 @@ proc compare(res: tuple[output: string, code: int], spec: TestSpec): TestResult 
     else:
       # not enough output fragments
       result = TestResult(kind: rkMismatch, got: "",
-                          expected: content(spec.expected[i]))
+                          expected: $content(spec.expected[i]))
   else:
     result = TestResult(kind: rkError, output: res.output)
 
