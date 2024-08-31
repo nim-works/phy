@@ -9,7 +9,7 @@ type
   Node = TreeNode[NodeKind]
 
   TypeId = distinct uint32
-  LocalId = uint32 # TODO: make distinct
+  LocalId = distinct uint32
   BlockId = uint32 ## ID/index of a basic block
 
   Terminator = enum
@@ -63,11 +63,12 @@ using
   changes: var ChangeSet[NodeKind]
   bu: var Builder[NodeKind]
 
+proc `==`(a, b: LocalId): bool {.borrow.}
 proc `<`(a, b: NodeIndex): bool {.borrow.}
 
 func id(n: Node): LocalId {.inline.} =
   assert n.kind == Local
-  n.val
+  LocalId(n.val)
 
 func imm(n: Node): uint32 {.inline.} =
   assert n.kind == Immediate
@@ -88,9 +89,9 @@ func returnType(c: PassCtx, tree; n): NodeIndex =
   assert tree[n].kind == ProcDef
   tree.child(c.lookup(tree, tree[n, 0].typ), 0)
 
-func getType(c: PassCtx, tree; local: uint32): TypeId =
+func getType(c: PassCtx, tree; local: LocalId): TypeId =
   ## Returns the type ID for `local`.
-  tree[c.locals, local].typ
+  tree[c.locals, ord(local)].typ
 
 iterator mritems[T](s: var seq[T]): var T =
   for i in countdown(s.high, 0):
@@ -266,7 +267,7 @@ proc translateStmt(tree; n; locals: Table[LocalId, uint32], bu): NodeIndex =
   else:
     result = copyAndPatch(tree, n, locals, bu)
 
-proc genList(c; src: Table[uint32, uint32], bb: BBlock, edge: int, bu) =
+proc genList(c; src: Table[LocalId, uint32], bb: BBlock, edge: int, bu) =
   ## Emits the move-list for a ``Continue`` targeting `dst`.
   let dst = bb.outgoing[edge]
   bu.subTree List:
@@ -284,7 +285,7 @@ proc genList(c; src: Table[uint32, uint32], bb: BBlock, edge: int, bu) =
         bu.subTree op:
           bu.add localRef(src[dst.params[i]])
 
-proc genContinue(c; src: Table[uint32, uint32], bb: BBlock, edge: int, bu) =
+proc genContinue(c; src: Table[LocalId, uint32], bb: BBlock, edge: int, bu) =
   bu.subTree Continue:
     bu.add Node(kind: Immediate, val: bb.outgoing[edge].uint32)
     c.genList(src, bb, edge, bu)
