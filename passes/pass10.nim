@@ -404,6 +404,10 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
         c.disabled.incl tree[it].id
 
   c.startBlock(tree.child(n, 2))
+  # register all procedure parameters with the first block:
+  for i in 1..<tree.len(c.lookup(tree, tree[n, 0].typ)):
+    c.bblocks[0].params.add LocalId(i - 1)
+
   # the body of a procedure must always end with a terminator
   doAssert c.computeBlocks(tree, tree.child(n, 2)),
            "control-flow falls out of the body"
