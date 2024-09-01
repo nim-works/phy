@@ -1,0 +1,4 @@
+discard """
+  output: "false: bool"
+"""
+(Call (Ident "<") (IntVal 10) (IntVal 10))
