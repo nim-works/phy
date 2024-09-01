@@ -39,6 +39,15 @@ template addType(c; kind: NodeKind, body: untyped): uint32 =
     body
   (let r = c.numTypes; inc c.numTypes; r.uint32)
 
+proc typeToIL(c; typ: TypeKind): uint32 =
+  case typ
+  of tkBool:
+    c.addType Int: c.types.add(Node(kind: Immediate, val: 1))
+  of tkInt, tkError:
+    c.addType Int: c.types.add(Node(kind: Immediate, val: 8))
+  of tkFloat:
+    c.addType Float: c.types.add(Node(kind: Immediate, val: 8))
+
 proc exprToIL(c; t: InTree, n: NodeIndex, bu): TypeKind
 
 proc exprToIL(c; t: InTree, n: NodeIndex): (NodeSeq, TypeKind) =
@@ -64,13 +73,7 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
     else:   unreachable()
 
   if typA == typB and typA in {tkInt, tkFloat}:
-    let typ =
-      if typA == tkInt:
-        c.addType Int:
-          c.types.add Node(kind: Immediate, val: 8)
-      else:
-        c.addType Float:
-          c.types.add Node(kind: Immediate, val: 8)
+    let typ = c.typeToIL(typA)
 
     bu.subTree op:
       bu.add Node(kind: Type, val: typ)
@@ -78,6 +81,28 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
       bu.add eB
 
     result = typA
+  else:
+    bu.add Node(kind: IntVal)
+    result = tkError
+
+proc relToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
+  ## Analyzes and emits the IL for a relational operation.
+  if t.len(n) != 3:
+    bu.add Node(kind: IntVal)
+    return tkError
+
+  let
+    (_, a, b)  = t.triplet(n)
+    (eA, typA) = exprToIl(c, t, a)
+    (eB, typB) = exprToIl(c, t, b)
+
+  if typA == typB and typA == tkBool:
+    bu.subTree Eq:
+      bu.add Node(kind: Type, val: c.typeToIL(typA))
+      bu.add eA
+      bu.add eB
+
+    result = tkBool
   else:
     bu.add Node(kind: IntVal)
     result = tkError
@@ -102,6 +127,8 @@ proc callToIL(c; t; n: NodeIndex, bu): TypeKind =
   case name
   of "+", "-":
     result = binaryArithToIL(c, t, n, name, bu)
+  of "==":
+    result = relToIL(c, t, n, name, bu)
   of "not":
     result = notToIL(c, t, n, bu)
   else:
@@ -139,14 +166,7 @@ proc exprToIL*(t: InTree): (TypeKind, PackedTree[NodeKind]) =
 
   let
     (e, typ) = exprToIL(c, t, NodeIndex(0))
-    typId =
-      case typ
-      of tkBool:
-        c.addType Int: c.types.add(Node(kind: Immediate, val: 1))
-      of tkInt, tkError:
-        c.addType Int: c.types.add(Node(kind: Immediate, val: 8))
-      of tkFloat:
-        c.addType Float: c.types.add(Node(kind: Immediate, val: 8))
+    typId = c.typeToIL(typ)
 
     ptypId = c.addType ProcTy:
       c.types.add Node(kind: Type, val: typId)
