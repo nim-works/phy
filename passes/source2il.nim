@@ -100,6 +100,7 @@ proc relToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
     case name
     of "==": (Eq, {tkBool, tkInt, tkFloat})
     of "<":  (Lt, {tkInt, tkFloat})
+    of "<=": (Le, {tkInt, tkFloat})
     else:   unreachable()
 
   if typA == typB and typA in valid:
@@ -133,7 +134,7 @@ proc callToIL(c; t; n: NodeIndex, bu): TypeKind =
   case name
   of "+", "-":
     result = binaryArithToIL(c, t, n, name, bu)
-  of "==", "<":
+  of "==", "<", "<=":
     result = relToIL(c, t, n, name, bu)
   of "not":
     result = notToIL(c, t, n, bu)
