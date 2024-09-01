@@ -69,6 +69,11 @@ if res.kind != yrkDone:
 
 # echo the result:
 case typ
+of tkBool:
+  case res.result.intVal
+  of 0: stdout.write("false: bool")
+  of 1: stdout.write("true: bool")
+  else: stdout.write("unknown(" & $res.result.intVal & "): bool")
 of tkInt:
   stdout.write($res.result.intVal & ": int")
 of tkFloat:
