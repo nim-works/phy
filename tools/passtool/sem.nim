@@ -209,9 +209,13 @@ proc sem*(name, dir: string, langs: var Languages, errors: var Errors) =
   let
     file = changeFileExt(dir / name, ".md")
     parsed = parseAll(file)
+    prev = errors.currFile
 
   # register the file:
   errors.currFile = errors.files.len.uint16
   errors.files.add file
 
   sem(parsed, name, dir, langs, errors)
+
+  # restore previous context:
+  errors.currFile = prev
