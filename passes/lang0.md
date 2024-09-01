@@ -101,4 +101,5 @@ them.
 
 ```grammar
 module ::= (Module (TypeDefs <type>*) (GlobalDefs <type_id>*) (ProcDefs <procdef>*))
+top ::= <module>
 ```

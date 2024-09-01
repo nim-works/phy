@@ -10,4 +10,6 @@ ident ::= (Ident <string>)
 expr ::= (IntVal <int>)
       |  (FloatVal <float>)
       |  (Call <ident> <expr>*)
+
+top ::= <expr>
 ```
