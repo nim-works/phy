@@ -14,7 +14,7 @@ type
     Call
 
 const
-  ExprNodes* = {IntVal, FloatVal, Call}
+  ExprNodes* = {IntVal, FloatVal, Ident, Call}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 
 template isAtom*(x: NodeKind): bool =

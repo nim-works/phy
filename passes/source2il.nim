@@ -20,6 +20,7 @@ type
 
   TypeKind* = enum
     tkError
+    tkBool
     tkInt
     tkFloat
 
@@ -46,7 +47,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex): (NodeSeq, TypeKind) =
   result[0] = finish(bu)
 
 proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
-  ## Analyzes and emits the IL for a binary arithmetic call.
+  ## Analyzes and emits the IL for a binary arithmetic operation.
   if t.len(n) != 3:
     bu.add Node(kind: IntVal, val: 0) # add at least something
     return tkError
@@ -62,7 +63,7 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
     of "-": Sub
     else:   unreachable()
 
-  if typA == typB and typA != tkError:
+  if typA == typB and typA in {tkInt, tkFloat}:
     let typ =
       if typA == tkInt:
         c.addType Int:
@@ -98,6 +99,17 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu): TypeKind =
   of SourceKind.FloatVal:
     bu.add Node(kind: FloatVal, val: t[n].val)
     result = tkFloat
+  of SourceKind.Ident:
+    case t.getString(n)
+    of "false":
+      bu.add Node(kind: IntVal, val: 0)
+      result = tkBool
+    of "true":
+      bu.add Node(kind: IntVal, val: 1)
+      result = tkBool
+    else:
+      bu.add Node(kind: IntVal)
+      result = tkError
   of SourceKind.Call:
     result = callToIL(c, t, n, bu)
   of AllNodes - ExprNodes:
@@ -112,6 +124,8 @@ proc exprToIL*(t: InTree): (TypeKind, PackedTree[NodeKind]) =
     (e, typ) = exprToIL(c, t, NodeIndex(0))
     typId =
       case typ
+      of tkBool:
+        c.addType Int: c.types.add(Node(kind: Immediate, val: 1))
       of tkInt, tkError:
         c.addType Int: c.types.add(Node(kind: Immediate, val: 8))
       of tkFloat:
