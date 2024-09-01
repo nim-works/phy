@@ -80,6 +80,8 @@ of yrkDone:
   stdout.write("(Done)")
 of yrkUnhandledException:
   stdout.write("(UnhandledException " & $res.exc.intVal & ")")
+of yrkError:
+  stdout.write("(Error " & $res.error & ")")
 else:
   echo "unexpected result, but got: ", res
   quit(1)
