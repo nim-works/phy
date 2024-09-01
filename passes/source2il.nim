@@ -82,11 +82,28 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
     bu.add Node(kind: IntVal)
     result = tkError
 
+proc notToIL(c; t; n: NodeIndex, bu): TypeKind =
+  if t.len(n) != 2:
+    bu.add Node(kind: IntVal)
+    return tkError
+
+  let (arg, typ) = exprToIL(c, t, t.child(n, 1))
+
+  if typ == tkBool:
+    bu.subTree Not:
+      bu.add arg
+    result = tkBool
+  else:
+    bu.add Node(kind: IntVal)
+    result = tkError
+
 proc callToIL(c; t; n: NodeIndex, bu): TypeKind =
   let name = t.getString(t.child(n, 0))
   case name
   of "+", "-":
     result = binaryArithToIL(c, t, n, name, bu)
+  of "not":
+    result = notToIL(c, t, n, bu)
   else:
     bu.add Node(kind: IntVal)
     result = tkError
