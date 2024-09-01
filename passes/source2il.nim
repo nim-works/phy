@@ -93,10 +93,10 @@ proc relToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
 
   let
     (_, a, b)  = t.triplet(n)
-    (eA, typA) = exprToIl(c, t, a)
-    (eB, typB) = exprToIl(c, t, b)
+    (eA, typA) = exprToIL(c, t, a)
+    (eB, typB) = exprToIL(c, t, b)
 
-  if typA == typB and typA == tkBool:
+  if typA == typB and typA in {tkBool, tkInt, tkFloat}:
     bu.subTree Eq:
       bu.add Node(kind: Type, val: c.typeToIL(typA))
       bu.add eA

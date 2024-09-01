@@ -1,0 +1,4 @@
+discard """
+  output: "true: bool"
+"""
+(Call (Ident "==") (FloatVal 10.0) (FloatVal 10.0))
