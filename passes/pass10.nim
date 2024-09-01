@@ -56,9 +56,8 @@ type
       ## ``Break``, the edges that require patching
     returns: seq[BlockId]
       ## all basic-blocks that end in a Return
-    disabled: PackedSet[LocalId]
-      ## the locals for which SSA is disabled and who need to be pinned in
-      ## memory
+    pinned: PackedSet[LocalId]
+      ## locals that need to be pinned in memory (i.e., don't change location)
 
 const
   IndirectAccess = {Copy, Clear, Store, Load, Call, CheckedCall,
@@ -177,7 +176,8 @@ proc computeBlocks(c; tree; n): bool =
     c.scanUsages(tree, src)
     if tree[dst].kind == Local:
       let id = tree[dst].id
-      if id in c.disabled:
+      if id in c.pinned:
+        # SSA is disabled
         c.bblocks[^1].needs.incl id
       else:
         # use the SSA form for the local
@@ -292,7 +292,7 @@ proc genList(c; src: Table[LocalId, uint32], bb: BBlock, edge: int, bu) =
       for i in ord(hasImplicit)..<dst.params.len:
         # pinned locals must be renamed
         let op =
-          if dst.params[i] in c.disabled: Rename
+          if dst.params[i] in c.pinned: Rename
           else: Move
         bu.subTree op:
           bu.add localRef(src[dst.params[i]])
@@ -387,7 +387,7 @@ proc genBlock(c; tree; bb: BBlock, bu) =
 proc lowerProc(c: var PassCtx, tree; n; changes) =
   c.bblocks.setLen(0)
   c.returns.setLen(0)
-  c.disabled.clear()
+  c.pinned.clear()
 
   c.locals = tree.child(n, 1)
 
@@ -401,7 +401,7 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
         it = tree.child(it, 0)
 
       if tree[it].kind == Local:
-        c.disabled.incl tree[it].id
+        c.pinned.incl tree[it].id
 
   c.startBlock(tree.child(n, 2))
   # register all procedure parameters with the first block:
@@ -433,10 +433,10 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
 
       for o in it.outgoing.items:
         c.bblocks[o].has.incl it.has
-        if c.disabled.len > 0:
+        if c.pinned.len > 0:
           # locals are spawned on first use (if not assigned to before); make
           # that information available to follow-up blocks, for pinned locals
-          c.bblocks[o].has.incl it.needs * c.disabled
+          c.bblocks[o].has.incl it.needs * c.pinned
 
       if inLoop and it.term == termLoop and it.outgoing[0] == loopStart:
         # got back to the start of the loop
@@ -448,10 +448,10 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
     # handle pinned locals: mark them as needed in every block where:
     # * they're available
     # * a read or write through a pointer happens
-    if c.disabled.len > 0:
+    if c.pinned.len > 0:
       for it in c.bblocks.mitems:
         if it.hasIndirectAccess:
-          it.needs.incl c.disabled * it.has
+          it.needs.incl c.pinned * it.has
 
     loopStart = i
     i = c.bblocks.high
