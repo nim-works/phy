@@ -18,6 +18,7 @@ proc main(args: openArray[string]) =
 
   # parse and analyse the provided file:
   sem(args[1], args[0], langs, errors)
+  trim(langs, errors)
 
   if errors.hasErrors:
     for source, it in errors.items:
