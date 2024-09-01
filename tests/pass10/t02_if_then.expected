@@ -1,3 +1,4 @@
+;$sexp
 (TypeDefs
   (ProcTy (Void)))
 (GlobalDefs)
