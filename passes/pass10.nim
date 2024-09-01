@@ -36,6 +36,8 @@ type
 
     isLoopStart: bool
       ## whether this block is the target of a loop back-edge
+    hasIndirectAccess: bool
+      ## whether there's a read or write through a pointer
 
     stmts: Slice[NodeIndex]
 
@@ -57,6 +59,12 @@ type
     disabled: PackedSet[LocalId]
       ## the locals for which SSA is disabled and who need to be pinned in
       ## memory
+
+const
+  IndirectAccess = {Copy, Clear, Store, Load, Call, CheckedCall,
+                    CheckedCallAsgn}
+    ## every operation that reads or writes through a pointer. Calls have to
+    ## conservatively be treated as performing an indirect access.
 
 # shorten some common procedure signatures:
 using
@@ -101,6 +109,8 @@ proc scanUsages(c; tree; n) =
   for it in tree.flat(n):
     if tree[it].kind in {Copy, At, Field, Addr} and tree[it, 0].kind == Local:
       c.bblocks[^1].needs.incl tree[it, 0].id
+    elif tree[it].kind in IndirectAccess:
+      c.bblocks[^1].hasIndirectAccess = true
 
 proc startBlock(c; n; predecessor: BlockId) =
   c.bblocks[predecessor].outgoing.add c.bblocks.len.int32
@@ -420,14 +430,9 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
       for o in it.outgoing.items:
         c.bblocks[o].has.incl it.has
         if c.disabled.len > 0:
-          # pinned locals must be part of the alive set of all continuations
-          # reachable from the current one
-          let extra = it.needs * c.disabled
-          c.bblocks[o].has.incl extra
-          c.bblocks[o].needs.incl extra
-          # XXX: there are currently no storage liveness delimiters, meaning
-          #      that locals that have their address taken need to stay alive
-          #      for the rest of the procedure :(
+          # locals are spawned on first use (if not assigned to before); make
+          # that information available to follow-up blocks, for pinned locals
+          c.bblocks[o].has.incl it.needs * c.disabled
 
       if inLoop and it.term == termLoop and it.outgoing[0] == loopStart:
         # got back to the start of the loop
@@ -435,6 +440,14 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
         inLoop = false
       else:
         inc i
+
+    # handle pinned locals: mark them as needed in every block where:
+    # * they're available
+    # * a read or write through a pointer happens
+    if c.disabled.len > 0:
+      for it in c.bblocks.mitems:
+        if it.hasIndirectAccess:
+          it.needs.incl c.disabled * it.has
 
     loopStart = i
     i = c.bblocks.high

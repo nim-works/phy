@@ -1,7 +1,7 @@
 discard """
   description: "
-    Taking the address of a local anywhere in the procedure keeps it alive in
-    basic-blocks reachable from the address operation.
+    A local that has its address taken is passed to everywhere a pointer might
+    be read/written through. No alias analysis is performed.
   "
 """
 (TypeDefs
@@ -12,7 +12,8 @@ discard """
   (ProcDef (Type 1)
     (Locals (Type 0))
     (Stmts
-      (If (IntVal 0) (Drop (IntVal 100)))
+      (Asgn (Local 0) (IntVal 0))
       (Drop (Addr (Local 0)))
       (If (IntVal 0) (Drop (IntVal 200)))
+      (Store (Type 0) (IntVal 0) (IntVal 0))
       (Return))))
