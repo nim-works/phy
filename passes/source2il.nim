@@ -55,11 +55,16 @@ proc exprToIL(c; t: InTree, n: NodeIndex): (NodeSeq, TypeKind) =
   result[1] = exprToIL(c, t, n, bu)
   result[0] = finish(bu)
 
+template lenCheck(t; n: NodeIndex, bu; expected: int) =
+  ## Exits the current analysis procedure with an error, if `n` doesn't have
+  ## `expected` children.
+  if t.len(n) != expected:
+    bu.add Node(kind: IntVal)
+    return tkError
+
 proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
   ## Analyzes and emits the IL for a binary arithmetic operation.
-  if t.len(n) != 3:
-    bu.add Node(kind: IntVal, val: 0) # add at least something
-    return tkError
+  lenCheck(t, n, bu, 3)
 
   let
     (_, a, b)  = t.triplet(n)
@@ -87,9 +92,7 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
 
 proc relToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
   ## Analyzes and emits the IL for a relational operation.
-  if t.len(n) != 3:
-    bu.add Node(kind: IntVal)
-    return tkError
+  lenCheck(t, n, bu, 3)
 
   let
     (_, a, b)  = t.triplet(n)
@@ -115,9 +118,7 @@ proc relToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
     result = tkError
 
 proc notToIL(c; t; n: NodeIndex, bu): TypeKind =
-  if t.len(n) != 2:
-    bu.add Node(kind: IntVal)
-    return tkError
+  lenCheck(t, n, bu, 2)
 
   let (arg, typ) = exprToIL(c, t, t.child(n, 1))
 
