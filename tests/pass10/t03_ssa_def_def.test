@@ -1,6 +1,3 @@
-discard """
-  description: "The "
-"""
 (TypeDefs
   (Int 8)
   (ProcTy (Void)))

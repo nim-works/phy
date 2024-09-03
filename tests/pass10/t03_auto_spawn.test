@@ -1,6 +1,7 @@
 discard """
   description: "
-    Locals used without a preceding definition (i.e., assignment) are spawned.
+    Locals used without a preceding definition (i.e., assignment) are spawned
+    in the continuations they're used in.
 
     Note: it's not yet clear whether a dangling use with no def should be
     allowed in the first place

@@ -1,6 +1,6 @@
 discard """
   description: "
-    Taking the address of a record local's field also 'pins' the local
+    Taking the address of a record local's field also 'pins' the local.
   "
 """
 (TypeDefs

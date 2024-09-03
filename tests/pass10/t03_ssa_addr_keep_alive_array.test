@@ -1,6 +1,6 @@
 discard """
   description: "
-    Taking the address of an array local's element also 'pins' the local
+    Taking the address of an array local's element also 'pins' the local.
   "
 """
 (TypeDefs

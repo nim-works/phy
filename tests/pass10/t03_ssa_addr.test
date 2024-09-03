@@ -1,7 +1,7 @@
 discard """
   description: "
     Taking the address of a local anywhere in the procedure disables the SSA
-    form for it
+    form for it.
   "
 """
 (TypeDefs
