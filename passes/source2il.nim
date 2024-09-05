@@ -190,17 +190,7 @@ proc exprToIL*(t: InTree): (TypeKind, PackedTree[NodeKind]) =
       bu.subTree ProcDef:
         bu.add Node(kind: Type, val: ptypId)
         bu.subTree Locals: discard
-        bu.subTree Continuations:
-          bu.subTree Continuation:
-            bu.subTree Params: discard
-            bu.subTree Locals: discard
-            bu.subTree Continue:
-              bu.add Node(kind: Immediate, val: 1)
-              # the expression is placed as an argument to the Continue:
-              bu.add e
-
-          bu.subTree Continuation:
-            bu.subTree Params:
-              bu.add Node(kind: Type, val: typId)
+        bu.subTree Return:
+          bu.add e
 
   result = (typ, initTree(bu.finish(), t.literals))
