@@ -13,6 +13,9 @@ import
     changesets,
     pass0,
     pass1,
+    pass3,
+    pass4,
+    pass10,
     source2il,
     spec_source,
     trees
@@ -43,6 +46,9 @@ if typ == tkError:
   quit(1)
 
 # lower to the L0 language:
+tree = tree.apply(pass10.lower(tree))
+tree = tree.apply(pass4.lower(tree))
+tree = tree.apply(pass3.lower(tree, 8))
 tree = tree.apply(pass1.lower(tree, 8))
 
 # generate the bytecode:
