@@ -37,6 +37,8 @@ type
     Module, TypeDefs, ProcDefs, ProcDef, Locals, Continuations, Continuation,
     Except, Params, GlobalDefs, GlobalDef
 
+    Break, Return, Case, If, Block, Stmts
+
 template isAtom*(x: NodeKind): bool =
   ord(x) <= ord(Global)
 
