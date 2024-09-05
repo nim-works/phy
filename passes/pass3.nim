@@ -249,7 +249,7 @@ proc lowerType(tree; n; changes) =
     # turn into a blob type:
     changes.replace(n, Blob):
       bu.add tree[n, 0] # copy the size
-  of ProcTy, Int, UInt:
+  of ProcTy, Int, UInt, Float:
     discard "nothing to do"
   else:
     unreachable()
