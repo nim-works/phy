@@ -1,7 +1,7 @@
 discard """
   description: "
     Ensure joining control-flow paths, with the local being assigned to on
-    only one both, works.
+    only one, works.
   "
 """
 (TypeDefs
