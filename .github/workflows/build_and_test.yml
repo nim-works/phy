@@ -92,4 +92,4 @@ jobs:
         run: bin/passtool passes lang10
 
       - name: "Check the source language grammar"
-        run: bin/passtool spec grammar
+        run: bin/passtool spec spec
