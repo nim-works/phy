@@ -20,9 +20,10 @@ import
     spec_source,
     trees
   ],
+  common/[
+    vmexec
+  ],
   vm/[
-    utils,
-    vm,
     vmenv,
     vmvalidation
   ]
@@ -63,26 +64,5 @@ if errors.len > 0:
   echo "validation failure"
   quit(1)
 
-# run the code:
-var
-  thread = vm.initThread(env, env.procs.high.ProcIndex, 1024, @[])
-  res = run(env, thread, nil)
-env.dispose(move thread)
-
-if res.kind != yrkDone:
-  echo "failed with: ", res
-  quit(1)
-
-# echo the result:
-case typ
-of tkBool:
-  case res.result.intVal
-  of 0: stdout.write("false: bool")
-  of 1: stdout.write("true: bool")
-  else: stdout.write("unknown(" & $res.result.intVal & "): bool")
-of tkInt:
-  stdout.write($res.result.intVal & ": int")
-of tkFloat:
-  stdout.write($res.result.floatVal & ": float")
-of tkError:
-  unreachable()
+# run the code and echo the result:
+stdout.write run(env, env.procs.high.ProcIndex, typ)
