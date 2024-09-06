@@ -210,7 +210,7 @@ proc lowerStmt(c; tree; n; changes) =
       c.lowerExpr(tree, a, changes)
       c.lowerExpr(tree, b, changes)
   of Store:
-    let (t, a, b) = triplet(tree, n)
+    let (_, a, b) = triplet(tree, n)
     c.lowerExpr(tree, a, changes)
     c.lowerExpr(tree, b, changes)
   of Copy:
