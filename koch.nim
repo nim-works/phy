@@ -17,7 +17,8 @@ Commands:
 """
   Programs: seq[(string, string)] = @[
     ("tester", "tools/tester.nim"),
-    ("passtool", "tools/passtool/passtool.nim")
+    ("passtool", "tools/passtool/passtool.nim"),
+    ("repl", "tools/repl.nim")
   ]
 
 var
