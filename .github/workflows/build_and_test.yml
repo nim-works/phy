@@ -88,7 +88,8 @@ jobs:
         run: bin/koch single passtool -d:nimStrictMode -d:release
 
       # run the passtool for the highest-level language:
-      - name: "Check the grammar"
-        run: |
-          bin/passtool passes lang10
-          bin/passtool passes lang_source
+      - name: "Check the IL grammar"
+        run: bin/passtool passes lang10
+
+      - name: "Check the source language grammar"
+        run: bin/passtool spec grammar
