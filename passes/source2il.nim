@@ -24,7 +24,7 @@ type
     tkInt
     tkFloat
 
-  Context* = object
+  ModuleCtx* = object
     ## The translation/analysis context for a single module.
     literals: Literals
     types: Builder[NodeKind]
@@ -33,7 +33,7 @@ type
     procs: Builder[NodeKind]
 
 using
-  c: var Context
+  c: var ModuleCtx
   t: InTree
   bu: var Builder[NodeKind]
 
@@ -170,12 +170,12 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu): TypeKind =
   of AllNodes - ExprNodes:
     unreachable()
 
-proc open*(): Context =
+proc open*(): ModuleCtx =
   ## Creates a new empty module translation/analysis context.
-  Context(types: initBuilder[NodeKind](TypeDefs),
-          procs: initBuilder[NodeKind](ProcDefs))
+  ModuleCtx(types: initBuilder[NodeKind](TypeDefs),
+            procs: initBuilder[NodeKind](ProcDefs))
 
-proc close*(c: sink Context): PackedTree[NodeKind] =
+proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
   ## Closes the module context and returns the accumulated translated code.
   var bu = initBuilder[NodeKind]()
   bu.subTree Module:

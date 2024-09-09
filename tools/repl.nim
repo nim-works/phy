@@ -84,7 +84,7 @@ iterator parse(stream: Stream): tuple[n: SexpNode, depth: int] {.closure.} =
       # we're done
       return (nil, 0)
 
-proc process(ctx: var Context, tree: PackedTree[NodeKind]) =
+proc process(ctx: var ModuleCtx, tree: PackedTree[NodeKind]) =
   case tree[NodeIndex(0)].kind
   of ExprNodes:
     let typ = ctx.exprToIL(tree)
