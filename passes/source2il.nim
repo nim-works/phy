@@ -26,6 +26,7 @@ type
 
   Context* = object
     ## The translation/analysis context for a single module.
+    literals: Literals
     types: Builder[NodeKind]
       ## the in-progress type section
     numTypes: int
@@ -148,10 +149,10 @@ proc callToIL(c; t; n: NodeIndex, bu): TypeKind =
 proc exprToIL(c; t: InTree, n: NodeIndex, bu): TypeKind =
   case t[n].kind
   of SourceKind.IntVal:
-    bu.add Node(kind: IntVal, val: t[n].val)
+    bu.add Node(kind: IntVal, val: c.literals.pack(t.getInt(n)))
     result = tkInt
   of SourceKind.FloatVal:
-    bu.add Node(kind: FloatVal, val: t[n].val)
+    bu.add Node(kind: FloatVal, val: c.literals.pack(t.getFloat(n)))
     result = tkFloat
   of SourceKind.Ident:
     case t.getString(n)
@@ -183,8 +184,7 @@ proc close*(c: sink Context): PackedTree[NodeKind] =
       discard
     bu.add finish(move c.procs)
 
-  # FIXME: passing an empty ``Literals`` object is, obviously, wrong
-  initTree[NodeKind](finish(bu), Literals())
+  initTree[NodeKind](finish(bu), c.literals)
 
 proc exprToIL*(c; t): TypeKind =
   ## Translates the given source language expression to the highest-level IL
@@ -194,7 +194,7 @@ proc exprToIL*(c; t): TypeKind =
     return tkError # don't create any procedure
 
   let
-    typeId = c.typeToIL(typ)
+    typId = c.typeToIL(typ)
     ptypId = c.addType ProcTy:
       c.types.add Node(kind: Type, val: typId)
 
