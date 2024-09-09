@@ -189,10 +189,12 @@ proc close*(c: sink Context): PackedTree[NodeKind] =
 proc exprToIL*(c; t): TypeKind =
   ## Translates the given source language expression to the highest-level IL
   ## and turns it into a procedure. Also returns the type of the expression.
-  let
-    (e, typ) = exprToIL(c, t, NodeIndex(0))
-    typId = c.typeToIL(typ)
+  let (e, typ) = exprToIL(c, t, NodeIndex(0))
+  if typ == tkError:
+    return tkError # don't create any procedure
 
+  let
+    typeId = c.typeToIL(typ)
     ptypId = c.addType ProcTy:
       c.types.add Node(kind: Type, val: typId)
 
