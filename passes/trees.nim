@@ -185,26 +185,38 @@ proc getString*(tree: PackedTree, n: NodeIndex): lent string =
   ## Returns the string value stored by `n`.
   tree.literals.strings[tree[n].val]
 
-proc pack*(tree: var PackedTree, i: int64): uint32 =
-  ## Packs `i` into an ``uint32`` value that can be stored in a ``TreeNode``.
+proc pack*(db: var Literals, i: int64): uint32 =
+  ## Packs `i` into a ``uint32`` value that can be stored in a ``TreeNode``.
   if i >= 0 and i < int64(ExternalFlag):
     result = uint32(i) # fits into a uint32
   else:
-    result = tree.literals.numbers.len.uint32 or ExternalFlag
-    tree.literals.numbers.add(cast[uint64](i))
+    result = db.numbers.len.uint32 or ExternalFlag
+    db.numbers.add(cast[uint64](i))
 
-proc pack*(tree: var PackedTree, f: float64): uint32 =
-  ## Packs `f` into an ``uint32`` value that can be stored in a ``TreeNode``.
-  result = tree.literals.numbers.len.uint32
-  tree.literals.numbers.add(cast[uint64](f))
+proc pack*(db: var Literals, f: float64): uint32 =
+  ## Packs `f` into a ``uint32`` value that can be stored in a ``TreeNode``.
+  result = db.numbers.len.uint32
+  db.numbers.add(cast[uint64](f))
 
-proc pack*(tree: var PackedTree, s: sink string): uint32 =
-  result = tree.literals.strings.len.uint32
-  tree.literals.strings.add(s)
+proc pack*(db: var Literals, s: sink string): uint32 =
+  result = db.strings.len.uint32
+  db.strings.add(s)
 
 func literals*(tree: PackedTree): lent Literals {.inline.} =
   ## Returns the storage for the literal data.
   tree.literals
+
+proc pack*(tree: var PackedTree, i: int64): uint32 {.inline.} =
+  ## Packs `i` into a ``uint32`` value that can be stored in a ``TreeNode``.
+  pack(tree.literals, i)
+
+proc pack*(tree: var PackedTree, f: float64): uint32 {.inline.} =
+  ## Packs `f` into a ``uint32`` value that can be stored in a ``TreeNode``.
+  pack(tree.literals, f)
+
+proc pack*(tree: var PackedTree, s: sink string): uint32 {.inline.} =
+  ## Packs `s` into a ``uint32`` value that can be stored in a ``TreeNode``.
+  pack(tree.literals, s)
 
 # TODO: move the S-expression serialization/deserialization elsewhere
 

@@ -24,13 +24,16 @@ type
     tkInt
     tkFloat
 
-  Context = object
+  ModuleCtx* = object
+    ## The translation/analysis context for a single module.
+    literals: Literals
     types: Builder[NodeKind]
       ## the in-progress type section
     numTypes: int
+    procs: Builder[NodeKind]
 
 using
-  c: var Context
+  c: var ModuleCtx
   t: InTree
   bu: var Builder[NodeKind]
 
@@ -146,10 +149,10 @@ proc callToIL(c; t; n: NodeIndex, bu): TypeKind =
 proc exprToIL(c; t: InTree, n: NodeIndex, bu): TypeKind =
   case t[n].kind
   of SourceKind.IntVal:
-    bu.add Node(kind: IntVal, val: t[n].val)
+    bu.add Node(kind: IntVal, val: c.literals.pack(t.getInt(n)))
     result = tkInt
   of SourceKind.FloatVal:
-    bu.add Node(kind: FloatVal, val: t[n].val)
+    bu.add Node(kind: FloatVal, val: c.literals.pack(t.getFloat(n)))
     result = tkFloat
   of SourceKind.Ident:
     case t.getString(n)
@@ -167,30 +170,40 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu): TypeKind =
   of AllNodes - ExprNodes:
     unreachable()
 
-proc exprToIL*(t: InTree): (TypeKind, PackedTree[NodeKind]) =
-  ## Translates the given source language expression to the highest-level IL.
-  ## Also returns the type of the expression.
-  var c = Context(types: initBuilder[NodeKind](TypeDefs))
+proc open*(): ModuleCtx =
+  ## Creates a new empty module translation/analysis context.
+  ModuleCtx(types: initBuilder[NodeKind](TypeDefs),
+            procs: initBuilder[NodeKind](ProcDefs))
 
-  let
-    (e, typ) = exprToIL(c, t, NodeIndex(0))
-    typId = c.typeToIL(typ)
-
-    ptypId = c.addType ProcTy:
-      c.types.add Node(kind: Type, val: typId)
-
+proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
+  ## Closes the module context and returns the accumulated translated code.
   var bu = initBuilder[NodeKind]()
   bu.subTree Module:
     bu.add finish(move c.types)
-
     bu.subTree GlobalDefs:
       discard
+    bu.add finish(move c.procs)
 
-    bu.subTree ProcDefs:
-      bu.subTree ProcDef:
-        bu.add Node(kind: Type, val: ptypId)
-        bu.subTree Locals: discard
-        bu.subTree Return:
-          bu.add e
+  initTree[NodeKind](finish(bu), c.literals)
 
-  result = (typ, initTree(bu.finish(), t.literals))
+proc exprToIL*(c; t): TypeKind =
+  ## Translates the given source language expression to the highest-level IL
+  ## and turns it into a procedure. Also returns the type of the expression.
+  let (e, typ) = exprToIL(c, t, NodeIndex(0))
+  if typ == tkError:
+    return tkError # don't create any procedure
+
+  let
+    typId = c.typeToIL(typ)
+    ptypId = c.addType ProcTy:
+      c.types.add Node(kind: Type, val: typId)
+
+  template bu: untyped = c.procs
+
+  bu.subTree ProcDef:
+    bu.add Node(kind: Type, val: ptypId)
+    bu.subTree Locals: discard
+    bu.subTree Return:
+      bu.add e
+
+  result = typ
