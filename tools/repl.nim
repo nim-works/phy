@@ -84,15 +84,19 @@ iterator parse(stream: Stream): tuple[n: SexpNode, depth: int] {.closure.} =
       # we're done
       return (nil, 0)
 
-proc process(tree: PackedTree[NodeKind]) =
+proc process(ctx: var Context, tree: PackedTree[NodeKind]) =
   case tree[NodeIndex(0)].kind
   of ExprNodes:
-    var (typ, m) = exprToIL(tree)
+    let typ = ctx.exprToIL(tree)
 
     # don't continue if there was an error:
     if typ == TypeKind.tkError:
       echo "expression has an error"
       return
+
+    # XXX: rather inefficient. Ideally, only the new code would be
+    #      compiled
+    var m = close(ctx)
 
     # lower to L0:
     m = m.apply(pass10.lower(m))
@@ -156,6 +160,7 @@ stream.readDataStrImpl = readDataStrImpl
 
 var depth = 0 ## the current S-expression nesting
 var iter = parse
+var module = source2il.open()
 
 block loop:
   while not finished(iter):
@@ -173,7 +178,7 @@ block loop:
       if n.len == 1 and n[0].kind == SSymbol and n[0].symbol == "quit":
         break loop # quit
 
-      process():
+      process(module):
         try:
           fromSexp[NodeKind](n)
         except ValueError as e:

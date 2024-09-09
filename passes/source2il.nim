@@ -24,10 +24,12 @@ type
     tkInt
     tkFloat
 
-  Context = object
+  Context* = object
+    ## The translation/analysis context for a single module.
     types: Builder[NodeKind]
       ## the in-progress type section
     numTypes: int
+    procs: Builder[NodeKind]
 
 using
   c: var Context
@@ -167,11 +169,26 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu): TypeKind =
   of AllNodes - ExprNodes:
     unreachable()
 
-proc exprToIL*(t: InTree): (TypeKind, PackedTree[NodeKind]) =
-  ## Translates the given source language expression to the highest-level IL.
-  ## Also returns the type of the expression.
-  var c = Context(types: initBuilder[NodeKind](TypeDefs))
+proc open*(): Context =
+  ## Creates a new empty module translation/analysis context.
+  Context(types: initBuilder[NodeKind](TypeDefs),
+          procs: initBuilder[NodeKind](ProcDefs))
 
+proc close*(c: sink Context): PackedTree[NodeKind] =
+  ## Closes the module context and returns the accumulated translated code.
+  var bu = initBuilder[NodeKind]()
+  bu.subTree Module:
+    bu.add finish(move c.types)
+    bu.subTree GlobalDefs:
+      discard
+    bu.add finish(move c.procs)
+
+  # FIXME: passing an empty ``Literals`` object is, obviously, wrong
+  initTree[NodeKind](finish(bu), Literals())
+
+proc exprToIL*(c; t): TypeKind =
+  ## Translates the given source language expression to the highest-level IL
+  ## and turns it into a procedure. Also returns the type of the expression.
   let
     (e, typ) = exprToIL(c, t, NodeIndex(0))
     typId = c.typeToIL(typ)
@@ -179,18 +196,12 @@ proc exprToIL*(t: InTree): (TypeKind, PackedTree[NodeKind]) =
     ptypId = c.addType ProcTy:
       c.types.add Node(kind: Type, val: typId)
 
-  var bu = initBuilder[NodeKind]()
-  bu.subTree Module:
-    bu.add finish(move c.types)
+  template bu: untyped = c.procs
 
-    bu.subTree GlobalDefs:
-      discard
+  bu.subTree ProcDef:
+    bu.add Node(kind: Type, val: ptypId)
+    bu.subTree Locals: discard
+    bu.subTree Return:
+      bu.add e
 
-    bu.subTree ProcDefs:
-      bu.subTree ProcDef:
-        bu.add Node(kind: Type, val: ptypId)
-        bu.subTree Locals: discard
-        bu.subTree Return:
-          bu.add e
-
-  result = (typ, initTree(bu.finish(), t.literals))
+  result = typ

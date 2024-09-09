@@ -39,13 +39,15 @@ if s.readLine() == "discard \"\"\"":
 else:
   s.setPosition(0)
 
+var ctx = source2il.open()
 # parse the S-expression and translate the source language to the L1:
-var (typ, tree) = exprToIL(fromSexp[NodeKind](parseSexp(readAll(s))))
+let typ = ctx.exprToIL(fromSexp[NodeKind](parseSexp(readAll(s))))
 # don't continue if there was an error:
 if typ == tkError:
   echo "exprToIL failed"
   quit(1)
 
+var tree = close(ctx)
 # lower to the L0 language:
 tree = tree.apply(pass10.lower(tree))
 tree = tree.apply(pass4.lower(tree))
