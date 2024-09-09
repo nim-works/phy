@@ -39,23 +39,28 @@ type
     ## expect from it.
     arguments: seq[string]
       ## extra arguments to pass to the runner
+    reject: bool
+      ## whether the test runner is expected to report a non-crash failure
     expected: seq[OutputSpec]
       ## the output(s) expected from the runner (if any)
     knownIssue: Option[string]
       ## whether the test is currently expected to fail due to a known issue
 
   ResultKind = enum
-    rkSuccess
-    rkError
+    rkSuccess    ## all good
+    rkError      ## the test is valid and failed (but shouldn't)
+    rkNoError    ## the test is valid and succeeded (but shouldn't)
+    rkFailure    ## the test is invalid or the runner failed
+                 ## unexpectedly (e.g., due to a crash)
     rkMismatch
     rkUnexpectedSuccess
 
   TestResult = object
     ## The result of a single test run.
     case kind: ResultKind
-    of rkSuccess, rkUnexpectedSuccess:
+    of rkSuccess, rkNoError, rkUnexpectedSuccess:
       discard
-    of rkError:
+    of rkError, rkFailure:
       output: string
     of rkMismatch:
       got, expected: string
@@ -170,7 +175,13 @@ proc content(s: OutputSpec): Content =
 
 proc compare(res: tuple[output: string, code: int], spec: TestSpec): TestResult =
   ## Compares the runner output `res` against the `spec`.
-  if res.code == 0:
+  if res.code in {0, 2}:
+    if (res.code == 2) != spec.reject:
+      result =
+        if spec.reject: TestResult(kind: rkNoError)
+        else:           TestResult(kind: rkError, output: res.output)
+      return
+
     var i = 0
     for got in split(res.output, "!BREAK!"):
       if i < spec.expected.len:
@@ -195,7 +206,8 @@ proc compare(res: tuple[output: string, code: int], spec: TestSpec): TestResult 
       result = TestResult(kind: rkMismatch, got: "",
                           expected: $content(spec.expected[i]))
   else:
-    result = TestResult(kind: rkError, output: res.output)
+    # the runer crashed, or there was some unexpected error
+    result = TestResult(kind: rkFailure, output: res.output)
 
 var
   nimExe = findExe("nim")
@@ -322,6 +334,8 @@ else:
                        output: strip(evt.value, leading=true, trailing=false))
         of "arguments":
           spec.arguments = split(evt.value, ' ')
+        of "reject":
+          spec.reject = parseBool(evt.value)
         else:
           echo "unknown key: ", evt.key
           quit(1)
@@ -362,6 +376,11 @@ else:
   of rkSuccess: discard
   of rkError:
     echo "The runner reported an error:" + fgYellow
+    echo res.output
+  of rkNoError:
+    echo "The runner didn't report an error" + fgYellow
+  of rkFailure:
+    echo "The runner failed:" + fgYellow
     echo res.output
   of rkMismatch:
     echo "Got:" + fgYellow
