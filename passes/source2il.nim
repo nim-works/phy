@@ -20,6 +20,8 @@ type
 
   TypeKind* = enum
     tkError
+    tkVoid
+    tkUnit
     tkBool
     tkInt
     tkFloat
@@ -31,6 +33,9 @@ type
       ## the in-progress type section
     numTypes: int
     procs: Builder[NodeKind]
+
+    # procedure context:
+    retType: TypeKind
 
 using
   c: var ModuleCtx
@@ -44,12 +49,30 @@ template addType(c; kind: NodeKind, body: untyped): uint32 =
 
 proc typeToIL(c; typ: TypeKind): uint32 =
   case typ
+  of tkVoid, tkUnit:
+    unreachable()
   of tkBool:
     c.addType Int: c.types.add(Node(kind: Immediate, val: 1))
   of tkInt, tkError:
     c.addType Int: c.types.add(Node(kind: Immediate, val: 8))
   of tkFloat:
     c.addType Float: c.types.add(Node(kind: Immediate, val: 8))
+
+proc genProcType(c; ret: TypeKind): uint32 =
+  ## Generates a proc type with `ret` as the return type and adds it to `c`.
+  case ret
+  of tkError:
+    unreachable()
+  of tkVoid, tkUnit:
+    # a ``void`` return type means "doesn't return a value", and since there's
+    # only a single value for the ``unit`` type, it too maps to the void
+    # return type
+    c.addType ProcTy:
+      c.types.subTree Void: discard
+  else:
+    let typId = c.typeToIL(ret)
+    c.addType ProcTy:
+      c.types.add Node(kind: Type, val: typId)
 
 proc exprToIL(c; t: InTree, n: NodeIndex, bu): TypeKind
 
@@ -167,6 +190,22 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu): TypeKind =
       result = tkError
   of SourceKind.Call:
     result = callToIL(c, t, n, bu)
+  of SourceKind.Return:
+    var typ: TypeKind
+    bu.subTree Return:
+      typ =
+        case t.len(n)
+        of 0: tkUnit
+        of 1: exprToIL(c, t, t.child(n, 0), bu)
+        else: unreachable() # syntax error
+
+    if typ != tkError and typ == c.retType:
+      result = tkVoid
+    else:
+      # TODO: use proper error correction; a return expression is always of
+      #       type ``void``
+      # type mismatch
+      result = tkError
   of AllNodes - ExprNodes:
     unreachable()
 
@@ -193,17 +232,23 @@ proc exprToIL*(c; t): TypeKind =
   if typ == tkError:
     return tkError # don't create any procedure
 
-  let
-    typId = c.typeToIL(typ)
-    ptypId = c.addType ProcTy:
-      c.types.add Node(kind: Type, val: typId)
+  let procTy = c.genProcType(typ)
 
   template bu: untyped = c.procs
 
   bu.subTree ProcDef:
-    bu.add Node(kind: Type, val: ptypId)
+    bu.add Node(kind: Type, val: procTy)
     bu.subTree Locals: discard
-    bu.subTree Return:
+    case typ
+    of tkVoid:
       bu.add e
+    of tkUnit:
+      bu.subTree Stmts:
+        bu.add e
+        bu.subTree Return:
+          discard
+    else:
+      bu.subTree Return:
+        bu.add e
 
   result = typ
