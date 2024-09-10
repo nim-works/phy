@@ -184,6 +184,18 @@ proc callToIL(c; t; n: NodeIndex, bu): TypeKind =
     result = relToIL(c, t, n, name, bu)
   of "not":
     result = notToIL(c, t, n, bu)
+  elif name in c.scope:
+    # it's a user-defined procedure
+    let prc {.cursor.} = c.scope[name]
+    if t.len(n) == 1:
+      # procedure arity is currently always 0
+      bu.subTree Call:
+        bu.add Node(kind: Proc, val: prc.id.uint32)
+
+      result = prc.result
+    else:
+      bu.add Node(kind: IntVal)
+      result = tkError
   else:
     bu.add Node(kind: IntVal)
     result = tkError
