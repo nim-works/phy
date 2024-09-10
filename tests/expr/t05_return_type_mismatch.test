@@ -1,0 +1,5 @@
+discard """
+  reject: true
+"""
+(ProcDecl (Ident "a") (IntTy) (Params)
+  (Return (FloatVal 0.0)))

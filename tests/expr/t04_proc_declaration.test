@@ -1,0 +1,5 @@
+discard """
+  output: "unit"
+"""
+(ProcDecl (Ident "a") (UnitTy) (Params)
+  (Return))
