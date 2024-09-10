@@ -86,6 +86,10 @@ iterator parse(stream: Stream): tuple[n: SexpNode, depth: int] {.closure.} =
 
 proc process(ctx: var ModuleCtx, tree: PackedTree[NodeKind]) =
   case tree[NodeIndex(0)].kind
+  of DeclNodes:
+    if ctx.declToIL(tree, NodeIndex(0)) == TypeKind.tkError:
+      echo "error in declaration"
+
   of ExprNodes:
     let typ = ctx.exprToIL(tree)
 
