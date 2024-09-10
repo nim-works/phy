@@ -10,11 +10,17 @@ import
 type
   NodeKind* {.pure.} = enum
     Immediate, IntVal, FloatVal
-    Ident
+    Ident,
+    UnitTy, BoolTy, IntTy, FloatTy
     Call
+    Return
+    Params,
+    ProcDecl,
+    Module
 
 const
-  ExprNodes* = {IntVal, FloatVal, Ident, Call}
+  ExprNodes* = {IntVal, FloatVal, Ident, Call, Return}
+  DeclNodes* = {ProcDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 
 template isAtom*(x: NodeKind): bool =

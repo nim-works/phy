@@ -74,6 +74,19 @@ expr += (IntVal <int>)
 
 The `IntVal` expression always has type `int`, `FloatVal` always type `float`.
 
+#### `return`
+
+```grammar
+expr += (Return res:<expr>?)
+```
+
+Let `P` be the enclosing procedure of the `Return` expression. Let `T` be
+the type of `res` -- if there's no `res` expression, `T` is `unit`. If `T`
+doesn't match the return type of `P`, an error is reported.
+
+The type of the `Return` expression is `void`. It returns control from the
+current procedure to its caller.
+
 #### Calls
 
 ```grammar
@@ -101,6 +114,35 @@ After evaluating the arguments (if any), control is passed to the callee.
 
 > TODO: specification for the built-in operations is missing
 
+#### Type Expression
+
 ```grammar
-top ::= <expr>
+type_expr ::= (UnitTy)  # unit
+           |  (BoolTy)  # bool
+           |  (IntTy)   # int
+           |  (FloatTy) # float
+```
+
+### Declarations
+
+#### Procedure
+
+```grammar
+decl ::= (ProcDecl name:<ident> ret:<type_expr> params:(Params) body:<expr>)
+```
+
+Let `S` be the current scope. If `lookup(S, name)` succeeds, an error is
+reported. Otherwise, `name` is added to `S`, referring to the declared
+procedure.
+
+`body` must be of type `void`. It is the computation that is run when the
+procedure is called.
+
+`name` is added to `S` *before* any lookup takes place in the body.
+
+### Modules
+
+```grammar
+module ::= (Module <decl>*)
+top ::= <module>
 ```
