@@ -7,6 +7,7 @@
 ## architecture (of this module) are of secondary concern.
 
 import
+  std/[tables],
   passes/[builders, spec, trees],
   vm/[utils]
 
@@ -26,6 +27,12 @@ type
     tkInt
     tkFloat
 
+  ProcInfo = object
+    id: int
+      ## ID of the procedure
+    result: TypeKind
+      ## return type
+
   ModuleCtx* = object
     ## The translation/analysis context for a single module.
     literals: Literals
@@ -33,6 +40,10 @@ type
       ## the in-progress type section
     numTypes: int
     procs: Builder[NodeKind]
+    numProcs: int
+
+    scope: Table[string, ProcInfo]
+      ## maps procedure names to their ID/position
 
     # procedure context:
     retType: TypeKind
@@ -46,6 +57,14 @@ template addType(c; kind: NodeKind, body: untyped): uint32 =
   c.types.subTree kind:
     body
   (let r = c.numTypes; inc c.numTypes; r.uint32)
+
+proc parseType(t; n: NodeIndex): TypeKind =
+  case t[n].kind
+  of UnitTy:  tkUnit
+  of BoolTy:  tkBool
+  of IntTy:   tkInt
+  of FloatTy: tkFloat
+  else:       unreachable() # syntax error
 
 proc typeToIL(c; typ: TypeKind): uint32 =
   case typ
@@ -251,4 +270,42 @@ proc exprToIL*(c; t): TypeKind =
       bu.subTree Return:
         bu.add e
 
+  inc c.numProcs
   result = typ
+
+proc declToIL*(c; t; n: NodeIndex): TypeKind =
+  ## Translates the given source language declaration to the target IL.
+  ## On success, the declaration effects are applied to `c` and the declared
+  ## procedure's return type is returned.
+  case t[n].kind
+  of SourceKind.ProcDecl:
+    let name = t.getString(t.child(n, 0))
+    if name in c.scope:
+      # declaration with the given name already exists
+      return tkError
+
+    c.retType = parseType(t, t.child(n, 1))
+
+    let procTy = c.genProcType(c.retType)
+
+    var bu = initBuilder[NodeKind](ProcDef)
+    bu.add Node(kind: Type, val: procTy)
+    bu.subTree Locals:
+      discard
+
+    # register the proc before analysing/translating the body
+    c.scope[name] = ProcInfo(id: c.numProcs, result: c.retType)
+
+    let (e, eTyp) = c.exprToIL(t, t.child(n, 3))
+    if eTyp == tkVoid:
+      # the expression must always be a void expression
+      bu.add e
+    else:
+      c.scope.del(name) # remove again
+      return tkError
+
+    c.procs.add finish(bu)
+    inc c.numProcs
+    result = c.retType
+  of AllNodes - DeclNodes:
+    unreachable() # syntax error
