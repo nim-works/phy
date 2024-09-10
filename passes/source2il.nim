@@ -230,7 +230,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu): TypeKind =
         of 1: exprToIL(c, t, t.child(n, 0), bu)
         else: unreachable() # syntax error
 
-    if typ != tkError and typ == c.retType:
+    if typ notin {tkError, tkVoid} and typ == c.retType:
       result = tkVoid
     else:
       # TODO: use proper error correction; a return expression is always of

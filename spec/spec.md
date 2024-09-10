@@ -81,8 +81,10 @@ expr += (Return res:<expr>?)
 ```
 
 Let `P` be the enclosing procedure of the `Return` expression. Let `T` be
-the type of `res` -- if there's no `res` expression, `T` is `unit`. If `T`
-doesn't match the return type of `P`, an error is reported.
+the type of `res` -- if there's no `res` expression, `T` is `unit`. An error
+is reported if:
+* `T` doesn't match the return type of `P`
+* `T` is `void`
 
 The type of the `Return` expression is `void`. It returns control from the
 current procedure to its caller.
