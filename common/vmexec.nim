@@ -22,6 +22,12 @@ proc run*(env: var VmEnv, prc: ProcIndex, typ: TypeKind): string =
   case res.kind
   of yrkDone:
     case typ
+    of tkVoid:
+      # this is nonsense ('void' has no value), but it's allowed for
+      # convenience
+      result = "void"
+    of tkUnit:
+      result = "unit"
     of tkBool:
       case res.result.intVal
       of 0: result = "false: bool"

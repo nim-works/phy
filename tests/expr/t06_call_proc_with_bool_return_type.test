@@ -1,0 +1,8 @@
+discard """
+  output: "true: bool"
+"""
+(Module
+  (ProcDecl (Ident "a") (BoolTy) (Params)
+    (Return (Ident "true")))
+  (ProcDecl (Ident "main") (BoolTy) (Params)
+    (Return (Call (Ident "a")))))

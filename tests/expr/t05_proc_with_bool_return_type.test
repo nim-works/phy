@@ -1,0 +1,5 @@
+discard """
+  output: "true: bool"
+"""
+(ProcDecl (Ident "a") (BoolTy) (Params)
+  (Return (Ident "true")))
