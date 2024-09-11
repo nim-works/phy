@@ -68,8 +68,13 @@ proc parseType(t; n: NodeIndex): TypeKind =
 
 proc typeToIL(c; typ: TypeKind): uint32 =
   case typ
-  of tkVoid, tkUnit:
+  of tkVoid:
     unreachable()
+  of tkUnit:
+    # XXX: there's no unit type in the target IL, and in order to not having
+    #      to rewrite all ``unit`` type usages here, we're translating the
+    #      type to a 1-byte integer
+    c.addType Int: c.types.add(Node(kind: Immediate, val: 1))
   of tkBool:
     c.addType Int: c.types.add(Node(kind: Immediate, val: 1))
   of tkInt, tkError:
@@ -82,10 +87,7 @@ proc genProcType(c; ret: TypeKind): uint32 =
   case ret
   of tkError:
     unreachable()
-  of tkVoid, tkUnit:
-    # a ``void`` return type means "doesn't return a value", and since there's
-    # only a single value for the ``unit`` type, it too maps to the void
-    # return type
+  of tkVoid:
     c.addType ProcTy:
       c.types.subTree Void: discard
   else:
@@ -226,7 +228,10 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu): TypeKind =
     bu.subTree Return:
       typ =
         case t.len(n)
-        of 0: tkUnit
+        of 0:
+          # as long as it's an 8-bit integer, the exact value doesn't matter
+          bu.add Node(kind: IntVal)
+          tkUnit
         of 1: exprToIL(c, t, t.child(n, 0), bu)
         else: unreachable() # syntax error
 
@@ -273,11 +278,6 @@ proc exprToIL*(c; t): TypeKind =
     case typ
     of tkVoid:
       bu.add e
-    of tkUnit:
-      bu.subTree Stmts:
-        bu.add e
-        bu.subTree Return:
-          discard
     else:
       bu.subTree Return:
         bu.add e
