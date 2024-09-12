@@ -1,0 +1,8 @@
+discard """
+  output: "runtime error: ecUnreachable"
+"""
+(Module
+  (ProcDecl (Ident "a") (VoidTy) (Params)
+    (Unreachable))
+  (ProcDecl (Ident "main") (VoidTy) (Params)
+    (Call (Ident "a"))))
