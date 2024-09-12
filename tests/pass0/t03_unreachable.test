@@ -1,6 +1,5 @@
 discard """
-  description: "An Unreachable exit translates to nothing"
-  output: "(Done)"
+  output: "(Error ecUnreachable)"
 """
 (TypeDefs
   (ProcTy (Void))
@@ -11,6 +10,5 @@ discard """
     (Continuation (Params) 0
       (Unreachable)
     )
-    (Continuation (Params))
   ))
 )
