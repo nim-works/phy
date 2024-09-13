@@ -33,6 +33,11 @@ type
     of tkTuple:
       elems*: seq[SemType]
 
+const
+  ComplexTypes* = {tkTuple}
+    ## types that can currently not be used as procedure return or parameter
+    ## types in the target IL
+
 proc errorType*(): SemType {.inline.} =
   SemType(kind: tkError)
 
