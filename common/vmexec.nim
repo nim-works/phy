@@ -6,6 +6,7 @@ import
     types
   ],
   vm/[
+    vmalloc,
     vmenv,
     vm,
     utils
@@ -14,9 +15,16 @@ import
 proc run*(env: var VmEnv, prc: ProcIndex, typ: SemType): string =
   ## Runs the nullary procedure with index `prc`, and returns the result
   ## rendered as a string. `typ` is the type of the resulting value.
-  var
+  var thread: VmThread
+  if typ.kind in ComplexTypes:
+    # reserve enough stack space:
+    let start = uint size(typ)
+    # pass the address of the destination as the first parameter
+    thread = vm.initThread(env, prc, hoSlice(start, 1024), @[Value(toVirt 0)])
+  else:
     thread = vm.initThread(env, prc, 1024, @[])
-    res = run(env, thread, nil)
+
+  let res = run(env, thread, nil)
   env.dispose(thread)
 
   case res.kind
@@ -37,6 +45,9 @@ proc run*(env: var VmEnv, prc: ProcIndex, typ: SemType): string =
       result = $res.result.intVal & ": int"
     of tkFloat:
       result = $res.result.floatVal & ": float"
+    of tkTuple:
+      # FIXME: implement this
+      result = "<missing>"
     of tkError:
       unreachable()
   of yrkError:
