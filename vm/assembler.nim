@@ -239,7 +239,7 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
      opcSubFloat, opcMulFloat, opcDivFloat, opcNegFloat, opcEqInt, opcLtInt,
      opcLeInt, opcLtu, opcLeu, opcEqFloat, opcLtFloat, opcLeFloat, opcNot,
      opcReinterpF32, opcReinterpF64, opcReinterpI32, opcReinterpI64,
-     opcExcept, opcRaise, opcMemCopy, opcMemClear, opcGrow:
+     opcExcept, opcUnreachable, opcRaise, opcMemCopy, opcMemClear, opcGrow:
     Instr(op) # instruction with no immediate operands
   of opcAddImm, opcLdConst, opcLdImmInt, opcOffset,
      opcLdInt8, opcLdInt16, opcLdInt32, opcLdInt64, opcLdFlt32, opcLdFlt64,

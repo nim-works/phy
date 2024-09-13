@@ -19,6 +19,7 @@ type
     ecIllegalGrow    ## improper grow operation
     ecTypeError      ## type error
     ecCallbackError  ## a fatal error ocurred within a callback
+    ecUnreachable    ## an 'unreachable' instruction was executed
 
   YieldReasonKind* = enum
     yrkDone
@@ -428,6 +429,8 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
 
     of opcExcept:
       unreachable() # never executed
+    of opcUnreachable:
+      return YieldReason(kind: yrkError, error: ecUnreachable)
 
     of opcStackAlloc:
       let next = t.sp + cast[uint32](imm32())

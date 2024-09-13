@@ -480,7 +480,7 @@ proc genExit(c; tree; exit: NodeIndex) =
     c.instr(opcPopLocal, tree[exit, 1].id)
     c.jump(opcJmp, tree[tree.child(exit, ^2), 0].imm)
   of Unreachable:
-    discard "a no-op"
+    c.instr(opcUnreachable)
   else:
     unreachable()
 

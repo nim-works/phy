@@ -105,6 +105,7 @@ type
     opcCall       ## callee:imm32 num:imm16
     opcIndCall    ## callee:int typ:imm32 num:imm16
     opcExcept     ## val:int
+    opcUnreachable
 
     # memory management
     opcStackAlloc ## size:imm32
