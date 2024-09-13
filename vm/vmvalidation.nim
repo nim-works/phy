@@ -240,6 +240,8 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
     check not ctx.active, "control-flow reaches 'opcExcept'"
     push(vtInt)
     ctx.active = true
+  of opcUnreachable:
+    ctx.active = false
   of opcStackAlloc:
     push(vtInt)
   of opcStackFree, opcGrow:
