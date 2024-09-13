@@ -1,0 +1,8 @@
+discard """
+  description: "
+    Ensure that a void expression cannot be used as a Return operand
+  "
+  reject: true
+"""
+(ProcDecl (Ident "a") (VoidTy) (Params)
+  (Return (Unreachable)))

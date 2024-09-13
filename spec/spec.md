@@ -74,7 +74,7 @@ expr += (IntVal <int>)
 
 The `IntVal` expression always has type `int`, `FloatVal` always type `float`.
 
-#### `return`
+#### `Return`
 
 ```grammar
 expr += (Return res:<expr>?)
@@ -88,6 +88,19 @@ is reported if:
 
 The type of the `Return` expression is `void`. It returns control from the
 current procedure to its caller.
+
+#### `Unreachable`
+
+```grammar
+expr += (Unreachable)
+```
+
+Marks a control-flow path as unreachable. In case program execution does reach
+the `Unreachable` expression, the program immediately terminates. A compiler
+*may* report an error if it can statically detect that control-flow can reach
+an `Unreachable` expression within a procedure.
+
+The type of the `Unreachable` expression is `void`.
 
 #### Calls
 
@@ -119,7 +132,8 @@ After evaluating the arguments (if any), control is passed to the callee.
 #### Type Expression
 
 ```grammar
-type_expr ::= (UnitTy)  # unit
+type_expr ::= (VoidTy)  # void
+           |  (UnitTy)  # unit
            |  (BoolTy)  # bool
            |  (IntTy)   # int
            |  (FloatTy) # float

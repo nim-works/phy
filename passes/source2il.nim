@@ -60,6 +60,7 @@ template addType(c; kind: NodeKind, body: untyped): uint32 =
 
 proc parseType(t; n: NodeIndex): TypeKind =
   case t[n].kind
+  of VoidTy:  tkVoid
   of UnitTy:  tkUnit
   of BoolTy:  tkBool
   of IntTy:   tkInt
@@ -191,8 +192,17 @@ proc callToIL(c; t; n: NodeIndex, bu): TypeKind =
     let prc {.cursor.} = c.scope[name]
     if t.len(n) == 1:
       # procedure arity is currently always 0
-      bu.subTree Call:
-        bu.add Node(kind: Proc, val: prc.id.uint32)
+      case prc.result
+      of tkVoid:
+        bu.subTree Stmts:
+          bu.subTree Call:
+            bu.add Node(kind: Proc, val: prc.id.uint32)
+          # mark the normal control-flow path as dead:
+          bu.subTree Unreachable:
+            discard
+      else:
+        bu.subTree Call:
+          bu.add Node(kind: Proc, val: prc.id.uint32)
 
       result = prc.result
     else:
@@ -242,6 +252,10 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu): TypeKind =
       #       type ``void``
       # type mismatch
       result = tkError
+  of SourceKind.Unreachable:
+    bu.subTree Unreachable:
+      discard
+    result = tkVoid
   of AllNodes - ExprNodes:
     unreachable()
 

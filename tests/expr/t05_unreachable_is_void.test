@@ -1,0 +1,6 @@
+discard """
+  description: "Ensure that `Unreachable` is a void expression"
+  output: "runtime error: ecUnreachable"
+"""
+(ProcDecl (Ident "a") (VoidTy) (Params)
+  (Unreachable))
