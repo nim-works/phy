@@ -7,7 +7,7 @@
 ## architecture (of this module) are of secondary concern.
 
 import
-  std/[tables],
+  std/[sequtils, tables],
   passes/[builders, spec, trees],
   phy/[types],
   vm/[utils]
@@ -51,13 +51,27 @@ template addType(c; kind: NodeKind, body: untyped): uint32 =
     body
   (let r = c.numTypes; inc c.numTypes; r.uint32)
 
-proc parseType(t; n: NodeIndex): SemType =
+proc evalType(t; n: NodeIndex): SemType =
+  ## Evaluates a type expression, yielding the resulting type.
   case t[n].kind
   of VoidTy:  prim(tkVoid)
   of UnitTy:  prim(tkUnit)
   of BoolTy:  prim(tkBool)
   of IntTy:   prim(tkInt)
   of FloatTy: prim(tkFloat)
+  of TupleTy:
+    if t.len(n) == 0:
+      prim(tkUnit)
+    else:
+      var tup = SemType(kind: tkTuple)
+      for it in t.items(n):
+        tup.elems.add evalType(t, it)
+        if tup.elems[^1].kind in {tkError, tkVoid}:
+          # error propagation and void handling
+          tup = errorType()
+          break
+
+      tup
   else:       unreachable() # syntax error
 
 proc typeToIL(c; typ: SemType): uint32 =
@@ -303,7 +317,7 @@ proc declToIL*(c; t; n: NodeIndex): SemType =
       # declaration with the given name already exists
       return errorType()
 
-    c.retType = parseType(t, t.child(n, 1))
+    c.retType = evalType(t, t.child(n, 1))
 
     let procTy = c.genProcType(c.retType)
 
