@@ -20,6 +20,9 @@ import
     spec_source,
     trees,
   ],
+  phy/[
+    types
+  ],
   common/[
     vmexec
   ],

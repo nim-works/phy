@@ -9,6 +9,7 @@
 import
   std/[tables],
   passes/[builders, spec, trees],
+  phy/[types],
   vm/[utils]
 
 import passes/spec_source except NodeKind
@@ -18,14 +19,6 @@ type
   InTree     = PackedTree[SourceKind]
   Node       = TreeNode[NodeKind]
   NodeSeq    = seq[Node]
-
-  TypeKind* = enum
-    tkError
-    tkVoid
-    tkUnit
-    tkBool
-    tkInt
-    tkFloat
 
   ProcInfo = object
     id: int
