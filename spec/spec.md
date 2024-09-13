@@ -100,10 +100,6 @@ the `Unreachable` expression, the program immediately terminates. A compiler
 *may* report an error if it can statically detect that control-flow can reach
 an `Unreachable` expression within a procedure.
 
-> TODO: consider lifting the requirement that the program must terminate, in
-> order to allow for the compiler optimizing the affected control-flow paths
-> away
-
 The type of the `Unreachable` expression is `void`.
 
 #### Calls
