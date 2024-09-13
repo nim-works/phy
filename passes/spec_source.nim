@@ -11,8 +11,9 @@ type
   NodeKind* {.pure.} = enum
     Immediate, IntVal, FloatVal
     Ident,
-    VoidTy, UnitTy, BoolTy, IntTy, FloatTy
+    VoidTy, UnitTy, BoolTy, IntTy, FloatTy, TupleTy
     Call
+    TupleCons
     Return
     Unreachable
     Params
@@ -20,7 +21,7 @@ type
     Module
 
 const
-  ExprNodes* = {IntVal, FloatVal, Ident, Call, Return, Unreachable}
+  ExprNodes* = {IntVal, FloatVal, Ident, Call, TupleCons, Return, Unreachable}
   DeclNodes* = {ProcDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 

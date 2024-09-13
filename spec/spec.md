@@ -19,7 +19,7 @@ A *statement* is a computation without a type.
 
 ### Types
 
-The built-in types (also referred to as "primitive types") are:
+The primitive types are:
 * `void`
 * `unit`
 * `bool`
@@ -38,6 +38,18 @@ dependent.
 
 `float` is the type of floating point values, where the size is target-
 dependent.
+
+#### Composite Types
+
+Types can be combined into *composite types*.
+
+The `tuple(T1, ..., Tn)` type constructor constructs a *product type* (i.e., a
+type that is the product of the `T1`..`Tn` types). The operand order is
+significant, meaning that `tuple(int, float)` does not construct the same type
+as `tuple(float, int)`.
+
+`tuple()` (i.e., the product of no types) is a special case, and is equal to
+the `unit` type.
 
 ### Lookup
 
@@ -129,7 +141,22 @@ After evaluating the arguments (if any), control is passed to the callee.
 
 > TODO: specification for the built-in operations is missing
 
-#### Type Expression
+#### Tuple Constructors
+
+```grammar
+expr += (TupleCons)         # first form
+      | (TupleCons <expr>+) # second form
+```
+
+The first form constructs a value of type `unit`.
+
+The second form construct a value of type `tuple(T1..Tn)`, where `T1` is the
+type of the first expression, `T2` the type of the second expression (if any),
+and so on.
+
+An error is reported if any `Tx` is `void`.
+
+### Type Expressions
 
 ```grammar
 type_expr ::= (VoidTy)  # void
@@ -138,6 +165,22 @@ type_expr ::= (VoidTy)  # void
            |  (IntTy)   # int
            |  (FloatTy) # float
 ```
+
+#### Tuple Type Constructors
+
+```gramm
+type_expr += (TupleTy)              # first form
+          |  (TupleTy <type_expr>+) # second form
+```
+
+The first form of the `TupleTy` operator produces the `unit` type.
+
+> TODO: this behaviour makes sense, but it renders `UnitTy` obsolete. Consider
+> removing the latter.
+
+The second form constructs a `tuple` type with from the given type. Allowed
+operand type kinds are: `unit`, `int`, `float`, and `tuple`. An error is
+reported for any other type.
 
 ### Declarations
 
