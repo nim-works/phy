@@ -349,6 +349,36 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       result = prim(tkError)
   of SourceKind.Call:
     result = callToIL(c, t, n, bu, stmts)
+  of SourceKind.TupleCons:
+    if t.len(n) > 0:
+      var elems = newSeq[SemType](t.len(n))
+      # there are no tuple constructors in the target IL; all elements are
+      # assigned individually
+      let tmp = Node(kind: Local, val: c.newTemp(errorType()))
+      for i, it in t.pairs(n):
+        let e = c.exprToIL(t, it)
+        elems[i] = e.typ
+
+        if e.typ.kind in {tkError, tkVoid}:
+          return e.typ
+
+        stmts.add e.stmts
+        # add an assignment for the field:
+        stmts.addStmt:
+          let dest = buildTree Field:
+            bu.add tmp
+            bu.add Node(kind: Immediate, val: i.uint32)
+          c.genAsgn(dest, e.expr, e.typ, bu)
+
+      result = SemType(kind: tkTuple, elems: elems)
+      # now that we know the type, correct it:
+      c.locals[tmp.val] = result
+
+      bu.add tmp
+    else:
+      # it's a unit value
+      bu.add Node(kind: IntVal)
+      result = prim(tkUnit)
   of SourceKind.Return:
     var typ: SemType
     bu.subTree Return:
