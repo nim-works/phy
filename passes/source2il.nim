@@ -23,7 +23,7 @@ type
   ProcInfo = object
     id: int
       ## ID of the procedure
-    result: TypeKind
+    result: SemType
       ## return type
 
   ModuleCtx* = object
@@ -39,7 +39,7 @@ type
       ## maps procedure names to their ID/position
 
     # procedure context:
-    retType: TypeKind
+    retType: SemType
 
 using
   c: var ModuleCtx
@@ -51,17 +51,17 @@ template addType(c; kind: NodeKind, body: untyped): uint32 =
     body
   (let r = c.numTypes; inc c.numTypes; r.uint32)
 
-proc parseType(t; n: NodeIndex): TypeKind =
+proc parseType(t; n: NodeIndex): SemType =
   case t[n].kind
-  of VoidTy:  tkVoid
-  of UnitTy:  tkUnit
-  of BoolTy:  tkBool
-  of IntTy:   tkInt
-  of FloatTy: tkFloat
+  of VoidTy:  prim(tkVoid)
+  of UnitTy:  prim(tkUnit)
+  of BoolTy:  prim(tkBool)
+  of IntTy:   prim(tkInt)
+  of FloatTy: prim(tkFloat)
   else:       unreachable() # syntax error
 
-proc typeToIL(c; typ: TypeKind): uint32 =
-  case typ
+proc typeToIL(c; typ: SemType): uint32 =
+  case typ.kind
   of tkVoid:
     unreachable()
   of tkUnit:
@@ -76,9 +76,9 @@ proc typeToIL(c; typ: TypeKind): uint32 =
   of tkFloat:
     c.addType Float: c.types.add(Node(kind: Immediate, val: 8))
 
-proc genProcType(c; ret: TypeKind): uint32 =
+proc genProcType(c; ret: SemType): uint32 =
   ## Generates a proc type with `ret` as the return type and adds it to `c`.
-  case ret
+  case ret.kind
   of tkError:
     unreachable()
   of tkVoid:
@@ -89,9 +89,9 @@ proc genProcType(c; ret: TypeKind): uint32 =
     c.addType ProcTy:
       c.types.add Node(kind: Type, val: typId)
 
-proc exprToIL(c; t: InTree, n: NodeIndex, bu): TypeKind
+proc exprToIL(c; t: InTree, n: NodeIndex, bu): SemType
 
-proc exprToIL(c; t: InTree, n: NodeIndex): (NodeSeq, TypeKind) =
+proc exprToIL(c; t: InTree, n: NodeIndex): (NodeSeq, SemType) =
   var bu = initBuilder[NodeKind]()
   result[1] = exprToIL(c, t, n, bu)
   result[0] = finish(bu)
@@ -101,9 +101,9 @@ template lenCheck(t; n: NodeIndex, bu; expected: int) =
   ## `expected` children.
   if t.len(n) != expected:
     bu.add Node(kind: IntVal)
-    return tkError
+    return errorType()
 
-proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
+proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu): SemType =
   ## Analyzes and emits the IL for a binary arithmetic operation.
   lenCheck(t, n, bu, 3)
 
@@ -118,7 +118,7 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
     of "-": Sub
     else:   unreachable()
 
-  if typA == typB and typA in {tkInt, tkFloat}:
+  if typA == typB and typA.kind in {tkInt, tkFloat}:
     let typ = c.typeToIL(typA)
 
     bu.subTree op:
@@ -129,9 +129,9 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
     result = typA
   else:
     bu.add Node(kind: IntVal)
-    result = tkError
+    result = errorType()
 
-proc relToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
+proc relToIL(c; t; n: NodeIndex, name: string, bu): SemType =
   ## Analyzes and emits the IL for a relational operation.
   lenCheck(t, n, bu, 3)
 
@@ -147,31 +147,31 @@ proc relToIL(c; t; n: NodeIndex, name: string, bu): TypeKind =
     of "<=": (Le, {tkInt, tkFloat})
     else:   unreachable()
 
-  if typA == typB and typA in valid:
+  if typA == typB and typA.kind in valid:
     bu.subTree op:
       bu.add Node(kind: Type, val: c.typeToIL(typA))
       bu.add eA
       bu.add eB
 
-    result = tkBool
+    result = prim(tkBool)
   else:
     bu.add Node(kind: IntVal)
-    result = tkError
+    result = errorType()
 
-proc notToIL(c; t; n: NodeIndex, bu): TypeKind =
+proc notToIL(c; t; n: NodeIndex, bu): SemType =
   lenCheck(t, n, bu, 2)
 
   let (arg, typ) = exprToIL(c, t, t.child(n, 1))
 
-  if typ == tkBool:
+  if typ.kind == tkBool:
     bu.subTree Not:
       bu.add arg
-    result = tkBool
+    result = prim(tkBool)
   else:
     bu.add Node(kind: IntVal)
-    result = tkError
+    result = errorType()
 
-proc callToIL(c; t; n: NodeIndex, bu): TypeKind =
+proc callToIL(c; t; n: NodeIndex, bu): SemType =
   let name = t.getString(t.child(n, 0))
   case name
   of "+", "-":
@@ -185,7 +185,7 @@ proc callToIL(c; t; n: NodeIndex, bu): TypeKind =
     let prc {.cursor.} = c.scope[name]
     if t.len(n) == 1:
       # procedure arity is currently always 0
-      case prc.result
+      case prc.result.kind
       of tkVoid:
         bu.subTree Stmts:
           bu.subTree Call:
@@ -200,55 +200,55 @@ proc callToIL(c; t; n: NodeIndex, bu): TypeKind =
       result = prc.result
     else:
       bu.add Node(kind: IntVal)
-      result = tkError
+      result = errorType()
   else:
     bu.add Node(kind: IntVal)
-    result = tkError
+    result = errorType()
 
-proc exprToIL(c; t: InTree, n: NodeIndex, bu): TypeKind =
+proc exprToIL(c; t: InTree, n: NodeIndex, bu): SemType =
   case t[n].kind
   of SourceKind.IntVal:
     bu.add Node(kind: IntVal, val: c.literals.pack(t.getInt(n)))
-    result = tkInt
+    result = prim(tkInt)
   of SourceKind.FloatVal:
     bu.add Node(kind: FloatVal, val: c.literals.pack(t.getFloat(n)))
-    result = tkFloat
+    result = prim(tkFloat)
   of SourceKind.Ident:
     case t.getString(n)
     of "false":
       bu.add Node(kind: IntVal, val: 0)
-      result = tkBool
+      result = prim(tkBool)
     of "true":
       bu.add Node(kind: IntVal, val: 1)
-      result = tkBool
+      result = prim(tkBool)
     else:
       bu.add Node(kind: IntVal)
-      result = tkError
+      result = prim(tkError)
   of SourceKind.Call:
     result = callToIL(c, t, n, bu)
   of SourceKind.Return:
-    var typ: TypeKind
+    var typ: SemType
     bu.subTree Return:
       typ =
         case t.len(n)
         of 0:
           # as long as it's an 8-bit integer, the exact value doesn't matter
           bu.add Node(kind: IntVal)
-          tkUnit
+          prim(tkUnit)
         of 1: exprToIL(c, t, t.child(n, 0), bu)
         else: unreachable() # syntax error
 
-    if typ notin {tkError, tkVoid} and typ == c.retType:
-      result = tkVoid
+    if typ.kind notin {tkError, tkVoid} and typ == c.retType:
+      result = prim(tkVoid)
     else:
       # TODO: use proper error correction; a return expression is always of
       #       type ``void``
       # type mismatch
-      result = tkError
+      result = errorType()
   of SourceKind.Unreachable:
     bu.subTree Unreachable:
       discard
-    result = tkVoid
+    result = prim(tkVoid)
   of AllNodes - ExprNodes:
     unreachable()
 
@@ -268,12 +268,12 @@ proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
 
   initTree[NodeKind](finish(bu), c.literals)
 
-proc exprToIL*(c; t): TypeKind =
+proc exprToIL*(c; t): SemType =
   ## Translates the given source language expression to the highest-level IL
   ## and turns it into a procedure. Also returns the type of the expression.
   let (e, typ) = exprToIL(c, t, NodeIndex(0))
-  if typ == tkError:
-    return tkError # don't create any procedure
+  if typ.kind == tkError:
+    return typ # don't create any procedure
 
   let procTy = c.genProcType(typ)
 
@@ -282,7 +282,7 @@ proc exprToIL*(c; t): TypeKind =
   bu.subTree ProcDef:
     bu.add Node(kind: Type, val: procTy)
     bu.subTree Locals: discard
-    case typ
+    case typ.kind
     of tkVoid:
       bu.add e
     else:
@@ -292,7 +292,7 @@ proc exprToIL*(c; t): TypeKind =
   inc c.numProcs
   result = typ
 
-proc declToIL*(c; t; n: NodeIndex): TypeKind =
+proc declToIL*(c; t; n: NodeIndex): SemType =
   ## Translates the given source language declaration to the target IL.
   ## On success, the declaration effects are applied to `c` and the declared
   ## procedure's return type is returned.
@@ -301,7 +301,7 @@ proc declToIL*(c; t; n: NodeIndex): TypeKind =
     let name = t.getString(t.child(n, 0))
     if name in c.scope:
       # declaration with the given name already exists
-      return tkError
+      return errorType()
 
     c.retType = parseType(t, t.child(n, 1))
 
@@ -316,12 +316,12 @@ proc declToIL*(c; t; n: NodeIndex): TypeKind =
     c.scope[name] = ProcInfo(id: c.numProcs, result: c.retType)
 
     let (e, eTyp) = c.exprToIL(t, t.child(n, 3))
-    if eTyp == tkVoid:
+    if eTyp.kind == tkVoid:
       # the expression must always be a void expression
       bu.add e
     else:
       c.scope.del(name) # remove again
-      return tkError
+      return errorType()
 
     c.procs.add finish(bu)
     inc c.numProcs

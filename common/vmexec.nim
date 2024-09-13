@@ -11,7 +11,7 @@ import
     utils
   ]
 
-proc run*(env: var VmEnv, prc: ProcIndex, typ: TypeKind): string =
+proc run*(env: var VmEnv, prc: ProcIndex, typ: SemType): string =
   ## Runs the nullary procedure with index `prc`, and returns the result
   ## rendered as a string. `typ` is the type of the resulting value.
   var
@@ -21,7 +21,7 @@ proc run*(env: var VmEnv, prc: ProcIndex, typ: TypeKind): string =
 
   case res.kind
   of yrkDone:
-    case typ
+    case typ.kind
     of tkVoid:
       # this is nonsense ('void' has no value), but it's allowed for
       # convenience
