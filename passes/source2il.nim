@@ -89,6 +89,16 @@ proc typeToIL(c; typ: SemType): uint32 =
     c.addType Int: c.types.add(Node(kind: Immediate, val: 8))
   of tkFloat:
     c.addType Float: c.types.add(Node(kind: Immediate, val: 8))
+  of tkTuple:
+    let args = mapIt(typ.elems, c.typeToIL(it))
+    c.addType Record:
+      c.types.add Node(kind: Immediate, val: size(typ).uint32)
+      var off = 0 ## the current field offset
+      for i, it in args.pairs:
+        c.types.subTree Field:
+          c.types.add Node(kind: Immediate, val: off.uint32)
+          c.types.add Node(kind: Type, val: it)
+        off += size(typ.elems[i])
 
 proc genProcType(c; ret: SemType): uint32 =
   ## Generates a proc type with `ret` as the return type and adds it to `c`.

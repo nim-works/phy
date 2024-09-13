@@ -59,3 +59,15 @@ proc `==`*(a, b: SemType): bool =
         return
 
     result = true
+
+proc size*(t: SemType): int =
+  ## Computes the size-in-bytes that an instance of `t` occupies in memory.
+  case t.kind
+  of tkError, tkVoid: unreachable()
+  of tkUnit, tkBool: 1
+  of tkInt, tkFloat: 8
+  of tkTuple:
+    var s = 0
+    for it in t.elems.items:
+      s += size(it)
+    s
