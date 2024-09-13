@@ -455,16 +455,23 @@ when not defined(debug):
 
 # ------- VmThread API
 
-proc initThread*(c: VmEnv, prc: ProcIndex, stack: uint,
+proc initThread*(c: VmEnv, prc: ProcIndex, stack: HOslice[uint],
                  params: sink seq[Value]): VmThread =
   ## Creates a new VM thread, with `prc` as the starting procedure and `params`
-  ## as the initial operand stack. `stack` denotes the maximum number of stack
-  ## memory the thread can use.
+  ## as the initial operand stack. `stack` is the memory region to use for the
+  ## stack of the thread.
   VmThread(pc: c[prc].code.a,
-           stackEnd: stack,
+           sp: stack.a,
+           stackEnd: stack.b,
            stack: params,
            locals: newSeq[Value](c[prc].locals.len),
            frames: @[Frame(prc: prc)])
+
+proc initThread*(c: VmEnv, prc: ProcIndex, stack: uint,
+                 params: sink seq[Value]): VmThread =
+  ## Convenience wrapper around
+  ## `initThread <#initThread,VmEnv,ProcIndex,HOslice[uint],sinkseq[Value]>`_.
+  initThread(c, prc, hoSlice(0'u, stack), params)
 
 proc dispose*(c: var VmEnv, t: sink VmThread) =
   ## Cleans up and frees all VM data owned by `t`.
