@@ -54,16 +54,7 @@ proc `==`*(a, b: SemType): bool =
   of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:
     result = true
   of tkTuple:
-    # equal if both have the same number of elements, and the same element
-    # types
-    if a.elems.len != b.elems.len:
-      return false
-
-    for i in 0..<a.elems.len:
-      if a.elems[i] != b.elems[i]:
-        return
-
-    result = true
+    result = a.elems == b.elems
 
 proc size*(t: SemType): int =
   ## Computes the size-in-bytes that an instance of `t` occupies in memory.
