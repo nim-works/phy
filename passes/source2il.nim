@@ -185,7 +185,7 @@ proc inline(bu; e: sink Expr; stmts) =
   stmts.add e.stmts
   bu.add e.expr
 
-proc capture(c; e: sink Expr; bu; stmts): Node =
+proc capture(c; e: sink Expr; stmts): Node =
   ## Commits expression `e` to a fresh temporary. This is part of the
   ## expression-list lowering machinery.
   let tmp = c.newTemp(e.typ)
@@ -225,15 +225,11 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu, stmts): SemType =
     else:   unreachable()
 
   if eA.typ == eB.typ and eA.typ.kind in {tkInt, tkFloat}:
-    let
-      typ = c.typeToIL(eA.typ)
-      a = c.capture(eA, bu, stmts)
-      b = c.capture(eB, bu, stmts)
 
     bu.subTree op:
-      bu.add Node(kind: Type, val: typ)
-      bu.add a
-      bu.add b
+      bu.add Node(kind: Type, val: c.typeToIL(eA.typ))
+      bu.add c.capture(eA, stmts)
+      bu.add c.capture(eB, stmts)
 
     result = eA.typ
   else:
@@ -257,14 +253,10 @@ proc relToIL(c; t; n: NodeIndex, name: string, bu; stmts): SemType =
     else:   unreachable()
 
   if eA.typ == eB.typ and eA.typ.kind in valid:
-    let
-      a = c.capture(eA, bu, stmts)
-      b = c.capture(eB, bu, stmts)
-
     bu.subTree op:
       bu.add Node(kind: Type, val: c.typeToIL(eA.typ))
-      bu.add a
-      bu.add b
+      bu.add c.capture(eA, stmts)
+      bu.add c.capture(eB, stmts)
 
     result = prim(tkBool)
   else:
