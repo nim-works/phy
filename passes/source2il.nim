@@ -165,8 +165,8 @@ proc newTemp(c; typ: SemType): uint32 =
 proc genAsgn(c; a: Node|NodeSeq, b: NodeSeq, typ: SemType, bu) =
   ## Emits an ``a = b`` assignment to `bu`.
   case typ.kind
-  of tkTuple:
-    # record types don't support assignments in the target IL, so a ``Copy``
+  of ComplexTypes:
+    # complex types don't support assignments in the target IL, so a ``Copy``
     # has to be used
     # XXX: this will happen as part of a lowering pass, eventually
     bu.subTree Copy:
