@@ -2,12 +2,13 @@
 ## source-language types.
 
 # XXX: the idea of ``SemType`` is misguided. Instead of using a custom IR, it
-#      would be simpler *and* more efficient to use ouput ``PackedTree`` as
+#      would be simpler *and* more efficient to use the ouput ``PackedTree`` as
 #      the type IR. There's no ``SemType``-to-tree translation step then, and
 #      instead of copying around ``SemType``s (which is costly), only a
-#      ``NodeIndex`` (referring to the type) would be copied around.
-#      If types are de-duplicated on creation, this would reduce type equality
-#      to an integer comparison
+#      ``NodeIndex`` (referring to the type) would have to be copied around.
+#
+#      If types are de-duplicated on creation, this would also reduce testing
+#      types for equality to an integer comparison
 
 import
   vm/[
@@ -25,7 +26,7 @@ type
     tkTuple
 
   SemType* = object
-    ## Represent a source-language type. The "Sem" prefix is to not have it
+    ## Represents a source-language type. The "Sem" prefix is there to prevent
     ## name conflicts with other types named `Type`.
     case kind*: TypeKind
     of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:

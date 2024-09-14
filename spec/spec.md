@@ -175,8 +175,8 @@ type_expr += (TupleTy)              # first form
 
 The first form of the `TupleTy` operator produces the `unit` type.
 
-> TODO: this behaviour makes sense, but it renders `UnitTy` obsolete. Consider
-> removing the latter.
+> TODO: this behaviour makes sense, but it renders `UnitTy` redundant. Consider
+> removing the latter, or at least making it an alias for `(TupleTy)`.
 
 The second form constructs a `tuple` type with from the given type. Allowed
 operand type kinds are: `unit`, `int`, `float`, and `tuple`. An error is
