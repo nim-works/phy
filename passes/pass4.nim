@@ -447,7 +447,7 @@ proc lowerCont(c; tree; gr; cont: Cont, self: int, changes) =
     if tree.len(exit) == 3:
       let g = cont.groups.a
       if isExit(tree, gr.conts[gr.groups[g].target].n):
-        lowerExpr(tree, tree.child(exit, 0), active, changes)
+        lowerExpr(tree, tree.child(exit, 1), active, changes)
       else:
         let dst = c.getDest(gr, cont, g)
         active.addUnique(dst)
