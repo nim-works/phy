@@ -356,7 +356,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         elems[i] = e.typ
 
         if e.typ.kind in {tkError, tkVoid}:
-          return e.typ
+          return errorType()
 
         stmts.add e.stmts
         # add an assignment for the field:
