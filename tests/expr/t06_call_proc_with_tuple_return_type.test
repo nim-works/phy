@@ -1,0 +1,8 @@
+discard """
+  output: "(100, 200): (int, int)"
+"""
+(Module
+  (ProcDecl (Ident "a") (TupleTy (IntTy) (IntTy)) (Params)
+    (Return (TupleCons (IntVal 100) (IntVal 200))))
+  (ProcDecl (Ident "main") (TupleTy (IntTy) (IntTy)) (Params)
+    (Return (Call (Ident "a")))))

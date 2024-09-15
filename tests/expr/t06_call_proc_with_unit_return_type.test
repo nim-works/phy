@@ -1,5 +1,5 @@
 discard """
-  output: "unit"
+  output: "(): unit"
 """
 (Module
   (ProcDecl (Ident "a") (UnitTy) (Params)
