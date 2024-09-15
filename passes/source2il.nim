@@ -228,8 +228,10 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu, stmts): SemType =
 
     bu.subTree op:
       bu.add Node(kind: Type, val: c.typeToIL(eA.typ))
-      bu.add c.capture(eA, stmts)
-      bu.add c.capture(eB, stmts)
+      bu.subTree Copy:
+        bu.add c.capture(eA, stmts)
+      bu.subTree Copy:
+        bu.add c.capture(eB, stmts)
 
     result = eA.typ
   else:
@@ -255,8 +257,10 @@ proc relToIL(c; t; n: NodeIndex, name: string, bu; stmts): SemType =
   if eA.typ == eB.typ and eA.typ.kind in valid:
     bu.subTree op:
       bu.add Node(kind: Type, val: c.typeToIL(eA.typ))
-      bu.add c.capture(eA, stmts)
-      bu.add c.capture(eB, stmts)
+      bu.subTree Copy:
+        bu.add c.capture(eA, stmts)
+      bu.subTree Copy:
+        bu.add c.capture(eB, stmts)
 
     result = prim(tkBool)
   else:
