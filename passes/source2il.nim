@@ -305,10 +305,11 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
       of ComplexTypes:
         # the value is not returned normally, but passed via an out parameter
         let tmp = c.newTemp(prc.result)
-        stmts.addStmt Call:
-          bu.add Node(kind: Proc, val: prc.id.uint32)
-          bu.subTree Addr:
-            bu.add Node(kind: Local, val: tmp)
+        stmts.addStmt Drop:
+          bu.subTree Call:
+            bu.add Node(kind: Proc, val: prc.id.uint32)
+            bu.subTree Addr:
+              bu.add Node(kind: Local, val: tmp)
 
         # return the temporary as the expression
         bu.add Node(kind: Local, val: tmp)
