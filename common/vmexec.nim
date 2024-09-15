@@ -12,6 +12,85 @@ import
     utils
   ]
 
+proc readInt(p: HostPointer, size: range[1..8]): int64 =
+  copyMem(addr result, p, size)
+
+proc readFloat64(p: HostPointer): float64 =
+  copyMem(addr result, p, 8)
+
+proc primToString(v: Value, typ: SemType): string =
+  ## Renders the primitive value `v` of `typ` type to a string.
+  case typ.kind
+  of tkVoid:
+    # this is nonsense ('void' has no value), but it's allowed for
+    # convenience
+    ""
+  of tkUnit:
+    "()"
+  of tkBool:
+    case v.intVal
+    of 0: "false"
+    of 1: "true"
+    else: "unknown(" & $v.intVal & ")"
+  of tkInt:
+    $v.intVal
+  of tkFloat:
+    $v.floatVal
+  of ComplexTypes, tkError:
+    unreachable()
+
+proc valueToString(env: var VmEnv, a: VirtualAddr, typ: SemType): string =
+  ## Reads a value of the given `typ` from memory location at `a` and renders
+  ## it to a string. The address is validated first.
+  var p: HostPointer
+  if checkmem(env.allocator, a, uint64 size(typ), p):
+    return "<inaccessible: " & $cast[uint](a) & ">"
+
+  case typ.kind
+  of tkUnit:
+    result = "()"
+  of tkBool:
+    result = primToString(Value(readInt(p, 1)), typ)
+  of tkInt:
+    result = $readInt(p, 8)
+  of tkFloat:
+    result = $readFloat64(p)
+  of tkTuple:
+    result = "("
+    var offset = 0
+    for i, it in typ.elems.pairs:
+      if i > 0:
+        result.add ", "
+      result.add valueToString(env, VirtualAddr(a.uint64 + offset.uint64), it)
+      offset += size(it)
+
+    if typ.elems.len == 1:
+      result.add ","
+    result.add ")"
+  of tkVoid, tkError:
+    unreachable()
+
+proc typeToString(typ: SemType): string =
+  case typ.kind
+  of tkVoid:  "void"
+  of tkUnit:  "unit"
+  of tkBool:  "bool"
+  of tkInt:   "int"
+  of tkFloat: "float"
+  of tkTuple:
+    var res = "("
+    for i, it in typ.elems.pairs:
+      if i > 0:
+        res.add ", "
+      res.add typeToString(it)
+
+    if typ.elems.len == 1:
+      res.add ","
+    res.add ")"
+    res
+  of tkError:
+    unreachable()
+
 proc run*(env: var VmEnv, prc: ProcIndex, typ: SemType): string =
   ## Runs the nullary procedure with index `prc`, and returns the result
   ## rendered as a string. `typ` is the type of the resulting value.
@@ -29,27 +108,16 @@ proc run*(env: var VmEnv, prc: ProcIndex, typ: SemType): string =
 
   case res.kind
   of yrkDone:
-    case typ.kind
-    of tkVoid:
-      # this is nonsense ('void' has no value), but it's allowed for
-      # convenience
-      result = "void"
-    of tkUnit:
-      result = "unit"
-    of tkBool:
-      case res.result.intVal
-      of 0: result = "false: bool"
-      of 1: result = "true: bool"
-      else: result = "unknown(" & $res.result.intVal & "): bool"
-    of tkInt:
-      result = $res.result.intVal & ": int"
-    of tkFloat:
-      result = $res.result.floatVal & ": float"
-    of tkTuple:
-      # FIXME: implement this
-      result = "<missing>"
-    of tkError:
-      unreachable()
+    # render the value:
+    result =
+      case typ.kind
+      of ComplexTypes: valueToString(env, toVirt(0), typ)
+      else:            primToString(res.result, typ)
+
+    # add the type:
+    if result.len > 0:
+      result.add ": "
+    result.add typeToString(typ)
   of yrkError:
     result = "runtime error: " & $res.error
   of yrkUnhandledException:
