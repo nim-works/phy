@@ -1,0 +1,4 @@
+discard """
+  output: "(100, (100,)): (int, (int,))"
+"""
+(TupleCons (IntVal 100) (TupleCons (IntVal 100)))

@@ -20,6 +20,9 @@ import
     spec_source,
     trees
   ],
+  phy/[
+    types
+  ],
   common/[
     vmexec
   ],
@@ -46,7 +49,7 @@ s.close()
 # translate the input
 
 var ctx = source2il.open()
-var typ: TypeKind
+var typ: SemType
 
 case input[NodeIndex(0)].kind
 of DeclNodes:
@@ -59,19 +62,19 @@ of Module:
   # it's a full module. Translate all declarations
   for it in input.items(NodeIndex(0)):
     typ = ctx.declToIL(input, it)
-    if typ == tkError:
+    if typ.kind == tkError:
       break
 
   # the last procedure is the one that will be executed
 
   if input.len(NodeIndex(0)) == 0:
-    typ = tkVoid # set to something that's not ``tkError``
+    typ = prim(tkVoid) # set to something that's not ``tkError``
 else:
   echo "unexpected node: ", input[NodeIndex(0)].kind
   quit(1)
 
 # don't continue if there was an error:
-if typ == tkError:
+if typ.kind == tkError:
   echo "semantic analysis failed"
   quit(2)
 

@@ -1,0 +1,4 @@
+discard """
+  output: "(100,): (int,)"
+"""
+(TupleCons (IntVal 100))
