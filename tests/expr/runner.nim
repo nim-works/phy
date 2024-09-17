@@ -21,6 +21,7 @@ import
     trees
   ],
   phy/[
+    default_reporting,
     types
   ],
   common/[
@@ -48,7 +49,8 @@ s.close()
 # -------------------
 # translate the input
 
-var ctx = source2il.open()
+var reporter = initDefaultReporter[string]()
+var ctx = source2il.open(reporter)
 var typ: SemType
 
 case input[NodeIndex(0)].kind
@@ -62,8 +64,6 @@ of Module:
   # it's a full module. Translate all declarations
   for it in input.items(NodeIndex(0)):
     typ = ctx.declToIL(input, it)
-    if typ.kind == tkError:
-      break
 
   # the last procedure is the one that will be executed
 
@@ -74,8 +74,10 @@ else:
   quit(1)
 
 # don't continue if there was an error:
-if typ.kind == tkError:
-  echo "semantic analysis failed"
+let messages = reporter[].retrieve()
+if messages.len > 0:
+  for it in messages.items:
+    echo "Error: ", it
   quit(2)
 
 # ---------------
