@@ -6,6 +6,7 @@ import
     strutils
   ],
   experimental/[
+    colortext,
     sexp,
     sexp_parse
   ],
@@ -21,7 +22,7 @@ import
     trees,
   ],
   phy/[
-    types
+    default_reporting
   ],
   common/[
     vmexec
@@ -36,6 +37,8 @@ type
     ## A stream implementation that returns lines from the standard input.
     line: string
     pos: int
+
+  Reporter = ref DefaultReporter[string]
 
 iterator parse(stream: Stream): tuple[n: SexpNode, depth: int] {.closure.} =
   ## Incrementally parses an S-expression from `stream`. The iterator yields:
@@ -87,18 +90,24 @@ iterator parse(stream: Stream): tuple[n: SexpNode, depth: int] {.closure.} =
       # we're done
       return (nil, 0)
 
-proc process(ctx: var ModuleCtx, tree: PackedTree[NodeKind]) =
+proc process(ctx: var ModuleCtx, reporter: Reporter,
+             tree: PackedTree[NodeKind]) =
   case tree[NodeIndex(0)].kind
   of DeclNodes:
-    if ctx.declToIL(tree, NodeIndex(0)).kind == TypeKind.tkError:
-      echo "error in declaration"
+    discard ctx.declToIL(tree, NodeIndex(0))
+
+    for msg in reporter[].retrieve().items:
+      echo "Error: " + fgRed, msg
 
   of ExprNodes:
     let typ = ctx.exprToIL(tree)
 
+    let messages = reporter[].retrieve()
+    for msg in messages.items:
+      echo "Error: " + fgRed, msg
+
     # don't continue if there was an error:
-    if typ.kind == TypeKind.tkError:
-      echo "expression has an error"
+    if messages.len > 0:
       return
 
     # XXX: rather inefficient. Ideally, only the new code would be
@@ -167,7 +176,8 @@ stream.readDataStrImpl = readDataStrImpl
 
 var depth = 0 ## the current S-expression nesting
 var iter = parse
-var module = source2il.open()
+var reporter = initDefaultReporter[string]()
+var module = source2il.open(reporter)
 
 block loop:
   while not finished(iter):
@@ -185,7 +195,7 @@ block loop:
       if n.len == 1 and n[0].kind == SSymbol and n[0].symbol == "quit":
         break loop # quit
 
-      process(module):
+      process(module, reporter):
         try:
           fromSexp[NodeKind](n)
         except ValueError as e:
