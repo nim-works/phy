@@ -29,9 +29,8 @@ type
   ModuleCtx* = object
     ## The translation/analysis context for a single module.
     reporter: ref ReportContext[string]
-    # XXX: strings being used for messages is a temporary measure. Eventually,
-    #      a dedicated message type that offloads message formating to message
-    #      rendering will be used
+    # XXX: strings being used for diagnostics is a temporary measure. Message
+    #      formatting should eventually be separated from diagnostic emission
 
     literals: Literals
     types: Builder[NodeKind]
