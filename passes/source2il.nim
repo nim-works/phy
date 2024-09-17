@@ -9,7 +9,7 @@
 import
   std/[sequtils, tables],
   passes/[builders, spec, trees],
-  phy/[types],
+  phy/[reporting, types],
   vm/[utils]
 
 import passes/spec_source except NodeKind
@@ -28,6 +28,11 @@ type
 
   ModuleCtx* = object
     ## The translation/analysis context for a single module.
+    reporter: ref ReportContext[string]
+    # XXX: strings being used for messages is a temporary measure. Eventually,
+    #      a dedicated message type that offloads message formating to message
+    #      rendering will be used
+
     literals: Literals
     types: Builder[NodeKind]
       ## the in-progress type section
@@ -59,12 +64,16 @@ using
   bu: var Builder[NodeKind]
   stmts: var seq[NodeSeq]
 
+proc reportError(c; message: sink string) =
+  ## Sends the error message `message` to the reporter.
+  c.reporter.report(message)
+
 template addType(c; kind: NodeKind, body: untyped): uint32 =
   c.types.subTree kind:
     body
   (let r = c.numTypes; inc c.numTypes; r.uint32)
 
-proc evalType(t; n: NodeIndex): SemType =
+proc evalType(c; t; n: NodeIndex): SemType =
   ## Evaluates a type expression, yielding the resulting type.
   case t[n].kind
   of VoidTy:  prim(tkVoid)
@@ -78,11 +87,17 @@ proc evalType(t; n: NodeIndex): SemType =
     else:
       var tup = SemType(kind: tkTuple)
       for it in t.items(n):
-        tup.elems.add evalType(t, it)
-        if tup.elems[^1].kind in {tkError, tkVoid}:
-          # error propagation and void handling
+        tup.elems.add evalType(c, t, it)
+        case tup.elems[^1].kind
+        of tkError:
           tup = errorType()
           break
+        of tkVoid:
+          c.reportError("'void' type cannot be part of tuple type")
+          tup = errorType()
+          break
+        else:
+          discard "all good"
 
       tup
   else:       unreachable() # syntax error
@@ -206,6 +221,7 @@ template lenCheck(t; n: NodeIndex, bu; expected: int) =
   ## Exits the current analysis procedure with an error, if `n` doesn't have
   ## `expected` children.
   if t.len(n) != expected:
+    c.reportError("expected " & $expected & " arguments, but got " & $t.len(n))
     bu.add Node(kind: IntVal)
     return errorType()
 
@@ -224,8 +240,15 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu, stmts): SemType =
     of "-": Sub
     else:   unreachable()
 
-  if eA.typ == eB.typ and eA.typ.kind in {tkInt, tkFloat}:
-
+  if tkError in {eA.typ.kind, eB.typ.kind}:
+    result = errorType()
+  elif eA.typ != eB.typ:
+    c.reportError("arguments have mismatching types")
+    result = errorType()
+  elif eA.typ.kind notin {tkInt, tkFloat}:
+    c.reportError("arguments must be of 'int' or 'float' type")
+    result = errorType()
+  else:
     bu.subTree op:
       bu.add Node(kind: Type, val: c.typeToIL(eA.typ))
       bu.subTree Copy:
@@ -234,9 +257,6 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu, stmts): SemType =
         bu.add c.capture(eB, stmts)
 
     result = eA.typ
-  else:
-    bu.add Node(kind: IntVal)
-    result = errorType()
 
 proc relToIL(c; t; n: NodeIndex, name: string, bu; stmts): SemType =
   ## Analyzes and emits the IL for a relational operation.
@@ -263,7 +283,10 @@ proc relToIL(c; t; n: NodeIndex, name: string, bu; stmts): SemType =
         bu.add c.capture(eB, stmts)
 
     result = prim(tkBool)
+  elif tkError in {eA.typ.kind, eB.typ.kind}:
+    result = errorType()
   else:
+    c.reportError("arguments have mismatching types")
     bu.add Node(kind: IntVal)
     result = errorType()
 
@@ -278,6 +301,7 @@ proc notToIL(c; t; n: NodeIndex, bu; stmts): SemType =
       bu.inline(arg, stmts)
     result = prim(tkBool)
   else:
+    c.reportError("expected 'bool' expression")
     bu.add Node(kind: IntVal)
     result = errorType()
 
@@ -319,9 +343,11 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
 
       result = prc.result
     else:
+      c.reportError("expected 0 arguments, but got " & $(t.len(n) - 1))
       bu.add Node(kind: IntVal)
       result = errorType()
   else:
+    c.reportError("undeclared identifier: " & name)
     bu.add Node(kind: IntVal)
     result = errorType()
 
@@ -342,6 +368,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       bu.add Node(kind: IntVal, val: 1)
       result = prim(tkBool)
     else:
+      c.reportError("undeclared identifier: " & t.getString(n))
       bu.add Node(kind: IntVal)
       result = prim(tkError)
   of SourceKind.Call:
@@ -356,7 +383,10 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         let e = c.exprToIL(t, it)
         elems[i] = e.typ
 
-        if e.typ.kind in {tkError, tkVoid}:
+        if e.typ.kind == tkError:
+          return errorType()
+        elif e.typ.kind == tkVoid:
+          c.reportError("tuple element cannot be 'void'")
           return errorType()
 
         stmts.add e.stmts
@@ -409,13 +439,11 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       else:
         unreachable() # syntax error
 
-    if typ.kind != tkVoid and typ == c.retType:
-      result = prim(tkVoid)
-    else:
-      # TODO: use proper error correction; a return expression is always of
-      #       type ``void``
-      # type mismatch
-      result = errorType()
+    result = prim(tkVoid)
+    if typ.kind == tkVoid:
+      c.reportError("cannot return 'void' expression")
+    elif typ != c.retType:
+      c.reportError("returned value's type doesn't match return type")
   of SourceKind.Unreachable:
     bu.subTree Unreachable:
       discard
@@ -423,9 +451,10 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
   of AllNodes - ExprNodes:
     unreachable()
 
-proc open*(): ModuleCtx =
+proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   ## Creates a new empty module translation/analysis context.
-  ModuleCtx(types: initBuilder[NodeKind](TypeDefs),
+  ModuleCtx(reporter: reporter,
+            types: initBuilder[NodeKind](TypeDefs),
             procs: initBuilder[NodeKind](ProcDefs))
 
 proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
@@ -497,10 +526,10 @@ proc declToIL*(c; t; n: NodeIndex): SemType =
   of SourceKind.ProcDecl:
     let name = t.getString(t.child(n, 0))
     if name in c.scope:
-      # declaration with the given name already exists
+      c.reportError("redeclaration of '" & name & "'")
       return errorType()
 
-    c.retType = evalType(t, t.child(n, 1))
+    c.retType = evalType(c, t, t.child(n, 1))
 
     let procTy = c.genProcType(c.retType)
 
@@ -518,6 +547,7 @@ proc declToIL*(c; t; n: NodeIndex): SemType =
     let e = c.exprToIL(t, t.child(n, 3))
     # the body expression must always be a void expression
     if e.typ.kind != tkVoid:
+      c.reportError("a procedure body must be a 'void' expression")
       c.scope.del(name) # remove again
       return errorType()
 
