@@ -1,0 +1,46 @@
+discard """
+"""
+(TypeDefs
+  (Int 4)
+  (UInt 4)
+  (Float 4)
+  (Float 8)
+  (ProcTy (Type 0))
+  (ProcTy (Type 0) (Type 0) (Type 1) (Type 2) (Type 3))
+  (UInt 2)
+  (UInt 1)
+  (Int 1)
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 5) (Locals (Type 0) (Type 1) (Type 2) (Type 3)) (Continuations
+    (Continuation (Params) 0 (Continue 1 (Copy (Local 0))))
+    (Continuation (Params (Type 0)))
+  ))
+  (ProcDef (Type 4) (Locals (Type 0) (Type 6)) (Continuations
+    (Continuation (Params) 4
+      (Asgn (Local 0) (Call (Proc 0) (IntVal -1) (IntVal 1) (FloatVal 10.0) (FloatVal 11.0)))
+      (Store (Type 0) (Addr 0) (Copy (Local 0)))
+      (Select (Type 0) (IntVal 1) (Choice (IntVal 1) (Continue 1)) (Choice (IntVal 6) (Continue 2)))
+    )
+    (Continuation (Params) 4
+      (Drop (Reinterp (Type 1) (Type 2) (Neg (Type 2) (FloatVal 1.5))))
+      (Drop (Div (Type 1) (IntVal -1) (IntVal 2)))
+      (Drop (Conv (Type 1) (Type 7) (BitNot (Type 7) (IntVal 2))))
+      (Continue 5 (Conv (Type 0) (Type 8) (Shl (Type 8) (IntVal 1) (IntVal 7))))
+    )
+    (Continuation (Params) 0
+      (SelectBool (Lt (Type 6) (Copy (Local 1)) (IntVal 10)) (Continue 3) (Continue 4))
+    )
+    (Continuation (Params) 0
+      (Asgn (Local 1) (Add (Type 6) (Copy (Local 1)) (IntVal 1)))
+      (Loop 2)
+    )
+    (Continuation (Params) 32
+      (Clear (Addr 0) (IntVal 32))
+      (Copy (Addr 0) (Addr 16) (IntVal 16))
+      (Continue 3 (Call (Type 5) (ProcVal 0) (Conv (Type 0) (Type 6) (Mul (Type 6) (Copy (Local 1)) (IntVal 10))) (IntVal 1) (FloatVal 10.0) (FloatVal 11.0)))
+    )
+    (Continuation (Params (Type 0)))
+  ))
+)
