@@ -14,6 +14,7 @@ type
     VoidTy, UnitTy, BoolTy, IntTy, FloatTy, TupleTy
     Call
     TupleCons
+    TupleAccess
     Return
     Unreachable
     Params
@@ -21,7 +22,8 @@ type
     Module
 
 const
-  ExprNodes* = {IntVal, FloatVal, Ident, Call, TupleCons, Return, Unreachable}
+  ExprNodes* = {IntVal, FloatVal, Ident, Call, TupleCons, TupleAccess, Return,
+                Unreachable}
   DeclNodes* = {ProcDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 
