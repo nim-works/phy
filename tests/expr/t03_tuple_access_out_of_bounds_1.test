@@ -1,0 +1,6 @@
+discard """
+  reject: true
+"""
+(TupleAccess
+  (TupleCons (IntVal 100))
+  (IntVal 1))

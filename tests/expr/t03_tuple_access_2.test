@@ -1,0 +1,6 @@
+discard """
+  output: "10.5: float"
+"""
+(TupleAccess
+  (TupleCons (IntVal 100) (FloatVal 10.5))
+  (IntVal 1))
