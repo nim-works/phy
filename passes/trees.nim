@@ -41,6 +41,10 @@ proc initTree*[T](nodes: sink seq[TreeNode[T]],
 proc `[]`*[T](t: PackedTree[T], at: NodeIndex): TreeNode[T] {.inline.} =
   t.nodes[ord at]
 
+proc contains*(t: PackedTree, n: NodeIndex): bool {.inline.} =
+  ## Returns whether `n` is a valid node index.
+  ord(n) in 0..<t.nodes.len
+
 proc next*(t: PackedTree, i: NodeIndex): NodeIndex =
   ## Returns the index of the first node following `i` that is not a child
   ## node of `i`.
