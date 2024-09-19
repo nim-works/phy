@@ -89,7 +89,7 @@ jobs:
 
       # run the passtool for the highest-level language:
       - name: "Check the IL grammar"
-        run: bin/passtool passes lang10
+        run: bin/passtool verify passes lang10
 
       - name: "Check the source language grammar"
-        run: bin/passtool spec spec
+        run: bin/passtool verify spec spec
