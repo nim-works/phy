@@ -1,0 +1,14 @@
+discard """
+  output: "(Done 1.5)"
+"""
+.type P1 (Proc (Float))
+.start P1 main
+.local tmp Int
+StackAlloc 8
+SetLocal tmp
+LdImmFloat 1.5
+WrFlt64 0
+GetLocal tmp
+LdFlt64 0
+Ret
+.end

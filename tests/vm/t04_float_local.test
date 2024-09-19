@@ -1,0 +1,11 @@
+discard """
+  output: "(Done 0.5)"
+"""
+.type P1 (Proc (Float))
+.start P1 main
+.local tmp float
+LdImmFloat 0.5
+PopLocal tmp
+GetLocal tmp
+Ret
+.end
