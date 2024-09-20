@@ -42,6 +42,10 @@ jobs:
           - name: Windows
             runner: windows-2022
 
+    # run the language-related chores first, so that not up-to-date generated
+    # files don't result in confusing test failures
+    needs: [languages]
+
     name: "Build binaries (${{ matrix.target.name }})"
     runs-on: ${{ matrix.target.runner }}
 
@@ -93,3 +97,16 @@ jobs:
 
       - name: "Check the source language grammar"
         run: bin/passtool verify spec spec
+
+      # make sure all generated files are up-to-date:
+      - name: "Up-to-date check"
+        run: |
+          mkdir "${{ runner.temp }}/gen"
+
+          bin/passtool gen-checks passes lang10 passes/spec "${{ runner.temp }}/gen/*_checks.nim"
+          bin/passtool gen-checks spec spec passes/spec_source "${{ runner.temp }}/gen/source_checks.nim"
+
+          if ! diff -rq "${{ runner.temp }}/gen" passes/gen; then
+            echo "::error::The generated modules are not up-to-date. Please update them."
+            exit 1
+          fi
