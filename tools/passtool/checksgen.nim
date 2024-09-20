@@ -24,6 +24,28 @@ proc add(o: var Output, m: string) =
     o.text.add "  "
   o.text.add m
 
+proc short(e: Expr): string =
+  ## Produces a shorter text representation of `e` than ``$``.
+  assert not e.isRef
+  result = "(" & e.name
+  for it in e.rules.items:
+    result.add " "
+    if it.expr.isRef:
+      result.add "<" & it.expr.name & ">"
+    else:
+      result.add "(" & it.expr.name
+      if it.expr.rules.len > 0:
+        result.add " ..."
+      result.add ")"
+
+    case it.repeat
+    of rOnce:       discard
+    of rZeroOrOne:  result.add "?"
+    of rZeroOrMore: result.add "*"
+    of rOneOrMore:  result.add "+"
+
+  result.add ")"
+
 proc genMatcher(e: Expr, output: var Output): string =
   ## Generates the matcher code for the single expression `e`. Returns the
   ## boolean expression to test for success with.
@@ -35,7 +57,7 @@ proc genMatcher(e: Expr, output: var Output): string =
     else:
       result = "check_" & e.name & "(tree, n, err)"
   else:
-    output.add "matchTree \"" & $e & "\", " & e.name & ", match:\n"
+    output.add "matchTree \"" & short(e) & "\", " & e.name & ", match:\n"
     inc output.indent
 
     var hasTmp = false
