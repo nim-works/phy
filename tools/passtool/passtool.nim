@@ -3,7 +3,7 @@
 ## verification logic and type definitions (if requested).
 
 import
-  std/[os, tables],
+  std/[strutils, os, tables],
   experimental/[colortext],
   sem, checksgen
 
@@ -34,7 +34,17 @@ proc main(args: openArray[string]) =
       echo "usage: passtool <dir> <langname> gen-checks <module> <out-file>"
       quit(1)
 
-    writeFile(args[4], gen(langs[args[2]], args[3]))
+    let
+      module = args[3] # the import path of the spec module
+      outfile = args[4]
+
+    if '*' in outfile:
+      # generate the checks module for every language
+      for name, lang in langs.pairs:
+        writeFile(outfile.replace("*", name), gen(lang, module))
+    else:
+      # only generate the checks module for the specified language
+      writeFile(outfile, gen(langs[args[2]], module))
   else:
     echo "unknown command: ", args[0]
     quit(1)
