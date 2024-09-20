@@ -80,7 +80,8 @@ Otherwise, an error is reported.
 #### Literals
 
 ```grammar
-expr += (IntVal <int>)
+int_val ::= (IntVal <int>)
+expr += <int_val>
       | (FloatVal <float>)
 ```
 
@@ -155,6 +156,21 @@ type of the first expression, `T2` the type of the second expression (if any),
 and so on.
 
 An error is reported if any `Tx` is `void`.
+
+### Tuple Elimination
+
+```grammar
+expr += (FieldAccess tup:<expr> index:<int_val>)
+```
+
+Retrieves the value from the `index`-th position of the tuple.
+
+Let `T` be the type of `tup`. If `T` is not a `tuple` type, an error is
+reported. If `index` is an integer value less than 0, or greater than or equal
+to the number of positions in the tuple type `T`, an error is reported.
+
+Given type `tuple(T[0], .., T[n])` for `T`, the type of the expression is
+`T[index]`.
 
 ### Type Expressions
 

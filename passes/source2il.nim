@@ -405,6 +405,37 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       # it's a unit value
       bu.add Node(kind: IntVal)
       result = prim(tkUnit)
+  of SourceKind.FieldAccess:
+    let
+      (a, b) = t.pair(n)
+      tup = c.exprToIL(t, a)
+    case tup.typ.kind
+    of tkTuple:
+      let idx = t.getInt(b)
+      if idx >= 0 and idx < tup.typ.elems.len:
+        result = tup.typ.elems[idx]
+
+        case result.kind
+        of ComplexTypes:
+          bu.subTree Field:
+            bu.inline(tup, stmts)
+            bu.add Node(kind: Immediate, val: idx.uint32)
+        else:
+          # TODO: wrapping the expression in a Copy operation needs to happen
+          #       at the callsite (because only the consumer knows whether to
+          #       copy or not)
+          bu.subTree Copy:
+            bu.subTree Field:
+              bu.inline(tup, stmts)
+              bu.add Node(kind: Immediate, val: idx.uint32)
+      else:
+        c.error("tuple has no element with index " & $idx)
+        result = errorType()
+    of tkError:
+      result = tup.typ
+    else:
+      c.error("expected 'tuple' value")
+      result = errorType()
   of SourceKind.Return:
     var typ: SemType
     bu.subTree Return:

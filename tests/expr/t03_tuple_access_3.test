@@ -1,0 +1,7 @@
+discard """
+  output: "(100,): (int,)"
+"""
+(FieldAccess
+  (TupleCons
+    (TupleCons (IntVal 100)))
+  (IntVal 0))
