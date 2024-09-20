@@ -194,12 +194,12 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
     check not checkmem(c.allocator, a, uint(len), p), ecIllegalAccess
     p
 
-  template load(typ: typedesc) =
-    asgn 1, cast[ptr typ](checkmem(operand(1).intVal + imm32(), sizeof(typ)))[]
+  template load[T](typ: typedesc[T]): T =
+    cast[ptr typ](checkmem(operand(1).intVal + imm32(), sizeof(typ)))[]
 
-  template store(typ: typedesc) =
-    let val = pop(typ)
-    cast[ptr typ](checkmem(pop(int64) + imm32(), sizeof(typ)))[] = val
+  template store[T](v: T) =
+    let val = v
+    cast[ptr T](checkmem(pop(int64) + imm32(), sizeof(T)))[] = val
 
   template mainLoop(label, body: untyped) =
     # a template in order to reduce visual nesting
@@ -329,18 +329,18 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
     of opcReinterpI64, opcReinterpF64:
       discard "a no-op"
 
-    of opcLdInt8:   load(uint8)
-    of opcLdInt16:  load(uint16)
-    of opcLdInt32:  load(uint32)
-    of opcLdInt64:  load(uint64)
-    of opcLdFlt32:  load(float32)
-    of opcLdFlt64:  load(float64)
-    of opcWrInt8:   store(uint8)
-    of opcWrInt16:  store(uint16)
-    of opcWrInt32:  store(uint32)
-    of opcWrInt64:  store(uint64)
-    of opcWrFlt32:  store(float32)
-    of opcWrFlt64:  store(float64)
+    of opcLdInt8:   asgn 1, load(uint8)
+    of opcLdInt16:  asgn 1, load(uint16)
+    of opcLdInt32:  asgn 1, load(uint32)
+    of opcLdInt64:  asgn 1, load(uint64)
+    of opcLdFlt32:  asgn 1, load(float32).float64
+    of opcLdFlt64:  asgn 1, load(float64)
+    of opcWrInt8:   store(pop(uint8))
+    of opcWrInt16:  store(pop(uint16))
+    of opcWrInt32:  store(pop(uint32))
+    of opcWrInt64:  store(pop(uint64))
+    of opcWrFlt32:  store(pop(float64).float32)
+    of opcWrFlt64:  store(pop(float64))
     of opcWrRef:
       let val = pop(ForeignRef)
       let dst = cast[ptr ForeignRef](checkmem(pop(int64) + imm32(), 8))
