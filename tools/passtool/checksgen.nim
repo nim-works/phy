@@ -66,18 +66,17 @@ proc genMatcher(e: Expr, output: var Output): string =
       case m.repeat
       of rOnce:
         let x = genMatcher(m.expr, output)
-        output.add "if not " & $x & ": break match\n"
+        output.add "if num == len or not " & $x & ": break match\n"
         output.add "inc num\n"
       of rZeroOrOne:
         let x = genMatcher(m.expr, output)
-        output.add "if " & x & ": inc num\n"
+        output.add "if num < len and " & x & ": inc num\n"
       of rZeroOrMore:
-        output.add "while true:\n"
+        output.add "while num < len:\n"
         inc output.indent
         output.add "if not " & genMatcher(m.expr, output) & ": break\n"
         output.add "inc num\n"
         dec output.indent
-        output.add "if wasError(n): break match\n"
       of rOneOrMore:
         if hasTmp:
           output.add "tmp = num\n"
@@ -85,12 +84,12 @@ proc genMatcher(e: Expr, output: var Output): string =
           output.add "var tmp = num\n"
           hasTmp = true
 
-        output.add "while true:\n"
+        output.add "while num < len:\n"
         inc output.indent
         output.add "if not " & genMatcher(m.expr, output) & ": break\n"
         output.add "inc num\n"
         dec output.indent
-        output.add "if wasError(n) or tmp == num: break match\n"
+        output.add "if tmp == num: break match\n"
 
     if e.rules.len == 0:
       output.add "discard\n"
@@ -117,10 +116,7 @@ proc gen*(lang: Grammar, module: string): string =
 
     template setError(e, n: NodeIndex, c: int, r: string) =
       if ord(err.pos) < ord(e):
-        err = Error(pos: e, rule: r, node: e, child: c)
-
-    template wasError(n: NodeIndex): bool =
-      ord(err.pos) >= ord(n)
+        err = Error(pos: e, rule: r, node: n, child: c)
 
     proc matchAtom(tree: Tree, n: var NodeIndex, kind: NodeKind): bool =
       result = n in tree and tree[n].kind == kind
@@ -134,13 +130,13 @@ proc gen*(lang: Grammar, module: string): string =
       else:
         if n in tree and tree[n].kind == k:
           let save = n
+          let len {.inject.} = tree.len(n)
           var num {.inject.} = 0
           var success = false
           n = tree.child(n, 0)
           block label:
-            var num {.inject.} = 0
             body
-            success = num == tree.len(save)
+            success = num == len
 
           result = success
           if not result:
