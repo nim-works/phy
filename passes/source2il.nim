@@ -405,7 +405,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       # it's a unit value
       bu.add Node(kind: IntVal)
       result = prim(tkUnit)
-  of SourceKind.TupleAccess:
+  of SourceKind.FieldAccess:
     let
       (a, b) = t.pair(n)
       tup = c.exprToIL(t, a)

@@ -160,7 +160,7 @@ An error is reported if any `Tx` is `void`.
 ### Tuple Elimination
 
 ```grammar
-expr += (TupleAccess tup:<expr> index:<int_val>)
+expr += (FieldAccess tup:<expr> index:<int_val>)
 ```
 
 Retrieves the value from the `index`-th position of the tuple.
