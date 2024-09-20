@@ -42,7 +42,7 @@ proc `[]`*[T](t: PackedTree[T], at: NodeIndex): TreeNode[T] {.inline.} =
   t.nodes[ord at]
 
 proc contains*(t: PackedTree, n: NodeIndex): bool {.inline.} =
-  ## Returns whether `n` is a valid node index.
+  ## Returns whether `n`, the node index, exists within `t`, the tree.
   ord(n) in 0..<t.nodes.len
 
 proc next*(t: PackedTree, i: NodeIndex): NodeIndex =

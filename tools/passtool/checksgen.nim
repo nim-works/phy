@@ -124,7 +124,7 @@ proc gen*(lang: Grammar, module: string): string =
 
     template matchTree(rule: string, k: NodeKind, label, body: untyped) =
       # the grammar doesn't know which nodes are atoms, and it thus has to
-      #  the decision to the ``isAtom`` procedure
+      # delegate the decision to the ``isAtom`` procedure
       when isAtom(k):
         result = matchAtom(tree, n, k)
       else:
@@ -167,7 +167,7 @@ proc gen*(lang: Grammar, module: string): string =
   result.add "\n"
   result.add defs.text
 
-  # emit the convenience wrappre:
+  # emit the convenience wrapper:
   result.addCode:
     template check*(tree: Tree, n: NodeIndex, name, onErr: untyped) =
       if true:
