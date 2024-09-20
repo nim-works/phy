@@ -101,12 +101,9 @@ jobs:
       # make sure all generated files are up-to-date:
       - name: "Up-to-date check"
         run: |
-          mkdir "${{ runner.temp }}/gen"
+          bin/passtool generate "${{ runner.temp }}/gen"
 
-          bin/passtool gen-checks passes lang10 passes/spec "${{ runner.temp }}/gen/*_checks.nim"
-          bin/passtool gen-checks spec spec passes/spec_source "${{ runner.temp }}/gen/source_checks.nim"
-
-          if ! diff -rq "${{ runner.temp }}/gen" passes/gen; then
+          if ! diff -rq "${{ runner.temp }}/gen" generated/; then
             echo "::error::The generated modules are not up-to-date. Please update them."
             exit 1
           fi

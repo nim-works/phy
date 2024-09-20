@@ -6,7 +6,7 @@ import std/[sequtils, strutils, os, osproc, parseopt]
 const
   HelpText = """
 Usage:
-  build [options] <command>
+  koch [options] <command>
 
 Options:
   --nim:path                  use the specified NimSkull compiler
@@ -14,6 +14,7 @@ Options:
 Commands:
   all [args]                  builds all programs
   single <name> [args]        builds the single program with the given name
+  generate [dir]              generates the various language-related modules
 """
   Programs: seq[(string, string)] = @[
     ("tester", "tools/tester.nim"),
@@ -25,6 +26,19 @@ var
   nimExe = findExe("nim")
   verbose = true
 
+proc run(exe: sink string, args: varargs[string]): bool =
+  if verbose:
+    echo "run: ", exe, " ", args.join(" ")
+
+  let p = startProcess(exe, args=args, options={poParentStreams, poUsePath})
+  result = p.waitForExit(-1) == 0
+  p.close()
+
+proc require(x: bool) =
+  if not x:
+    echo "failure"
+    quit(1)
+
 proc compile(file: sink string, name: string, extra: varargs[string]): bool =
   ## Compiles the given NimSkull `file` into an exectuable located in the bin/
   ## directory, using `name` as the name.
@@ -32,11 +46,7 @@ proc compile(file: sink string, name: string, extra: varargs[string]): bool =
                "-o:bin/" & addFileExt(name, ExeExt)]
   args.add extra
   args.add file
-  if verbose:
-    echo "run: ", nimExe, " ", args.join(" ")
-  let p = startProcess(nimExe, args=args, options={poParentStreams, poUsePath})
-  result = p.waitForExit(-1) == 0
-  p.close()
+  result = run(nimExe, args)
 
 proc saneSplit(s: string): seq[string] =
   ## Compared to the normal split, returns an empty sequence for an empty
@@ -81,6 +91,30 @@ proc buildAll(args: string): bool =
 
   result = true
 
+proc generate(args: string): bool =
+  ## Invokes the passtool for generating the language-related modules.
+  let args = saneSplit(args)
+  if args.len > 1:
+    echo "too many arguments"
+    return false
+
+  let passtool = addFileExt("bin/passtool", ExeExt)
+  # the passtool binary might be out-of-date; it's better to always compile it
+  result = buildSingle("passtool -d:release")
+  if not result:
+    return
+
+  let dir = if args.len == 1: args[0] else: "generated"
+  createDir(dir)
+
+  # generate the modules:
+  require run(passtool, "gen-checks", "passes", "lang10", "passes/spec",
+              dir / "*_checks.nim")
+  require run(passtool, "gen-checks", "spec", "spec", "passes/spec_source",
+              dir / "source_checks.nim")
+
+  result = true
+
 proc showHelp(): bool =
   ## Shows the help text.
   echo HelpText
@@ -104,9 +138,14 @@ while true:
   of cmdArgument:
     success =
       case normalize(opts.key)
-      of "all":    buildAll(opts.cmdLineRest)
-      of "single": buildSingle(opts.cmdLineRest)
-      of "help":   showHelp()
+      of "all":
+        buildAll(opts.cmdLineRest)
+      of "single":
+        buildSingle(opts.cmdLineRest)
+      of "generate":
+        generate(opts.cmdLineRest)
+      of "help":
+        showHelp()
       else:
         echo "Unknown command: ", normalize(opts.key)
         false
