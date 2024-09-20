@@ -181,8 +181,8 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
     pop(vtInt)
     pop(vtInt)
   of opcWrFlt32, opcWrFlt64:
-    pop(vtInt)
     pop(vtFloat)
+    pop(vtInt)
   of opcWrRef:
     pop(vtInt)
     pop(vtRef)
