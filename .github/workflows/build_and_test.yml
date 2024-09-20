@@ -101,7 +101,7 @@ jobs:
       # make sure all generated files are up-to-date:
       - name: "Up-to-date check"
         run: |
-          bin/passtool generate "${{ runner.temp }}/gen"
+          bin/koch generate "${{ runner.temp }}/gen"
 
           if ! diff -rq "${{ runner.temp }}/gen" generated/; then
             echo "::error::The generated modules are not up-to-date. Please update them."
