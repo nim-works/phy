@@ -9,7 +9,12 @@ import
   experimental/[
     sexp
   ],
+  generated/[
+    source_checks,
+    lang10_checks
+  ],
   passes/[
+    debugutils,
     changesets,
     pass0,
     pass1,
@@ -56,12 +61,15 @@ var typ: SemType
 case input[NodeIndex(0)].kind
 of DeclNodes:
   # it's a single declaration
+  checkSyntax(input, source_checks, decl)
   typ = ctx.declToIL(input, NodeIndex(0))
 of ExprNodes:
   # it's a standalone expression
+  checkSyntax(input, source_checks, expr)
   typ = ctx.exprToIL(input)
 of Module:
   # it's a full module. Translate all declarations
+  checkSyntax(input, source_checks, module)
   for it in input.items(NodeIndex(0)):
     typ = ctx.declToIL(input, it)
 
@@ -84,6 +92,8 @@ if messages.len > 0:
 # apply lowerings
 
 var tree = close(ctx)
+checkSyntax(tree, lang10_checks, top)
+
 # lower to the L0 language:
 tree = tree.apply(pass10.lower(tree))
 tree = tree.apply(pass4.lower(tree))

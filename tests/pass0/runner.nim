@@ -13,7 +13,11 @@ import
   experimental/[
     sexp
   ],
+  generated/[
+    lang0_checks
+  ],
   passes/[
+    debugutils,
     pass0,
     spec,
     trees
@@ -36,10 +40,13 @@ if s.readLine() == "discard \"\"\"":
 else:
   s.setPosition(0)
 
-let file = readAll(s)
+let tree = fromSexp[NodeKind](parseSexp("(Module " & readAll(s) & ")"))
+s.close()
+
+checkSyntax(tree, lang0_checks, top)
 
 var env = initVm(1024, 1024 * 1024)
-translate(fromSexp[NodeKind](parseSexp("(Module " & file & ")")), env)
+translate(tree, env)
 
 # make sure the environment is correct:
 let errors = validate(env)

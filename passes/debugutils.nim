@@ -64,3 +64,19 @@ proc toPretty(result: var string, t: PackedTree, n: NodeIndex, indent: int) =
 proc pretty*(t: PackedTree, n: NodeIndex): string =
   ## Returns a multi-line textual S-expression representation of `t`.
   toPretty(result, t, n, 0)
+
+template checkSyntax*(t: PackedTree, module, with: untyped) {.dirty.} =
+  ## Convenience template for running syntax / grammar checks as generated
+  ## by the passtool on `t`. Note that the module implementing the checks
+  ## still needs to be imported at the callsite (using the name provided by
+  ## `module`).
+  ##
+  ## `with` is the name of the check routine. If there was an error, a message
+  ## is echoed and the program terminates.
+  `module`.check t, NodeIndex(0), with:
+    if node in t:
+      echo "Syntax error: \"", rule, "\" didn't match for child node '", child,
+          "' (kind = ", t[node, child].kind, ") of '", ord(node), "'"
+    else:
+      echo "Syntax error: \"", rule, "\" didn't match. Unexpected end"
+    quit(1)
