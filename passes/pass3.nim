@@ -2,6 +2,7 @@
 ## * turning path expressions into pointer (read, integer) arithmetic
 ## * turning copies from within aggregate locations into loads
 ## * turning assignments into aggregate locations into stores
+## * turning aggregate assignments/stores/loads into memory copies
 ##
 ## Future Considerations
 ## ~~~~~~~~~~~~~~~~~~~~~
@@ -194,13 +195,40 @@ proc lowerExpr(c; tree; n; bu: var BuilderOrChangeset) =
       for it in tree.items(n):
         c.lowerExpr(tree, it, bu)
 
+proc genMemCopy(c; tree; n, dst, src, typ: NodeIndex, changes) =
+  ## Replaces the subtree at `n` with a ``Copy`` statement.
+  changes.replace(n, Copy):
+    # can be either an l- or rvalue, depending on who called ``genMemCopy``
+    if tree[dst].kind in {Field, At, Local}:
+      c.lowerPathElem(tree, dst, bu)
+    else:
+      c.lowerExpr(tree, dst, bu)
+
+    case tree[src].kind
+    of Copy:
+      c.lowerPathElem(tree, tree.last(src), bu)
+    of Load:
+      # don't load a temporary value, copy from the source into the
+      # destination directly
+      c.lowerExpr(tree, tree.last(src), bu)
+    else:
+      # no other expression can evaluate to an aggregate value
+      unreachable()
+
+    # the size-in-bytes to copy. Take it from the type
+    bu.add Node(kind: IntVal, val: tree[typ, 0].val)
+
 proc lowerStmt(c; tree; n; changes) =
   case tree[n].kind
   of Asgn:
     let
       (a, b) = pair(tree, n)
       typ = c.typeof(tree, a)
-    if tree[a].kind in {Field, At}:
+      typN = c.lookup(tree, typ)
+
+    if tree[typN].kind in AggregateTypes:
+      c.genMemCopy(tree, n, a, b, typN, changes)
+    elif tree[a].kind in {Field, At}:
       # turn into a Store
       changes.replace(n, Store):
         bu.add Node(kind: Type, val: typ.uint32)
@@ -210,9 +238,15 @@ proc lowerStmt(c; tree; n; changes) =
       c.lowerExpr(tree, a, changes)
       c.lowerExpr(tree, b, changes)
   of Store:
-    let (_, a, b) = triplet(tree, n)
-    c.lowerExpr(tree, a, changes)
-    c.lowerExpr(tree, b, changes)
+    let
+      (t, a, b) = triplet(tree, n)
+      typN = c.lookup(tree, tree[t].typ)
+
+    if tree[typN].kind in AggregateTypes:
+      c.genMemCopy(tree, n, a, b, typN, changes)
+    else:
+      c.lowerExpr(tree, a, changes)
+      c.lowerExpr(tree, b, changes)
   of Copy:
     let (a, b, size) = triplet(tree, n)
     c.lowerExpr(tree, a, changes)

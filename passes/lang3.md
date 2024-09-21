@@ -46,7 +46,5 @@ value += (Copy <path>)
 stmt += (Asgn <path> <value>)
 ```
 
-Storing, loading, or assigning full aggregate values is not supported at
-this level.
-
-*Note: this might be subject to change.*
+Discarding an aggregate value (e.g., via `(Drop (Copy (Local 0)))`) is not
+supported at this level.
