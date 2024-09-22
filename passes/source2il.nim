@@ -8,7 +8,7 @@
 
 import
   std/[sequtils, tables],
-  passes/[builders, spec, trees],
+  passes/[builders, spec, trees, debugutils],
   phy/[reporting, types],
   vm/[utils]
 
@@ -367,6 +367,42 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       c.error("undeclared identifier: " & t.getString(n))
       bu.add Node(kind: IntVal)
       result = prim(tkError)
+  of SourceKind.If:
+    case t.len(n)
+    of 2: # condition and body
+      bu.subTree If:
+        let cond = exprToIL(c, t, t.child(n, 0), bu, stmts) # condition
+        # TODO: check condition type
+        let body = exprToIL(c, t, t.child(n, 1), bu, stmts) # body
+        # TODO: check body type is unit or void
+      result = prim(tkUnit)
+    of 3:
+      # TODO: use `pair`, `triplet`, and friends to clean-up this code
+      let cond = exprToIL(c, t, t.child(n, 0)) # condition
+      # TODO: check condition type
+      let body = exprToIL(c, t, t.child(n, 1)) # body
+      let els = exprToIL(c, t, t.child(n, 2)) # else
+      # TODO: check body and else type match
+      case body.typ.kind
+      of tkVoid, tkUnit:
+        bu.subTree If:
+          bu.inline(cond, stmts)
+          bu.inline(body, stmts)
+          bu.inline(els, stmts)
+      else:
+        let tmp = c.newTemp(body.typ)
+        bu.subTree If:
+          bu.inline(cond, stmts)
+          bu.subtree Stmts:
+            stmts.add body.stmts
+            c.genAsgn(@[Node(kind: Local, val: tmp)], body.expr, body.typ, bu)
+          bu.subTree Stmts:
+            stmts.add els.stmts
+            c.genAsgn(@[Node(kind: Local, val: tmp)], els.expr, body.typ, bu)
+      result = body.typ
+    else:
+      unreachable() # syntax error
+    echo pretty(initTree[NodeKind](bu.finish, c.literals), NodeIndex(0))
   of SourceKind.Call:
     result = callToIL(c, t, n, bu, stmts)
   of SourceKind.TupleCons:
