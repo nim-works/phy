@@ -1,7 +1,7 @@
 ## Tool for performing various build and testing related actions for the
 ## repository. *Koch* is a German noun meaning *cook* or *chef* in English.
 
-import std/[sequtils, strutils, os, osproc, parseopt]
+import std/[sequtils, strutils, tables, os, osproc, parseopt]
 
 const
   HelpText = """
@@ -16,11 +16,16 @@ Commands:
   single <name> [args]        builds the single program with the given name
   generate [dir]              generates the various language-related modules
 """
-  Programs: seq[(string, string)] = @[
-    ("tester", "tools/tester.nim"),
-    ("passtool", "tools/passtool/passtool.nim"),
-    ("repl", "tools/repl.nim")
+  Programs: seq[(string, string, bool)] = @[
+    ("tester", "tools/tester.nim", true),
+    ("passtool", "tools/passtool/passtool.nim", true),
+    ("repl", "tools/repl.nim", false)
   ]
+    ## maps program names to the associated path and whether the program
+    ## doesn't depend on generated modules
+
+  DefaultGenerated = "generated"
+    ## the default path for the generated modules
 
 var
   nimExe = findExe("nim")
@@ -55,6 +60,29 @@ proc saneSplit(s: string): seq[string] =
   if s.len > 0: split(s, ' ')
   else:         @[]
 
+# helpers:
+
+proc generateModules(dir: string) =
+  ## Invokes the passtool for generating the language-derived modules.
+  let passtool = addFileExt("bin/passtool", ExeExt)
+  createDir(dir)
+
+  # generate the modules:
+  require run(passtool, "gen-checks", "passes", "lang10", "passes/spec",
+              dir / "*_checks.nim")
+  require run(passtool, "gen-checks", "spec", "spec", "passes/spec_source",
+              dir / "source_checks.nim")
+
+proc buildSingle(args: string): bool
+
+proc regenerate() =
+  ## Makes sure the generated modules are up-to-date.
+  if not dirExists(DefaultGenerated):
+    # assume that the 'generated' folder existing means that it's up-to-date.
+    # This is usually *not* correct, but it's the simplest heuristic we have
+    discard buildSingle("passtool -d:release")
+    generateModules(DefaultGenerated)
+
 # command implementations:
 
 proc buildSingle(args: string): bool =
@@ -68,8 +96,13 @@ proc buildSingle(args: string): bool =
 
   result = true
 
-  for (name, path) in Programs.items:
+  for (name, path, standalone) in Programs.items:
     if name == progName:
+      if not standalone:
+        # depends on some generated modules; first make sure they're
+        # up-to-date
+        regenerate()
+
       if not compile(getCurrentDir() / path, name, args):
         echo "Failure"
         quit(1)
@@ -83,11 +116,22 @@ proc buildSingle(args: string): bool =
 proc buildAll(args: string): bool =
   ## Builds all programs, passing `args` along to the compiler.
   let extra = args.saneSplit()
-  for (name, path) in Programs.items:
-    echo extra
-    if not compile(getCurrentDir() / path, name, extra):
-      echo "Failure"
-      quit(1)
+  # build all standalone programs first:
+  for (name, path, standalone) in Programs.items:
+    if standalone:
+      if not compile(getCurrentDir() / path, name, extra):
+        echo "Failure"
+        quit(1)
+
+  # then generate the language-derived modules:
+  generateModules(DefaultGenerated)
+
+  # finally, build the remaining programs:
+  for (name, path, standalone) in Programs.items:
+    if not standalone:
+      if not compile(getCurrentDir() / path, name, extra):
+        echo "Failure"
+        quit(1)
 
   result = true
 
@@ -98,20 +142,13 @@ proc generate(args: string): bool =
     echo "too many arguments"
     return false
 
-  let passtool = addFileExt("bin/passtool", ExeExt)
   # the passtool binary might be out-of-date; it's better to always compile it
   result = buildSingle("passtool -d:release")
   if not result:
     return
 
-  let dir = if args.len == 1: args[0] else: "generated"
-  createDir(dir)
-
-  # generate the modules:
-  require run(passtool, "gen-checks", "passes", "lang10", "passes/spec",
-              dir / "*_checks.nim")
-  require run(passtool, "gen-checks", "spec", "spec", "passes/spec_source",
-              dir / "source_checks.nim")
+  generateModules():
+    if args.len == 1: args[0] else: DefaultGenerated
 
   result = true
 
