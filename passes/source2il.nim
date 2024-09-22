@@ -176,23 +176,20 @@ proc newTemp(c; typ: SemType): uint32 =
   result = c.locals.len.uint32
   c.locals.add typ
 
+proc genUse(a: NodeSeq, bu) =
+  ## Emits `a` to `bu`, wrapping the expression in a ``Copy`` operation when
+  ## it's an lvalue expression.
+  if a[0].kind in {Field, At, Local}:
+    bu.subTree Copy:
+      bu.add a
+  else:
+    bu.add a
+
 proc genAsgn(c; a: Node|NodeSeq, b: NodeSeq, typ: SemType, bu) =
   ## Emits an ``a = b`` assignment to `bu`.
-  case typ.kind
-  of ComplexTypes:
-    # complex types don't support assignments in the target IL, so a ``Copy``
-    # has to be used
-    # XXX: this will happen as part of a lowering pass, eventually
-    bu.subTree Copy:
-      bu.subTree Addr:
-        bu.add a
-      bu.subTree Addr:
-        bu.add b
-      bu.add Node(kind: IntVal, val: c.literals.pack(size(typ)))
-  else:
-    bu.subTree Asgn:
-      bu.add a
-      bu.add b
+  bu.subTree Asgn:
+    bu.add a
+    genUse(b, bu)
 
 proc inline(bu; e: sink Expr; stmts) =
   ## Appends the trailing expression directly to `bu`.
@@ -414,20 +411,9 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       let idx = t.getInt(b)
       if idx >= 0 and idx < tup.typ.elems.len:
         result = tup.typ.elems[idx]
-
-        case result.kind
-        of ComplexTypes:
-          bu.subTree Field:
-            bu.inline(tup, stmts)
-            bu.add Node(kind: Immediate, val: idx.uint32)
-        else:
-          # TODO: wrapping the expression in a Copy operation needs to happen
-          #       at the callsite (because only the consumer knows whether to
-          #       copy or not)
-          bu.subTree Copy:
-            bu.subTree Field:
-              bu.inline(tup, stmts)
-              bu.add Node(kind: Immediate, val: idx.uint32)
+        bu.subTree Field:
+          bu.inline(tup, stmts)
+          bu.add Node(kind: Immediate, val: idx.uint32)
       else:
         c.error("tuple has no element with index " & $idx)
         result = errorType()
@@ -454,18 +440,16 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
 
         case e.typ.kind
         of ComplexTypes:
-          # special handling for complex types; do a memcopy through the out
-          # parameter
-          stmts.addStmt Copy:
+          # special handling for complex types: store through the out parameter
+          stmts.addStmt Store:
+            bu.add Node(kind: Type, val: c.typeToIL(typ))
             bu.subTree Copy:
               bu.add Node(kind: Local, val: c.returnParam)
-            bu.subTree Addr:
-              bu.add e.expr
-            bu.add Node(kind: IntVal, val: c.literals.pack(size(typ)))
+            genUse(e.expr, bu)
 
           bu.add Node(kind: IntVal) # return the unitary value
         else:
-          bu.add e.expr
+          genUse(e.expr, bu)
       else:
         unreachable() # syntax error
 
@@ -544,7 +528,7 @@ proc exprToIL*(c; t): SemType =
         bu.add e.expr
       else:
         bu.subTree Return:
-          bu.add e.expr
+          genUse(e.expr, bu)
 
   inc c.numProcs
 
