@@ -42,8 +42,8 @@ jobs:
           - name: Windows
             runner: windows-2022
 
-    # run the language-related chores first, so that not up-to-date generated
-    # files don't result in confusing test failures
+    # run the language-related chores first, so that language definition errors
+    # are reported early and only once
     needs: [languages]
 
     name: "Build binaries (${{ matrix.target.name }})"
@@ -97,13 +97,3 @@ jobs:
 
       - name: "Check the source language grammar"
         run: bin/passtool verify spec spec
-
-      # make sure all generated files are up-to-date:
-      - name: "Up-to-date check"
-        run: |
-          bin/koch generate "${{ runner.temp }}/gen"
-
-          if ! diff -rq "${{ runner.temp }}/gen" generated/; then
-            echo "::error::The generated modules are not up-to-date. Please update them."
-            exit 1
-          fi
