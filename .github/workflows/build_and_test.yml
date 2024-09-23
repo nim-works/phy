@@ -42,6 +42,10 @@ jobs:
           - name: Windows
             runner: windows-2022
 
+    # run the language-related chores first, so that language definition errors
+    # are reported early and only once
+    needs: [languages]
+
     name: "Build binaries (${{ matrix.target.name }})"
     runs-on: ${{ matrix.target.runner }}
 
@@ -89,7 +93,7 @@ jobs:
 
       # run the passtool for the highest-level language:
       - name: "Check the IL grammar"
-        run: bin/passtool passes lang10
+        run: bin/passtool verify passes lang10
 
       - name: "Check the source language grammar"
-        run: bin/passtool spec spec
+        run: bin/passtool verify spec spec

@@ -10,6 +10,9 @@ import
     sexp,
     sexp_parse
   ],
+  generated/[
+    source_checks
+  ],
   passes/[
     changesets,
     pass0,
@@ -94,12 +97,20 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
              tree: PackedTree[NodeKind]) =
   case tree[NodeIndex(0)].kind
   of DeclNodes:
+    source_checks.check tree, NodeIndex(0), decl:
+      echo "Syntax error: \"", rule, "\" didn't match"
+      return
+
     discard ctx.declToIL(tree, NodeIndex(0))
 
     for msg in reporter[].retrieve().items:
       echo "Error: " + fgRed, msg
 
   of ExprNodes:
+    source_checks.check tree, NodeIndex(0), expr:
+      echo "Syntax error: \"", rule, "\" didn't match"
+      return
+
     let typ = ctx.exprToIL(tree)
 
     let messages = reporter[].retrieve()

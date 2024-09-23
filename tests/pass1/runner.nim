@@ -9,6 +9,10 @@ import
   experimental/[
     sexp
   ],
+  generated/[
+    lang0_checks,
+    lang1_checks
+  ],
   passes/[
     changesets,
     debugutils,
@@ -37,8 +41,9 @@ else:
 var tree = fromSexp[NodeKind](parseSexp("(Module " & readAll(s) & ")"))
 s.close()
 
-let transformation = pass1.lower(tree, 8)
-tree = tree.apply(transformation)
+checkSyntax(tree, lang1_checks, top)
+tree = tree.apply(pass1.lower(tree, 8))
+checkSyntax(tree, lang0_checks, top)
 
 # output the lowered code:
 # TODO: instead of the whole tree, only the *difference* (as an S-expression)

@@ -9,6 +9,10 @@ import
   experimental/[
     sexp
   ],
+  generated/[
+    lang1_checks,
+    lang3_checks
+  ],
   passes/[
     changesets,
     debugutils,
@@ -38,7 +42,9 @@ else:
 var tree = fromSexp[NodeKind](parseSexp("(Module " & readAll(s) & ")"))
 s.close()
 
+checkSyntax(tree, lang3_checks, top)
 tree = tree.apply(pass3.lower(tree, 8))
+checkSyntax(tree, lang1_checks, top)
 
 # output the lowered code:
 stdout.writeLine(pretty(tree, tree.child(0)))

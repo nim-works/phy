@@ -184,7 +184,7 @@ type_expr ::= (VoidTy)  # void
 
 #### Tuple Type Constructors
 
-```gramm
+```grammar
 type_expr += (TupleTy)              # first form
           |  (TupleTy <type_expr>+) # second form
 ```

@@ -7,7 +7,7 @@
 (ProcDefs
   (ProcDef (Type 2) (Locals (Type 1))
     (Continuations
-      (Continuation (Params) (Locals (Type 0))
+      (Continuation (Params) (Locals (Local 0))
         (Drop (Addr (Field (Local 0) 0)))
         (Drop (Addr (Field (Local 0) 1)))
         (Continue 1)

@@ -91,6 +91,7 @@ continuation ::= (Continuation (Params) stack:<int> <stmt>* <exit>)
               |  (Except <local> stack:<int> <stmt>* <exit>)
 
 procdef ::= (ProcDef <type_id> (Locals <type_id>*) (Continuations <continuation>+))
+globaldef ::= <intVal> | <floatVal>
 ```
 
 ### Module
@@ -100,6 +101,6 @@ top-level node, in dedicated sections, to allow for easy and fast access to
 them.
 
 ```grammar
-module ::= (Module (TypeDefs <type>*) (GlobalDefs <type_id>*) (ProcDefs <procdef>*))
+module ::= (Module (TypeDefs <type>*) (GlobalDefs <globaldef>*) (ProcDefs <procdef>*))
 top ::= <module>
 ```
