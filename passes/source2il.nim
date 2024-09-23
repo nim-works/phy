@@ -391,14 +391,17 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
           bu.inline(els, stmts)
       else:
         let tmp = c.newTemp(body.typ)
-        bu.subTree If:
-          bu.inline(cond, stmts)
-          bu.subtree Stmts:
-            stmts.add body.stmts
-            c.genAsgn(@[Node(kind: Local, val: tmp)], body.expr, body.typ, bu)
-          bu.subTree Stmts:
-            stmts.add els.stmts
-            c.genAsgn(@[Node(kind: Local, val: tmp)], els.expr, body.typ, bu)
+        bu.subTree Stmts:
+          bu.subTree Locals:
+            bu.add Node(kind: Local, val: tmp)
+          bu.subTree If:
+            bu.inline(cond, stmts)
+            bu.subtree Stmts:
+              stmts.add body.stmts
+              c.genAsgn(@[Node(kind: Local, val: tmp)], body.expr, body.typ, bu)
+            bu.subTree Stmts:
+              stmts.add els.stmts
+              c.genAsgn(@[Node(kind: Local, val: tmp)], els.expr, body.typ, bu)
       result = body.typ
     else:
       unreachable() # syntax error
