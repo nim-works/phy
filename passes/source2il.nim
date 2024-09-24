@@ -402,6 +402,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
             bu.subTree Stmts:
               stmts.add els.stmts
               c.genAsgn(@[Node(kind: Local, val: tmp)], els.expr, body.typ, bu)
+          bu.add Node(kind: Local, val: tmp)
       result = body.typ
     else:
       unreachable() # syntax error
