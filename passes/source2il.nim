@@ -150,8 +150,6 @@ proc typeToIL(c; typ: SemType): uint32 =
 proc genProcType(c; ret: SemType): uint32 =
   ## Generates a proc type with `ret` as the return type and adds it to `c`.
   case ret.kind
-  of tkError:
-    unreachable()
   of tkVoid:
     c.addType ProcTy:
       c.types.subTree Void: discard
