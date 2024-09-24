@@ -157,7 +157,7 @@ and so on.
 
 An error is reported if any `Tx` is `void`.
 
-### Tuple Elimination
+#### Tuple Elimination
 
 ```grammar
 expr += (FieldAccess tup:<expr> index:<int_val>)
@@ -181,6 +181,16 @@ type_expr ::= (VoidTy)  # void
            |  (IntTy)   # int
            |  (FloatTy) # float
 ```
+
+#### Type Lookup
+
+```grammar
+type_expr += (Ident name:<string>)
+```
+
+Let `S` be the current scope. If `lookup(S, name)` fails or doesn't yield a
+type, an error is reported. Otherwise, the identifier refers to the type that
+that was bound to the identifier earlier.
 
 #### Tuple Type Constructors
 
@@ -214,6 +224,23 @@ procedure.
 procedure is called.
 
 `name` is added to `S` *before* any lookup takes place in the body.
+
+#### Type Alias
+
+```grammar
+decl += (TypeDecl name:<ident> typ:<type_expr>)
+```
+
+Let `S` be the current scope. If `lookup(S, name)` succeeds, an error is
+reported. If not, `name` is added to `S`, referring to the type `typ` evaluates
+to.
+
+Type aliases only give a name to a type, for more convenient usage thereof --
+they do not alter or affect the type in any way. The evaluated type is *bound*
+to the name, meaning that replacing the identifier with the provided expression
+verbatim does *not* necessarily yield a program with the same meaning.
+
+`name` is added to `S` after any lookup takes place in `typ`.
 
 ### Modules
 
