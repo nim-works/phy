@@ -51,6 +51,13 @@ as `tuple(float, int)`.
 `tuple()` (i.e., the product of no types) is a special case, and is equal to
 the `unit` type.
 
+The `union(T0, ..., Tn)` type constructor constructs a *sum type* (i.e., a type
+that is the sum of the `T0` .. `Tn` types). The operand order is *not*
+significant, meaning that `union(int, float)` and `union(float, int)` construct
+the same type.
+
+`union(T)` is *not* equal to `T`.
+
 ### Lookup
 
 *Entities* are part of *scopes*. They're queried from their scope via their
@@ -195,8 +202,20 @@ The first form of the `TupleTy` operator produces the `unit` type.
 > removing the latter, or at least making it an alias for `(TupleTy)`.
 
 The second form constructs a `tuple` type from the given types. Allowed
-operand type kinds are: `unit`, `int`, `float`, and `tuple`. An error is
-reported for any other type.
+operand type kinds are: `unit`, `int`, `float`, `tuple`, and `union`. An error
+is reported for any other type.
+
+#### Union Type Constructors
+
+```grammar
+type_expr += (UnionTy <type_expr>+)
+```
+
+`UnionTy` constructs a `union` type from the given types.
+
+An error is reported if:
+* any operand is the `void` type
+* a type is provided more than once
 
 ### Declarations
 
