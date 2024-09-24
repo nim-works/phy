@@ -235,7 +235,10 @@ Let `S` be the current scope. If `lookup(S, name)` succeeds, an error is
 reported. If not, `name` is added to `S`, referring to the type `typ` evaluates
 to.
 
-The type being bound to a name doesn't affect the type in any way.
+Type aliases only give a name to a type, for more convenient usage thereof --
+they do not alter or affect the type in any way. The evaluated type is *bound*
+to the name, meaning that replacing the identifier with the provided expression
+verbatim does *not* necessarily yield a program with the same meaning.
 
 `name` is added to `S` after any lookup takes place in `typ`.
 
