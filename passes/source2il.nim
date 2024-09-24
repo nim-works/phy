@@ -107,6 +107,18 @@ proc evalType(c; t; n: NodeIndex): SemType =
           discard "all good"
 
       tup
+  of Ident:
+    let name = t.getString(n)
+    if name in c.scope:
+      let ent {.cursor.} = c.scope[name]
+      if ent.kind == ekType:
+        ent.typ
+      else:
+        c.error("'" & name & "' is not a type")
+        errorType()
+    else:
+      c.error("undeclared identifier: " & name)
+      errorType()
   else:       unreachable() # syntax error
 
 proc typeToIL(c; typ: SemType): uint32 =
@@ -593,5 +605,15 @@ proc declToIL*(c; t; n: NodeIndex): SemType =
     c.procs.add finish(bu)
     inc c.numProcs
     result = c.retType
+  of SourceKind.TypeDecl:
+    let name = t.getString(t.child(n, 0))
+    if name in c.scope:
+      c.error("redeclaration of '" & name & "'")
+      return errorType()
+
+    let typ = evalType(c, t, t.child(n, 1))
+    # add the type to the scope, regardless of whether `typ` is an error
+    c.scope[name] = Entity(kind: ekType, typ: typ)
+    result = typ
   of AllNodes - DeclNodes:
     unreachable() # syntax error
