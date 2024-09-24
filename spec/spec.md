@@ -56,7 +56,7 @@ that is the sum of the `T0` .. `Tn` types). The operand order is *not*
 significant, meaning that `union(int, float)` and `union(float, int)` construct
 the same type.
 
-`union(T)` is *not* equal to `T`.
+`union(...)` is the supertype of all its operand types.
 
 ### Lookup
 
@@ -103,7 +103,7 @@ expr += (Return res:<expr>?)
 Let `P` be the enclosing procedure of the `Return` expression. Let `T` be
 the type of `res` -- if there's no `res` expression, `T` is `unit`. An error
 is reported if:
-* `T` doesn't match the return type of `P`
+* `T` is not the same type as the return type of `P`, or a *subtype* thereof
 * `T` is `void`
 
 The type of the `Return` expression is `void`. It returns control from the
