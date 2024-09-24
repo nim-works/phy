@@ -82,10 +82,23 @@ proc `==`*(a, b: SemType): bool =
   of tkTuple, tkUnion:
     result = a.elems == b.elems
 
+proc isSubtypeOf*(a, b: SemType): bool =
+  ## Computes whether `a` is a subtype of `b`.
+  if b.kind == tkError:
+    true # the error type acts as a top type
+  elif a.kind == tkVoid:
+    # void is the subtype of all other types
+    b.kind != tkVoid
+  elif b.kind == tkUnion:
+    b.elems.find(a) != -1
+  else:
+    false
+
 proc size*(t: SemType): int =
   ## Computes the size-in-bytes that an instance of `t` occupies in memory.
   case t.kind
-  of tkError, tkVoid: unreachable()
+  of tkVoid: unreachable()
+  of tkError: 8 # TODO: return a value indicating "unknown"
   of tkUnit, tkBool: 1
   of tkInt, tkFloat: 8
   of tkTuple:
