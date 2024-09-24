@@ -29,8 +29,8 @@ type
     id: int
       ## ID of the procedure or type. It's an index into the respective list
 
-  ProcInfo = object
-    result: SemType
+  ProcInfo* = object
+    result*: SemType
       ## the return type
 
   ModuleCtx* = object
@@ -47,7 +47,7 @@ type
       ## the list of type aliases
     procs: Builder[NodeKind]
       ## the in-progress procedure section
-    procList: seq[ProcInfo]
+    procList*: seq[ProcInfo]
 
     scope: Table[string, Entity]
       ## maps names to their associated entity
@@ -559,7 +559,7 @@ proc exprToIL*(c; t): SemType =
 
   c.procList.add ProcInfo(result: result)
 
-proc declToIL*(c; t; n: NodeIndex): SemType =
+proc declToIL*(c; t; n: NodeIndex) =
   ## Translates the given source language declaration to the target IL.
   ## On success, the declaration effects are applied to `c` and the declared
   ## procedure's return type is returned.
@@ -568,7 +568,7 @@ proc declToIL*(c; t; n: NodeIndex): SemType =
     let name = t.getString(t.child(n, 0))
     if name in c.scope:
       c.error("redeclaration of '" & name & "'")
-      return errorType()
+      return
 
     c.retType = evalType(c, t, t.child(n, 1))
 
@@ -592,7 +592,7 @@ proc declToIL*(c; t; n: NodeIndex): SemType =
       c.error("a procedure body must be a 'void' expression")
       c.scope.del(name) # remove again
       c.procList.del(c.procList.high)
-      return errorType()
+      return
 
     var bu = initBuilder[NodeKind](ProcDef)
     bu.add Node(kind: Type, val: procTy)
@@ -606,17 +606,15 @@ proc declToIL*(c; t; n: NodeIndex): SemType =
       bu.add e.expr
 
     c.procs.add finish(bu)
-    result = c.retType
   of SourceKind.TypeDecl:
     let name = t.getString(t.child(n, 0))
     if name in c.scope:
       c.error("redeclaration of '" & name & "'")
-      return errorType()
+      return
 
     let typ = evalType(c, t, t.child(n, 1))
     # add the type to the scope, regardless of whether `typ` is an error
     c.aliases.add typ
     c.scope[name] = Entity(kind: ekType, id: c.aliases.high)
-    result = typ
   of AllNodes - DeclNodes:
     unreachable() # syntax error
