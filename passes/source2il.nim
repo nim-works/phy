@@ -20,11 +20,19 @@ type
   Node       = TreeNode[NodeKind]
   NodeSeq    = seq[Node]
 
-  ProcInfo = object
-    id: int
-      ## ID of the procedure
-    result: SemType
-      ## return type
+  EntityKind = enum
+    ekProc
+    ekType
+
+  Entity = object
+    case kind: EntityKind
+    of ekProc:
+      id: int
+        ## ID of the procedure or type
+      result: SemType
+        ## the return type
+    of ekType:
+      typ: SemType
 
   ModuleCtx* = object
     ## The translation/analysis context for a single module.
@@ -39,8 +47,8 @@ type
     procs: Builder[NodeKind]
     numProcs: int
 
-    scope: Table[string, ProcInfo]
-      ## maps procedure names to their ID/position
+    scope: Table[string, Entity]
+      ## maps names to their associated entity
 
     # procedure context:
     retType: SemType
@@ -313,7 +321,9 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
   elif name in c.scope:
     # it's a user-defined procedure
     let prc {.cursor.} = c.scope[name]
-    if t.len(n) == 1:
+    # TODO: rework this logic so that the argument expressions are always
+    #       analyzed, even on arity mismatch or when the callee is not a proc
+    if prc.kind == ekProc and t.len(n) == 1:
       # procedure arity is currently always 0
       case prc.result.kind
       of tkVoid:
@@ -338,6 +348,10 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
           bu.add Node(kind: Proc, val: prc.id.uint32)
 
       result = prc.result
+    elif prc.kind != ekProc:
+      c.error(name & " is not a procedure name")
+      bu.add Node(kind: IntVal)
+      result = errorType()
     else:
       c.error("expected 0 arguments, but got " & $(t.len(n) - 1))
       bu.add Node(kind: IntVal)
@@ -556,7 +570,7 @@ proc declToIL*(c; t; n: NodeIndex): SemType =
       c.resetProcContext() # clear the context again
 
     # register the proc before analysing/translating the body
-    c.scope[name] = ProcInfo(id: c.numProcs, result: c.retType)
+    c.scope[name] = Entity(kind: ekProc, id: c.numProcs, result: c.retType)
 
     let e = c.exprToIL(t, t.child(n, 3))
     # the body expression must always be a void expression
