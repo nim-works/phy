@@ -391,22 +391,16 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
           bu.inline(els, stmts)
       else:
         let tmp = c.newTemp(body.typ)
-        bu.subTree Stmts:
-          bu.subTree Locals:
-            bu.add Node(kind: Local, val: tmp)
-          bu.subTree If:
-            bu.inline(cond, stmts)
-            bu.subtree Stmts:
-              stmts.add body.stmts
-              c.genAsgn(@[Node(kind: Local, val: tmp)], body.expr, body.typ, bu)
-            bu.subTree Stmts:
-              stmts.add els.stmts
-              c.genAsgn(@[Node(kind: Local, val: tmp)], els.expr, body.typ, bu)
-          bu.add Node(kind: Local, val: tmp)
+        stmts.addStmt If:
+          bu.inline(cond, stmts)
+          stmts.add body.stmts
+          c.genAsgn(@[Node(kind: Local, val: tmp)], body.expr, body.typ, bu)
+          stmts.add els.stmts
+          c.genAsgn(@[Node(kind: Local, val: tmp)], els.expr, body.typ, bu)
+        bu.add Node(kind: Local, val: tmp)
       result = body.typ
     else:
       unreachable() # syntax error
-    echo pretty(initTree[NodeKind](bu.finish, c.literals), NodeIndex(0))
   of SourceKind.Call:
     result = callToIL(c, t, n, bu, stmts)
   of SourceKind.TupleCons:
@@ -568,6 +562,8 @@ proc exprToIL*(c; t): SemType =
         bu.add e.expr
       else:
         bu.subTree Return:
+          # TODO: implement a `last` routine that appropriately chooses between
+          #       `expr`, and if empty, resorts to the last entry in `stmts`
           genUse(e.expr, bu)
 
   inc c.numProcs
