@@ -121,7 +121,7 @@ proc evalType(c; t; n: NodeIndex): SemType =
   of UnionTy:
     var list = newSeq[SemType]()
     for i, it in t.pairs(n):
-      # make sure to add the types in an ordered fashion, so that
+      # make sure to add the types in a sorted fashion, so that
       # ``union(int, float)`` and ``union(float, int)`` result in the same type
       let
         typ = c.expectNot(c.evalType(t, it), tkVoid)
