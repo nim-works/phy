@@ -19,12 +19,13 @@ type
     Unreachable
     Params
     ProcDecl
+    TypeDecl
     Module
 
 const
   ExprNodes* = {IntVal, FloatVal, Ident, Call, TupleCons, FieldAccess, Return,
                 Unreachable}
-  DeclNodes* = {ProcDecl}
+  DeclNodes* = {ProcDecl, TypeDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 
 template isAtom*(x: NodeKind): bool =

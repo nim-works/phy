@@ -20,11 +20,18 @@ type
   Node       = TreeNode[NodeKind]
   NodeSeq    = seq[Node]
 
-  ProcInfo = object
+  EntityKind = enum
+    ekProc
+    ekType
+
+  Entity = object
+    kind: EntityKind
     id: int
-      ## ID of the procedure
-    result: SemType
-      ## return type
+      ## ID of the procedure or type. It's an index into the respective list
+
+  ProcInfo* = object
+    result*: SemType
+      ## the return type
 
   ModuleCtx* = object
     ## The translation/analysis context for a single module.
@@ -36,11 +43,14 @@ type
     types: Builder[NodeKind]
       ## the in-progress type section
     numTypes: int
+    aliases: seq[SemType]
+      ## the list of type aliases
     procs: Builder[NodeKind]
-    numProcs: int
+      ## the in-progress procedure section
+    procList*: seq[ProcInfo]
 
-    scope: Table[string, ProcInfo]
-      ## maps procedure names to their ID/position
+    scope: Table[string, Entity]
+      ## maps names to their associated entity
 
     # procedure context:
     retType: SemType
@@ -124,6 +134,18 @@ proc evalType(c; t; n: NodeIndex): SemType =
         list.add typ
 
     SemType(kind: tkUnion, elems: list)
+  of Ident:
+    let name = t.getString(n)
+    if name in c.scope:
+      let ent = c.scope[name]
+      if ent.kind == ekType:
+        c.aliases[ent.id]
+      else:
+        c.error("'" & name & "' is not a type")
+        errorType()
+    else:
+      c.error("undeclared identifier: " & name)
+      errorType()
   else:       unreachable() # syntax error
 
 proc typeToIL(c; typ: SemType): uint32 =
@@ -397,14 +419,17 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
   of "not":
     result = notToIL(c, t, n, bu, stmts)
   elif name in c.scope:
-    # it's a user-defined procedure
-    let prc {.cursor.} = c.scope[name]
-    if t.len(n) == 1:
+    # it could be a user-defined procedure
+    let ent = c.scope[name]
+    # TODO: rework this logic so that the argument expressions are always
+    #       analyzed, even on arity mismatch or when the callee is not a proc
+    if ent.kind == ekProc and t.len(n) == 1:
       # procedure arity is currently always 0
+      let prc {.cursor.} = c.procList[ent.id]
       case prc.result.kind
       of tkVoid:
         stmts.addStmt Call:
-          bu.add Node(kind: Proc, val: prc.id.uint32)
+          bu.add Node(kind: Proc, val: ent.id.uint32)
         # mark the normal control-flow path as dead:
         bu.subTree Unreachable:
           discard
@@ -413,7 +438,7 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
         let tmp = c.newTemp(prc.result)
         stmts.addStmt Drop:
           bu.subTree Call:
-            bu.add Node(kind: Proc, val: prc.id.uint32)
+            bu.add Node(kind: Proc, val: ent.id.uint32)
             bu.subTree Addr:
               bu.add Node(kind: Local, val: tmp)
 
@@ -421,9 +446,13 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
         bu.add Node(kind: Local, val: tmp)
       else:
         bu.subTree Call:
-          bu.add Node(kind: Proc, val: prc.id.uint32)
+          bu.add Node(kind: Proc, val: ent.id.uint32)
 
       result = prc.result
+    elif ent.kind != ekProc:
+      c.error(name & " is not a procedure name")
+      bu.add Node(kind: IntVal)
+      result = errorType()
     else:
       c.error("expected 0 arguments, but got " & $(t.len(n) - 1))
       bu.add Node(kind: IntVal)
@@ -610,9 +639,9 @@ proc exprToIL*(c; t): SemType =
         bu.subTree Return:
           genUse(e.expr, bu)
 
-  inc c.numProcs
+  c.procList.add ProcInfo(result: result)
 
-proc declToIL*(c; t; n: NodeIndex): SemType =
+proc declToIL*(c; t; n: NodeIndex) =
   ## Translates the given source language declaration to the target IL.
   ## On success, the declaration effects are applied to `c` and the declared
   ## procedure's return type is returned.
@@ -621,7 +650,7 @@ proc declToIL*(c; t; n: NodeIndex): SemType =
     let name = t.getString(t.child(n, 0))
     if name in c.scope:
       c.error("redeclaration of '" & name & "'")
-      return errorType()
+      return
 
     c.retType = evalType(c, t, t.child(n, 1))
 
@@ -636,14 +665,16 @@ proc declToIL*(c; t; n: NodeIndex): SemType =
       c.resetProcContext() # clear the context again
 
     # register the proc before analysing/translating the body
-    c.scope[name] = ProcInfo(id: c.numProcs, result: c.retType)
+    c.procList.add ProcInfo(result: c.retType)
+    c.scope[name] = Entity(kind: ekProc, id: c.procList.high)
 
     let e = c.exprToIL(t, t.child(n, 3))
     # the body expression must always be a void expression
     if e.typ.kind != tkVoid:
       c.error("a procedure body must be a 'void' expression")
       c.scope.del(name) # remove again
-      return errorType()
+      c.procList.del(c.procList.high)
+      return
 
     var bu = initBuilder[NodeKind](ProcDef)
     bu.add Node(kind: Type, val: procTy)
@@ -657,7 +688,15 @@ proc declToIL*(c; t; n: NodeIndex): SemType =
       bu.add e.expr
 
     c.procs.add finish(bu)
-    inc c.numProcs
-    result = c.retType
+  of SourceKind.TypeDecl:
+    let name = t.getString(t.child(n, 0))
+    if name in c.scope:
+      c.error("redeclaration of '" & name & "'")
+      return
+
+    let typ = evalType(c, t, t.child(n, 1))
+    # add the type to the scope, regardless of whether `typ` is an error
+    c.aliases.add typ
+    c.scope[name] = Entity(kind: ekType, id: c.aliases.high)
   of AllNodes - DeclNodes:
     unreachable() # syntax error

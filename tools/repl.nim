@@ -101,7 +101,7 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
       echo "Syntax error: \"", rule, "\" didn't match"
       return
 
-    discard ctx.declToIL(tree, NodeIndex(0))
+    ctx.declToIL(tree, NodeIndex(0))
 
     for msg in reporter[].retrieve().items:
       echo "Error: " + fgRed, msg
