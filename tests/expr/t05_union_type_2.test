@@ -1,0 +1,5 @@
+discard """
+  output: "1.5: union(int, float)"
+"""
+(ProcDecl (Ident "a") (UnionTy (IntTy) (FloatTy)) (Params)
+  (Return (FloatVal 1.5)))

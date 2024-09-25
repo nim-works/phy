@@ -20,11 +20,18 @@ type
   Node       = TreeNode[NodeKind]
   NodeSeq    = seq[Node]
 
-  ProcInfo = object
+  EntityKind = enum
+    ekProc
+    ekType
+
+  Entity = object
+    kind: EntityKind
     id: int
-      ## ID of the procedure
-    result: SemType
-      ## return type
+      ## ID of the procedure or type. It's an index into the respective list
+
+  ProcInfo* = object
+    result*: SemType
+      ## the return type
 
   ModuleCtx* = object
     ## The translation/analysis context for a single module.
@@ -36,11 +43,14 @@ type
     types: Builder[NodeKind]
       ## the in-progress type section
     numTypes: int
+    aliases: seq[SemType]
+      ## the list of type aliases
     procs: Builder[NodeKind]
-    numProcs: int
+      ## the in-progress procedure section
+    procList*: seq[ProcInfo]
 
-    scope: Table[string, ProcInfo]
-      ## maps procedure names to their ID/position
+    scope: Table[string, Entity]
+      ## maps names to their associated entity
 
     # procedure context:
     retType: SemType
@@ -72,6 +82,15 @@ template addType(c; kind: NodeKind, body: untyped): uint32 =
     body
   (let r = c.numTypes; inc c.numTypes; r.uint32)
 
+proc expectNot(c; typ: sink SemType, kind: TypeKind): SemType =
+  ## If `typ` has the given `kind`, reports an error and returns the error
+  ## type. Otherwise returns `typ` as-is.
+  if typ.kind != kind:
+    result = typ
+  else:
+    c.error("type not allowed in this context")
+    result = errorType()
+
 proc evalType(c; t; n: NodeIndex): SemType =
   ## Evaluates a type expression, yielding the resulting type.
   case t[n].kind
@@ -99,6 +118,34 @@ proc evalType(c; t; n: NodeIndex): SemType =
           discard "all good"
 
       tup
+  of UnionTy:
+    var list = newSeq[SemType]()
+    for i, it in t.pairs(n):
+      # make sure to add the types in a sorted fashion, so that
+      # ``union(int, float)`` and ``union(float, int)`` result in the same type
+      let
+        typ = c.expectNot(c.evalType(t, it), tkVoid)
+        at = lowerBound(list, typ, cmp)
+
+      if at < list.len and list[at] == typ:
+        if typ.kind != tkError:
+          c.error("union type operands must be unique")
+      else:
+        list.add typ
+
+    SemType(kind: tkUnion, elems: list)
+  of Ident:
+    let name = t.getString(n)
+    if name in c.scope:
+      let ent = c.scope[name]
+      if ent.kind == ekType:
+        c.aliases[ent.id]
+      else:
+        c.error("'" & name & "' is not a type")
+        errorType()
+    else:
+      c.error("undeclared identifier: " & name)
+      errorType()
   else:       unreachable() # syntax error
 
 proc typeToIL(c; typ: SemType): uint32 =
@@ -126,12 +173,30 @@ proc typeToIL(c; typ: SemType): uint32 =
           c.types.add Node(kind: Immediate, val: off.uint32)
           c.types.add Node(kind: Type, val: it)
         off += size(typ.elems[i])
+  of tkUnion:
+    let args = mapIt(typ.elems, c.typeToIL(it))
+    let inner = c.addType Record:
+      c.types.add Node(kind: Immediate, val: size(typ).uint32 - 8)
+      for it in args.items:
+        c.types.subTree Field:
+          c.types.add Node(kind: Immediate, val: 0)
+          c.types.add Node(kind: Type, val: it)
+
+    let tag = c.typeToIL(prim(tkInt))
+    c.addType Record:
+      c.types.add Node(kind: Immediate, val: size(typ).uint32)
+      # the tag field:
+      c.types.subTree Field:
+        c.types.add Node(kind: Immediate, val: 0)
+        c.types.add Node(kind: Type, val: tag)
+      # the actual union:
+      c.types.subTree Field:
+        c.types.add Node(kind: Immediate, val: 8)
+        c.types.add Node(kind: Type, val: inner)
 
 proc genProcType(c; ret: SemType): uint32 =
   ## Generates a proc type with `ret` as the return type and adds it to `c`.
   case ret.kind
-  of tkError:
-    unreachable()
   of tkVoid:
     c.addType ProcTy:
       c.types.subTree Void: discard
@@ -205,6 +270,49 @@ proc capture(c; e: sink Expr; stmts): Node =
   stmts.add e.stmts
   stmts.addStmt:
     c.genAsgn(result, e.expr, e.typ, bu)
+
+proc fitExpr(c; e: sink Expr, target: SemType): Expr =
+  ## Makes sure `e` fits into the `target` type, returning the expression
+  ## with the appropriate conversion operation applied. If the type of `e`
+  ## is not the same as or a subtype of `target`, an error is reported.
+  if e.typ == target:
+    result = e
+  elif e.typ.isSubtypeOf(target):
+    result = Expr(stmts: e.stmts, typ: target)
+    case target.kind
+    of tkUnion:
+      # construct a union
+      let
+        tmp = c.newTemp(target)
+        idx = find(target.elems, e.typ)
+
+      # ignore the type not being found in the union. This indicates that an
+      # error occurred during union construction
+
+      # emit the tag assignment:
+      result.stmts.addStmt Asgn:
+        bu.subTree Field:
+          bu.add Node(kind: Local, val: tmp)
+          bu.add Node(kind: Immediate, val: 0)
+        bu.add Node(kind: IntVal, val: c.literals.pack(idx))
+
+      # emit the value assignment:
+      result.stmts.addStmt Asgn:
+        bu.subTree Field:
+          bu.subTree Field:
+            bu.add Node(kind: Local, val: tmp)
+            bu.add Node(kind: Immediate, val: 1)
+          bu.add Node(kind: Immediate, val: idx.uint32)
+        genUse(e.expr, bu)
+
+      result.expr = @[Node(kind: Local, val: tmp)]
+    else:
+      unreachable()
+  else:
+    # TODO: this needs a better error message
+    c.error("type mismatch")
+    result = Expr(stmts: e.stmts, expr: @[Node(kind: IntVal)],
+                  typ: errorType())
 
 proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType
 
@@ -311,14 +419,17 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
   of "not":
     result = notToIL(c, t, n, bu, stmts)
   elif name in c.scope:
-    # it's a user-defined procedure
-    let prc {.cursor.} = c.scope[name]
-    if t.len(n) == 1:
+    # it could be a user-defined procedure
+    let ent = c.scope[name]
+    # TODO: rework this logic so that the argument expressions are always
+    #       analyzed, even on arity mismatch or when the callee is not a proc
+    if ent.kind == ekProc and t.len(n) == 1:
       # procedure arity is currently always 0
+      let prc {.cursor.} = c.procList[ent.id]
       case prc.result.kind
       of tkVoid:
         stmts.addStmt Call:
-          bu.add Node(kind: Proc, val: prc.id.uint32)
+          bu.add Node(kind: Proc, val: ent.id.uint32)
         # mark the normal control-flow path as dead:
         bu.subTree Unreachable:
           discard
@@ -327,7 +438,7 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
         let tmp = c.newTemp(prc.result)
         stmts.addStmt Drop:
           bu.subTree Call:
-            bu.add Node(kind: Proc, val: prc.id.uint32)
+            bu.add Node(kind: Proc, val: ent.id.uint32)
             bu.subTree Addr:
               bu.add Node(kind: Local, val: tmp)
 
@@ -335,9 +446,13 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
         bu.add Node(kind: Local, val: tmp)
       else:
         bu.subTree Call:
-          bu.add Node(kind: Proc, val: prc.id.uint32)
+          bu.add Node(kind: Proc, val: ent.id.uint32)
 
       result = prc.result
+    elif ent.kind != ekProc:
+      c.error(name & " is not a procedure name")
+      bu.add Node(kind: IntVal)
+      result = errorType()
     else:
       c.error("expected 0 arguments, but got " & $(t.len(n) - 1))
       bu.add Node(kind: IntVal)
@@ -457,41 +572,35 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       c.error("expected 'tuple' value")
       result = errorType()
   of SourceKind.Return:
-    var typ: SemType
-    bu.subTree Return:
+    var e =
       case t.len(n)
-      of 0:
-        # as long as it's an 8-bit integer, the exact value doesn't matter
-        bu.add Node(kind: IntVal)
-        typ = prim(tkUnit)
-      of 1:
-        let e = c.exprToIL(t, t.child(n, 0))
-        typ = e.typ
-        stmts.add e.stmts
+      of 0: Expr(expr: @[Node(kind: IntVal)], typ: prim(tkUnit))
+      of 1: c.exprToIL(t, t.child(n, 0))
+      else: unreachable() # syntax error
 
-        if e.typ.kind == tkError:
-          return e.typ
+    # apply the necessary to-supertype conversions:
+    e = c.fitExpr(e, c.retType)
 
-        case e.typ.kind
-        of ComplexTypes:
-          # special handling for complex types: store through the out parameter
-          stmts.addStmt Store:
-            bu.add Node(kind: Type, val: c.typeToIL(typ))
-            bu.subTree Copy:
-              bu.add Node(kind: Local, val: c.returnParam)
-            genUse(e.expr, bu)
-
-          bu.add Node(kind: IntVal) # return the unitary value
-        else:
+    stmts.add e.stmts
+    bu.subTree Return:
+      case e.typ.kind
+      of tkError:
+        discard "do nothing"
+      of tkVoid:
+        c.error("cannot return 'void' expression")
+      of ComplexTypes:
+        # special handling for complex types: store through the out parameter
+        stmts.addStmt Store:
+          bu.add Node(kind: Type, val: c.typeToIL(e.typ))
+          bu.subTree Copy:
+            bu.add Node(kind: Local, val: c.returnParam)
           genUse(e.expr, bu)
+
+        bu.add Node(kind: IntVal) # return the unitary value
       else:
-        unreachable() # syntax error
+        bu.add e.expr
 
     result = prim(tkVoid)
-    if typ.kind == tkVoid:
-      c.error("cannot return 'void' expression")
-    elif typ != c.retType:
-      c.error("returned value's type doesn't match return type")
   of SourceKind.Unreachable:
     bu.subTree Unreachable:
       discard
@@ -564,9 +673,9 @@ proc exprToIL*(c; t): SemType =
         bu.subTree Return:
           genUse(e.expr, bu)
 
-  inc c.numProcs
+  c.procList.add ProcInfo(result: result)
 
-proc declToIL*(c; t; n: NodeIndex): SemType =
+proc declToIL*(c; t; n: NodeIndex) =
   ## Translates the given source language declaration to the target IL.
   ## On success, the declaration effects are applied to `c` and the declared
   ## procedure's return type is returned.
@@ -575,7 +684,7 @@ proc declToIL*(c; t; n: NodeIndex): SemType =
     let name = t.getString(t.child(n, 0))
     if name in c.scope:
       c.error("redeclaration of '" & name & "'")
-      return errorType()
+      return
 
     c.retType = evalType(c, t, t.child(n, 1))
 
@@ -590,14 +699,16 @@ proc declToIL*(c; t; n: NodeIndex): SemType =
       c.resetProcContext() # clear the context again
 
     # register the proc before analysing/translating the body
-    c.scope[name] = ProcInfo(id: c.numProcs, result: c.retType)
+    c.procList.add ProcInfo(result: c.retType)
+    c.scope[name] = Entity(kind: ekProc, id: c.procList.high)
 
     let e = c.exprToIL(t, t.child(n, 3))
     # the body expression must always be a void expression
     if e.typ.kind != tkVoid:
       c.error("a procedure body must be a 'void' expression")
       c.scope.del(name) # remove again
-      return errorType()
+      c.procList.del(c.procList.high)
+      return
 
     var bu = initBuilder[NodeKind](ProcDef)
     bu.add Node(kind: Type, val: procTy)
@@ -611,7 +722,15 @@ proc declToIL*(c; t; n: NodeIndex): SemType =
       bu.add e.expr
 
     c.procs.add finish(bu)
-    inc c.numProcs
-    result = c.retType
+  of SourceKind.TypeDecl:
+    let name = t.getString(t.child(n, 0))
+    if name in c.scope:
+      c.error("redeclaration of '" & name & "'")
+      return
+
+    let typ = evalType(c, t, t.child(n, 1))
+    # add the type to the scope, regardless of whether `typ` is an error
+    c.aliases.add typ
+    c.scope[name] = Entity(kind: ekType, id: c.aliases.high)
   of AllNodes - DeclNodes:
     unreachable() # syntax error

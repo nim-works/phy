@@ -1,0 +1,5 @@
+discard """
+  reject: true
+"""
+(ProcDecl (Ident "a") (UnionTy (VoidTy)) (Params)
+  (Return (Unreachable)))

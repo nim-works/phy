@@ -1,0 +1,5 @@
+discard """
+  output: "100: union(int)"
+"""
+(ProcDecl (Ident "a") (UnionTy (IntTy)) (Params)
+  (Return (IntVal 100)))

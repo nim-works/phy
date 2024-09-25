@@ -11,7 +11,7 @@ type
   NodeKind* {.pure.} = enum
     Immediate, IntVal, FloatVal
     Ident,
-    VoidTy, UnitTy, BoolTy, IntTy, FloatTy, TupleTy
+    VoidTy, UnitTy, BoolTy, IntTy, FloatTy, TupleTy, UnionTy
     If
     Call
     TupleCons
@@ -20,12 +20,13 @@ type
     Unreachable
     Params
     ProcDecl
+    TypeDecl
     Module
 
 const
   ExprNodes* = {IntVal, FloatVal, Ident, If, Call, TupleCons, FieldAccess,
                 Return, Unreachable}
-  DeclNodes* = {ProcDecl}
+  DeclNodes* = {ProcDecl, TypeDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 
 template isAtom*(x: NodeKind): bool =
