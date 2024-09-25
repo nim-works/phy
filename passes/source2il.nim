@@ -562,8 +562,6 @@ proc exprToIL*(c; t): SemType =
         bu.add e.expr
       else:
         bu.subTree Return:
-          # TODO: implement a `last` routine that appropriately chooses between
-          #       `expr`, and if empty, resorts to the last entry in `stmts`
           genUse(e.expr, bu)
 
   inc c.numProcs
