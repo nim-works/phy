@@ -11,7 +11,7 @@ type
   NodeKind* {.pure.} = enum
     Immediate, IntVal, FloatVal
     Ident,
-    VoidTy, UnitTy, BoolTy, IntTy, FloatTy, TupleTy
+    VoidTy, UnitTy, BoolTy, IntTy, FloatTy, TupleTy, UnionTy
     Call
     TupleCons
     FieldAccess

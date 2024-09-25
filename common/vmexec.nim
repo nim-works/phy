@@ -67,6 +67,12 @@ proc valueToString(env: var VmEnv, a: VirtualAddr, typ: SemType): string =
     if typ.elems.len == 1:
       result.add ","
     result.add ")"
+  of tkUnion:
+    let tag = readInt(p, 8)
+    if tag in 0..typ.elems.high:
+      result = valueToString(env, VirtualAddr(a.uint64 + 8), typ.elems[tag])
+    else:
+      result = "<invalid tag: " & $tag & ">"
   of tkVoid, tkError:
     unreachable()
 
@@ -86,6 +92,14 @@ proc typeToString(typ: SemType): string =
 
     if typ.elems.len == 1:
       res.add ","
+    res.add ")"
+    res
+  of tkUnion:
+    var res = "union("
+    for i, it in typ.elems.pairs:
+      if i > 0:
+        res.add ", "
+      res.add typeToString(it)
     res.add ")"
     res
   of tkError:

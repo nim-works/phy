@@ -23,7 +23,8 @@ type
     tkBool
     tkInt
     tkFloat
-    tkTuple
+    tkTuple ## an anonymous product type
+    tkUnion ## an anonymous sum type
 
   SemType* = object
     ## Represents a source-language type. The "Sem" prefix is there to prevent
@@ -31,13 +32,37 @@ type
     case kind*: TypeKind
     of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:
       discard
-    of tkTuple:
+    of tkTuple, tkUnion:
       elems*: seq[SemType]
 
 const
-  ComplexTypes* = {tkTuple}
+  ComplexTypes* = {tkTuple, tkUnion}
     ## types that can currently not be used as procedure return or parameter
     ## types in the target IL
+
+proc cmp*(a, b: SemType): int =
+  ## Establishes a total order for types, intended mainly for sorting them.
+  ## The order does *not* imply any type-system relevant properties, such as
+  ## "is subtype of".
+  result = ord(a.kind) - ord(b.kind)
+  if result != 0:
+    return
+
+  # same kind, compare operands
+  case a.kind
+  of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:
+    result = 0 # equal
+  of tkTuple, tkUnion:
+    result = a.elems.len - b.elems.len
+    if result != 0:
+      return
+
+    for i in 0..<a.elems.len:
+      result = cmp(a.elems[i], b.elems[i])
+      if result != 0:
+        return
+
+    result = 0 # the types are equal
 
 proc errorType*(): SemType {.inline.} =
   SemType(kind: tkError)
@@ -54,13 +79,26 @@ proc `==`*(a, b: SemType): bool =
   case a.kind
   of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:
     result = true
-  of tkTuple:
+  of tkTuple, tkUnion:
     result = a.elems == b.elems
+
+proc isSubtypeOf*(a, b: SemType): bool =
+  ## Computes whether `a` is a subtype of `b`.
+  if b.kind == tkError:
+    true # the error type acts as a top type
+  elif a.kind == tkVoid:
+    # void is the subtype of all other types
+    b.kind != tkVoid
+  elif b.kind == tkUnion:
+    b.elems.find(a) != -1
+  else:
+    false
 
 proc size*(t: SemType): int =
   ## Computes the size-in-bytes that an instance of `t` occupies in memory.
   case t.kind
-  of tkError, tkVoid: unreachable()
+  of tkVoid: unreachable()
+  of tkError: 8 # TODO: return a value indicating "unknown"
   of tkUnit, tkBool: 1
   of tkInt, tkFloat: 8
   of tkTuple:
@@ -68,3 +106,8 @@ proc size*(t: SemType): int =
     for it in t.elems.items:
       s += size(it)
     s
+  of tkUnion:
+    var s = 0
+    for it in t.elems.items:
+      s = max(s, size(it))
+    s + 8 # +8 for the tag

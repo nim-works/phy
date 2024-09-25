@@ -7,7 +7,7 @@
 ## architecture (of this module) are of secondary concern.
 
 import
-  std/[sequtils, tables],
+  std/[algorithm, sequtils, tables],
   passes/[builders, spec, trees],
   phy/[reporting, types],
   vm/[utils]
@@ -82,6 +82,15 @@ template addType(c; kind: NodeKind, body: untyped): uint32 =
     body
   (let r = c.numTypes; inc c.numTypes; r.uint32)
 
+proc expectNot(c; typ: sink SemType, kind: TypeKind): SemType =
+  ## If `typ` has the given `kind`, reports an error and returns the error
+  ## type. Otherwise returns `typ` as-is.
+  if typ.kind != kind:
+    result = typ
+  else:
+    c.error("type not allowed in this context")
+    result = errorType()
+
 proc evalType(c; t; n: NodeIndex): SemType =
   ## Evaluates a type expression, yielding the resulting type.
   case t[n].kind
@@ -109,6 +118,22 @@ proc evalType(c; t; n: NodeIndex): SemType =
           discard "all good"
 
       tup
+  of UnionTy:
+    var list = newSeq[SemType]()
+    for i, it in t.pairs(n):
+      # make sure to add the types in a sorted fashion, so that
+      # ``union(int, float)`` and ``union(float, int)`` result in the same type
+      let
+        typ = c.expectNot(c.evalType(t, it), tkVoid)
+        at = lowerBound(list, typ, cmp)
+
+      if at < list.len and list[at] == typ:
+        if typ.kind != tkError:
+          c.error("union type operands must be unique")
+      else:
+        list.add typ
+
+    SemType(kind: tkUnion, elems: list)
   of Ident:
     let name = t.getString(n)
     if name in c.scope:
@@ -148,6 +173,26 @@ proc typeToIL(c; typ: SemType): uint32 =
           c.types.add Node(kind: Immediate, val: off.uint32)
           c.types.add Node(kind: Type, val: it)
         off += size(typ.elems[i])
+  of tkUnion:
+    let args = mapIt(typ.elems, c.typeToIL(it))
+    let inner = c.addType Record:
+      c.types.add Node(kind: Immediate, val: size(typ).uint32 - 8)
+      for it in args.items:
+        c.types.subTree Field:
+          c.types.add Node(kind: Immediate, val: 0)
+          c.types.add Node(kind: Type, val: it)
+
+    let tag = c.typeToIL(prim(tkInt))
+    c.addType Record:
+      c.types.add Node(kind: Immediate, val: size(typ).uint32)
+      # the tag field:
+      c.types.subTree Field:
+        c.types.add Node(kind: Immediate, val: 0)
+        c.types.add Node(kind: Type, val: tag)
+      # the actual union:
+      c.types.subTree Field:
+        c.types.add Node(kind: Immediate, val: 8)
+        c.types.add Node(kind: Type, val: inner)
 
 proc genProcType(c; ret: SemType): uint32 =
   ## Generates a proc type with `ret` as the return type and adds it to `c`.
@@ -225,6 +270,49 @@ proc capture(c; e: sink Expr; stmts): Node =
   stmts.add e.stmts
   stmts.addStmt:
     c.genAsgn(result, e.expr, e.typ, bu)
+
+proc fitExpr(c; e: sink Expr, target: SemType): Expr =
+  ## Makes sure `e` fits into the `target` type, returning the expression
+  ## with the appropriate conversion operation applied. If the type of `e`
+  ## is not the same as or a subtype of `target`, an error is reported.
+  if e.typ == target:
+    result = e
+  elif e.typ.isSubtypeOf(target):
+    result = Expr(stmts: e.stmts, typ: target)
+    case target.kind
+    of tkUnion:
+      # construct a union
+      let
+        tmp = c.newTemp(target)
+        idx = find(target.elems, e.typ)
+
+      # ignore the type not being found in the union. This indicates that an
+      # error occurred during union construction
+
+      # emit the tag assignment:
+      result.stmts.addStmt Asgn:
+        bu.subTree Field:
+          bu.add Node(kind: Local, val: tmp)
+          bu.add Node(kind: Immediate, val: 0)
+        bu.add Node(kind: IntVal, val: c.literals.pack(idx))
+
+      # emit the value assignment:
+      result.stmts.addStmt Asgn:
+        bu.subTree Field:
+          bu.subTree Field:
+            bu.add Node(kind: Local, val: tmp)
+            bu.add Node(kind: Immediate, val: 1)
+          bu.add Node(kind: Immediate, val: idx.uint32)
+        genUse(e.expr, bu)
+
+      result.expr = @[Node(kind: Local, val: tmp)]
+    else:
+      unreachable()
+  else:
+    # TODO: this needs a better error message
+    c.error("type mismatch")
+    result = Expr(stmts: e.stmts, expr: @[Node(kind: IntVal)],
+                  typ: errorType())
 
 proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType
 
@@ -450,41 +538,35 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       c.error("expected 'tuple' value")
       result = errorType()
   of SourceKind.Return:
-    var typ: SemType
-    bu.subTree Return:
+    var e =
       case t.len(n)
-      of 0:
-        # as long as it's an 8-bit integer, the exact value doesn't matter
-        bu.add Node(kind: IntVal)
-        typ = prim(tkUnit)
-      of 1:
-        let e = c.exprToIL(t, t.child(n, 0))
-        typ = e.typ
-        stmts.add e.stmts
+      of 0: Expr(expr: @[Node(kind: IntVal)], typ: prim(tkUnit))
+      of 1: c.exprToIL(t, t.child(n, 0))
+      else: unreachable() # syntax error
 
-        if e.typ.kind == tkError:
-          return e.typ
+    # apply the necessary to-supertype conversions:
+    e = c.fitExpr(e, c.retType)
 
-        case e.typ.kind
-        of ComplexTypes:
-          # special handling for complex types: store through the out parameter
-          stmts.addStmt Store:
-            bu.add Node(kind: Type, val: c.typeToIL(typ))
-            bu.subTree Copy:
-              bu.add Node(kind: Local, val: c.returnParam)
-            genUse(e.expr, bu)
-
-          bu.add Node(kind: IntVal) # return the unitary value
-        else:
+    stmts.add e.stmts
+    bu.subTree Return:
+      case e.typ.kind
+      of tkError:
+        discard "do nothing"
+      of tkVoid:
+        c.error("cannot return 'void' expression")
+      of ComplexTypes:
+        # special handling for complex types: store through the out parameter
+        stmts.addStmt Store:
+          bu.add Node(kind: Type, val: c.typeToIL(e.typ))
+          bu.subTree Copy:
+            bu.add Node(kind: Local, val: c.returnParam)
           genUse(e.expr, bu)
+
+        bu.add Node(kind: IntVal) # return the unitary value
       else:
-        unreachable() # syntax error
+        bu.add e.expr
 
     result = prim(tkVoid)
-    if typ.kind == tkVoid:
-      c.error("cannot return 'void' expression")
-    elif typ != c.retType:
-      c.error("returned value's type doesn't match return type")
   of SourceKind.Unreachable:
     bu.subTree Unreachable:
       discard
