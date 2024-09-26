@@ -1,0 +1,4 @@
+discard """
+  reject: true
+"""
+(If (Ident "true") (IntVal 1) (TupleCons (IntVal 1) (IntVal 2)))
