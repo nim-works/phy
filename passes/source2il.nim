@@ -486,7 +486,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     case t.len(n)
     of 2: # condition and body
       bu.subTree If:
-        let (p, b) = t.pair(NodeIndex(0)) # predicate and body
+        let (p, b) = t.pair(n) # predicate and body
         let cond = exprToIL(c, t, p, bu, stmts) # condition
         if cond.kind != tkBool:
           c.error("`If` condition must be a boolean expression")
@@ -497,7 +497,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         else:
           result = body
     of 3:
-      let (p, b, e) = t.triplet(NodeIndex(0)) # predicate, body, else
+      let (p, b, e) = t.triplet(n) # predicate, body, else
       let cond = exprToIL(c, t, p) # condition
       if cond.typ.kind != tkBool:
         c.error("`If` condition must be a boolean expression")
@@ -616,7 +616,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       discard
     result = prim(tkVoid)
   of AllNodes - ExprNodes:
-    unreachable()
+    unreachable($t[n].kind)
 
 proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   ## Creates a new empty module translation/analysis context.
