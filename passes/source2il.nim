@@ -7,7 +7,7 @@
 ## architecture (of this module) are of secondary concern.
 
 import
-  std/[sequtils, tables],
+  std/[algorithm, sequtils, tables],
   passes/[builders, spec, trees],
   phy/[reporting, types],
   vm/[utils]
