@@ -503,7 +503,6 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         c.error("`If` condition must be a boolean expression")
       let body = exprToIL(c, t, b) # body
       let els = exprToIL(c, t, e) # else
-      # TODO: check body and else type match
       case body.typ.kind
       of tkVoid, tkUnit:
         bu.subTree If:
