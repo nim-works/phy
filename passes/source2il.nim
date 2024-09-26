@@ -486,21 +486,23 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     case t.len(n)
     of 2: # condition and body
       bu.subTree If:
-        let cond = exprToIL(c, t, t.child(n, 0), bu, stmts) # condition
+        let (p, b) = t.pair(NodeIndex(0)) # predicate and body
+        let cond = exprToIL(c, t, p, bu, stmts) # condition
         if cond.kind != tkBool:
           c.error("`If` condition must be a boolean expression")
-        let body = exprToIL(c, t, t.child(n, 1), bu, stmts) # body
+        let body = exprToIL(c, t, b, bu, stmts) # body
         if body.kind notin {tkUnit, tkVoid}:
           c.error("non-exhaustive `If` must be of type unit or void")
           result = errorType()
         else:
           result = body
     of 3:
-      let cond = exprToIL(c, t, t.child(n, 0)) # condition
+      let (p, b, e) = t.triplet(NodeIndex(0)) # predicate, body, else
+      let cond = exprToIL(c, t, p) # condition
       if cond.typ.kind != tkBool:
         c.error("`If` condition must be a boolean expression")
-      let body = exprToIL(c, t, t.child(n, 1)) # body
-      let els = exprToIL(c, t, t.child(n, 2)) # else
+      let body = exprToIL(c, t, b) # body
+      let els = exprToIL(c, t, e) # else
       # TODO: check body and else type match
       case body.typ.kind
       of tkVoid, tkUnit:
