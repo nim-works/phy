@@ -8,7 +8,7 @@
 
 import
   std/[sequtils, tables],
-  passes/[builders, spec, trees, debugutils],
+  passes/[builders, spec, trees],
   phy/[reporting, types],
   vm/[utils]
 
@@ -487,14 +487,18 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     of 2: # condition and body
       bu.subTree If:
         let cond = exprToIL(c, t, t.child(n, 0), bu, stmts) # condition
-        # TODO: check condition type
+        if cond.kind != tkBool:
+          c.error("`If` condition must be a boolean expression")
         let body = exprToIL(c, t, t.child(n, 1), bu, stmts) # body
-        # TODO: check body type is unit or void
-      result = prim(tkUnit)
+        if body.kind notin {tkUnit, tkVoid}:
+          c.error("non-exhaustive `If` must be of type unit or void")
+          result = errorType()
+        else:
+          result = body
     of 3:
-      # TODO: use `pair`, `triplet`, and friends to clean-up this code
       let cond = exprToIL(c, t, t.child(n, 0)) # condition
-      # TODO: check condition type
+      if cond.typ.kind != tkBool:
+        c.error("`If` condition must be a boolean expression")
       let body = exprToIL(c, t, t.child(n, 1)) # body
       let els = exprToIL(c, t, t.child(n, 2)) # else
       # TODO: check body and else type match
@@ -504,6 +508,9 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
           bu.inline(cond, stmts)
           bu.inline(body, stmts)
           bu.inline(els, stmts)
+        if els.typ.kind notin {tkVoid, tkUnit}:
+          c.error("else branch in `If` statement must be a unit or void expression")
+        result = body.typ
       else:
         let tmp = c.newTemp(body.typ)
         stmts.addStmt If:
@@ -511,9 +518,10 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
           stmts.add body.stmts
           c.genAsgn(@[Node(kind: Local, val: tmp)], body.expr, body.typ, bu)
           stmts.add els.stmts
-          c.genAsgn(@[Node(kind: Local, val: tmp)], els.expr, body.typ, bu)
+          let fit = c.fitExpr(els, body.typ)
+          c.genAsgn(@[Node(kind: Local, val: tmp)], fit.expr,
+                    fit.typ, bu)
         bu.add Node(kind: Local, val: tmp)
-      result = body.typ
     else:
       unreachable() # syntax error
   of SourceKind.Call:
