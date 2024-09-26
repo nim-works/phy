@@ -11,6 +11,14 @@ the given name.
 An *expression* is a term or a control-flow instruction. All expressions have a
 *type*.
 
+Expressions are further subdivided into:
+* *l-value* expressions: an expression that refers to a location
+* *r-value* expressions: an expression that produces a new value
+* `void` expressions: control-flow instructions that don't produce a value
+
+> TODO: reorder the definitions such that the term "locations" is defined
+>       before it's used here
+
 A *statement* is a computation without a type.
 
 > Note: at the moment, the grammar describes the grammar of the parse-tree,
@@ -58,6 +66,40 @@ the same type.
 
 `union(...)` is the supertype of all its operand types.
 
+### Values, Locations, and Cells
+
+A *value* is something that inhabits a type. They're either constructed
+implicitly or are produced by terms. An *aggregate value* is a value
+inhabiting a composite type.
+
+*Values* are stored in *locations*. If a location stores an aggregate value,
+it consists of one or more sub-locations. A location not part of any other
+location is called a *cell*.
+
+Every implicitly or explicitly constructed value has a unique *identity*,
+meaning two separate values cannot be the *same*, but they can be *equal*.
+
+Changing the value stored in a sub-location also modifies the value of the
+parent location, but without changing its *identity*.
+
+### Normal, Linear, and Affine Types
+
+How a value inhabiting a type is allowed to be used depends on whether the
+type is a normal, linear, or affine type:
+
+| Type   | No Use | Single Use | Multi Use |
+| ------ | ------ | ---------- | --------- |
+| Normal | Yes    | Yes        | Yes       |
+| Affine | Yes    | Yes        | No        |
+| Linear | No     | Yes        | No        |
+
+What constitutes a *use* of a value is described in this document.
+
+Using an r-value expression means using the value it produces. Using an l-
+value expression means using the value stored in the named location.
+
+> note: at the moment, all types are *normal* types
+
 ### Lookup
 
 *Entities* are part of *scopes*. They're queried from their scope via their
@@ -84,6 +126,9 @@ the `true` or `false` value, respectively.
 
 Otherwise, an error is reported.
 
+**Expression kind**: r-value
+**Uses**: nothing
+
 #### Literals
 
 ```grammar
@@ -93,6 +138,9 @@ expr += <int_val>
 ```
 
 The `IntVal` expression always has type `int`, `FloatVal` always type `float`.
+
+**Expression kind**: r-value
+**Uses**: nothing
 
 #### `Return`
 
@@ -109,6 +157,9 @@ is reported if:
 The type of the `Return` expression is `void`. It returns control from the
 current procedure to its caller.
 
+**Expression kind**: `void`
+**Uses**: `expr`, if present
+
 #### `Unreachable`
 
 ```grammar
@@ -121,6 +172,9 @@ the `Unreachable` expression, the program immediately terminates. A compiler
 an `Unreachable` expression within a procedure.
 
 The type of the `Unreachable` expression is `void`.
+
+**Expression kind**: `void`
+**Uses**: nothing
 
 #### Calls
 
@@ -149,20 +203,28 @@ After evaluating the arguments (if any), control is passed to the callee.
 
 > TODO: specification for the built-in operations is missing
 
+**Expression kind**: r-value or `void`, depending on the return type
+**Uses**: each argument expression
+
 #### Tuple Constructors
 
 ```grammar
-expr += (TupleCons)         # first form
-      | (TupleCons <expr>+) # second form
+expr += (TupleCons)
 ```
 
-The first form constructs a value of type `unit`.
+Constructs a value of type `unit`.
 
-The second form construct a value of type `tuple(T1..Tn)`, where `T1` is the
-type of the first expression, `T2` the type of the second expression (if any),
-and so on.
+```grammar
+expr += (TupleCons <expr>+)
+```
+
+Constructs a value of type `tuple(T0..Tn)`, where `T0` is the type of the first
+expression, `T1` the type of the second expression (if any), and so on.
 
 An error is reported if any `Tx` is `void`.
+
+**Expression kind**: r-value
+**Uses**: each operand expression
 
 #### Tuple Elimination
 
@@ -178,6 +240,9 @@ to the number of positions in the tuple type `T`, an error is reported.
 
 Given type `tuple(T[0], .., T[n])` for `T`, the type of the expression is
 `T[index]`.
+
+**Expression kind**: same as `tup`
+**Uses**: nothing
 
 ### Type Expressions
 
