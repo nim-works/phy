@@ -517,10 +517,10 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         stmts.addStmt If:
           bu.inline(cond, stmts)
           stmts.add body.stmts
-          c.genAsgn(@[Node(kind: Local, val: tmp)], body.expr, body.typ, bu)
+          c.genAsgn(Node(kind: Local, val: tmp), body.expr, body.typ, bu)
           let fit = c.fitExpr(els, body.typ)
           stmts.add fit.stmts
-          c.genAsgn(@[Node(kind: Local, val: tmp)], fit.expr,
+          c.genAsgn(Node(kind: Local, val: tmp), fit.expr,
                     fit.typ, bu)
         bu.add Node(kind: Local, val: tmp)
         result = body.typ

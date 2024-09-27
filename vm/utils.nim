@@ -26,13 +26,13 @@ iterator items*[T](s: HOslice[T]): T =
 
 type IInfo = typeof(instantiationInfo())
 
-func unreachableImpl(loc: IInfo, xtraMsg = "") {.noinline, noreturn.} =
+func unreachableImpl(loc: IInfo, extra = "") {.noinline, noreturn.} =
   var msg: string
   msg.toLocation(loc.filename, loc.line, loc.column + 1)
   msg.add" unreachable"
-  if xtraMsg.len != 0:
+  if extra.len != 0:
     msg.add " "
-    msg.add xtraMsg
+    msg.add extra
   raiseAssert(msg)
 
 template unreachable*(xtraMsg = "") =
