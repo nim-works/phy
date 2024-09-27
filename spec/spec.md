@@ -66,26 +66,34 @@ the same type.
 
 `union(...)` is the supertype of all its operand types.
 
-### Values, Locations, and Cells
+### Values, Objects, Locations, and Cells
 
-A *value* is something that inhabits a type. They're either constructed
-implicitly or are produced by terms. An *aggregate value* is a value
+A *value* is something that inhabits a type. An *aggregate value* is a value
 inhabiting a composite type.
 
-*Values* are stored in *locations*. If a location stores an aggregate value,
-it consists of one or more sub-locations. A location not part of any other
-location is called a *cell*.
+An *object* represents a *value*. If an object represents an aggregate value,
+it has *sub-objects*. *Object*s are stored in *locations*, which can have
+sub-locations storing the sub-objects, if any. A location not part of any
+other location is called a *cell*.
 
-Every implicitly or explicitly constructed value has a unique *identity*,
-meaning two separate values cannot be the *same*, but they can be *equal*.
+Each object constructed at some point has a unique identity, even if it
+represents the same value as another object. An object can only be stored in
+a single location at a time (which is referred to as its *owner*), but can
+move locations (thereby changing the owner).
 
-Changing the value stored in a sub-location also modifies the value of the
+Changing the object stored in a sub-location also modifies the object of the
 parent location, but without changing its *identity*.
+
+> Note: the term "object" is intended as a placeholder until a better,
+> less overloaded term is found.
+
+> Note: "constructing a value" is sometimes used interchangeably with
+> "constructing an object"
 
 ### Normal, Linear, and Affine Types
 
-How a value inhabiting a type is allowed to be used depends on whether the
-type is a normal, linear, or affine type:
+How an object representing a value inhabiting a type is allowed to be used
+depends on whether the type is a normal, linear, or affine type:
 
 | Type   | No Use | Single Use | Multi Use |
 | ------ | ------ | ---------- | --------- |
@@ -93,10 +101,10 @@ type is a normal, linear, or affine type:
 | Affine | Yes    | Yes        | No        |
 | Linear | No     | Yes        | No        |
 
-What constitutes a *use* of a value is described in this document.
+What constitutes a *use* of an object is described in this document.
 
-Using an r-value expression means using the value it produces. Using an l-
-value expression means using the value stored in the named location.
+Using an r-value expression means using the object it produces. Using an l-
+value expression means using the object stored in the named location.
 
 > note: at the moment, all types are *normal* types
 
