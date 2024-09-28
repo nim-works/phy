@@ -549,6 +549,11 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       of 1: c.exprToIL(t, t.child(n, 0))
       else: unreachable() # syntax error
 
+    if e.typ.kind == tkVoid:
+      c.error("cannot return 'void' expression")
+      e.expr = @[Node(kind: IntVal)] # add a placholder
+      e.typ = prim(tkError)
+
     # apply the necessary to-supertype conversions:
     e = c.fitExpr(e, c.retType)
 
@@ -557,8 +562,6 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       case e.typ.kind
       of tkError:
         discard "do nothing"
-      of tkVoid:
-        c.error("cannot return 'void' expression")
       of ComplexTypes:
         # special handling for complex types: store through the out parameter
         stmts.addStmt Store:
