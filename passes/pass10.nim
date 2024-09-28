@@ -446,7 +446,7 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
           c.bblocks[o].has.incl it.needs * c.pinned
 
       if inLoop and it.term == termLoop and it.outgoing[0] == loopStart:
-        # got back to the start of the loop
+        # end of the loop reached; jump back to the start of it
         swap(i, loopStart) # prevent inner loops from being repeated
         inLoop = false
       else:
@@ -479,8 +479,8 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
       for param in it.params.items:
         it.needs.excl param
 
-      if i == loopStart and inLoop:
-        # jump back to the end of the loop
+      if inLoop and c.bblocks[loopStart].outgoing[0] == i:
+        # start of the loop reached; jump back to the end of it
         swap(i, loopStart)
         inLoop = false
       else:
