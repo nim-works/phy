@@ -251,10 +251,12 @@ proc genUse(a: NodeSeq, bu) =
     bu.add a
 
 proc genAsgn(c; a: Node|NodeSeq, b: NodeSeq, typ: SemType, bu) =
-  ## Emits an ``a = b`` assignment to `bu`.
-  bu.subTree Asgn:
-    bu.add a
-    genUse(b, bu)
+  ## Emits an ``a = b`` assignment to `bu`. For convenience, if `typ` is a
+  ## ``tkVoid``, no assignment is emitted.
+  if typ.kind != tkVoid:
+    bu.subTree Asgn:
+      bu.add a
+      genUse(b, bu)
 
 proc inline(bu; e: sink Expr; stmts) =
   ## Appends the trailing expression directly to `bu`.
