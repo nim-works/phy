@@ -486,8 +486,9 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     case t.len(n)
     of 2: # condition and body
       stmts.addStmt If:
-        let (p, b) = t.pair(n) # predicate and body
-        let cond = exprToIL(c, t, p, bu, stmts) # condition
+        let
+          (p, b) = t.pair(n) # predicate and body
+          cond = exprToIL(c, t, p, bu, stmts) # condition
         if cond.kind != tkBool:
           c.error("`If` condition must be a boolean expression")
         bu.subTree Stmts:
