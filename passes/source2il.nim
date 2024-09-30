@@ -515,7 +515,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         stmts.addStmt If:
           bu.inline(cond, stmts) # this might need to be assigned to a local
           bu.subTree Stmts:
-            for s in body.stmts: # TODO: should just be an overload
+            for s in body.stmts: # FIXME: this should just use the overload
               bu.add s
           bu.subTree Stmts:
             for s in els.stmts:
