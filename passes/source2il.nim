@@ -572,11 +572,11 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         stmts.addStmt If:
           bu.inline(cond, stmts) # this might need to be assigned to a local
           bu.subTree Stmts:
-            for s in body.stmts:
+            for s in bd.stmts:
               bu.add s
             c.genAsgn(Node(kind: Local, val: tmp), bd.expr, bd.typ, bu)
           bu.subTree Stmts:
-            for s in els.stmts:
+            for s in el.stmts:
               bu.add s
             c.genAsgn(Node(kind: Local, val: tmp), el.expr, el.typ, bu)
         bu.add Node(kind: Local, val: tmp)

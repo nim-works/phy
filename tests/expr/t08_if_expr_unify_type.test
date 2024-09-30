@@ -1,4 +1,5 @@
 discard """
+  description: "Ensure types unify for an if-expression"
 """
 (Module
   (ProcDecl (Ident "p") (UnionTy (IntTy) (FloatTy)) (Params)
