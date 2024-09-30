@@ -12,6 +12,8 @@ import
   phy/[reporting, types],
   vm/[utils]
 
+from std/strutils import `%`
+
 import passes/spec_source except NodeKind
 
 type
@@ -515,36 +517,70 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       let
         body = exprToIL(c, t, b) # body
         els = exprToIL(c, t, e) # else
-      case body.typ.kind
-      of tkVoid, tkUnit:
+      const
+        bodyAndElseStmts = 0
+        elseFitToBody    = 1
+        bodyFitToElse    = 2
+        bodyAndElseNoFit = 3
+      let fitStrategy: range[0..3] =
+        if body.typ.kind in {tkUnit, tkVoid} and els.typ.kind in {tkUnit, tkVoid}:
+          bodyAndElseStmts
+        elif body.typ == els.typ or els.typ.isSubtypeOf(body.typ):
+          elseFitToBody
+        elif body.typ.isSubtypeOf(els.typ):
+          bodyFitToElse
+        else:
+          bodyAndElseNoFit
+      case fitStrategy
+      of bodyAndElseStmts, bodyAndElseNoFit:
         stmts.addStmt If:
           bu.inline(cond, stmts) # this might need to be assigned to a local
           bu.subTree Stmts:
             for s in body.stmts: # FIXME: this should just use the overload
               bu.add s
+          if body.typ.kind != tkVoid:
+            bu.subTree Drop:
+              bu.add body.expr
           bu.subTree Stmts:
             for s in els.stmts:
               bu.add s
-        if els.typ.kind notin {tkVoid, tkUnit}:
-          c.error("else branch in `If` statement must be a unit or void expression")
-        bu.add Node(kind: IntVal) # unit
-        result = prim(tkUnit)
-      else:
-        let tmp = c.newTemp(body.typ)
+          if els.typ.kind != tkVoid:
+            bu.subTree Drop:
+              bu.add els.expr
+        case fitStrategy
+        of bodyAndElseNoFit:
+          c.error("if ($1) and else ($2) branches cannot be unified into a single type" %
+                  [$body.typ.kind, $els.typ.kind])
+          result = errorType()
+        of bodyAndElseStmts:
+          bu.add Node(kind: IntVal) # unit
+          result = prim(tkUnit)
+        else:
+          unreachable()
+      of elseFitToBody, bodyFitToElse:
+        let
+          (fit, elseToBody) =
+            case fitStrategy
+            of elseFitToBody:
+              (c.fitExpr(els, body.typ), true)
+            of bodyFitToElse:
+              (c.fitExpr(body, els.typ), false)
+            else:
+              unreachable()
+          (bd, el) = if elseToBody: (body, fit) else: (fit, els)
+          tmp = c.newTemp(fit.typ)
         stmts.addStmt If:
           bu.inline(cond, stmts) # this might need to be assigned to a local
           bu.subTree Stmts:
             for s in body.stmts:
               bu.add s
-            c.genAsgn(Node(kind: Local, val: tmp), body.expr, body.typ, bu)
+            c.genAsgn(Node(kind: Local, val: tmp), bd.expr, bd.typ, bu)
           bu.subTree Stmts:
-            let fit = c.fitExpr(els, body.typ)
-            for s in fit.stmts:
+            for s in els.stmts:
               bu.add s
-            c.genAsgn(Node(kind: Local, val: tmp), fit.expr,
-                      fit.typ, bu)
+            c.genAsgn(Node(kind: Local, val: tmp), el.expr, el.typ, bu)
         bu.add Node(kind: Local, val: tmp)
-        result = body.typ
+        result = fit.typ
     else:
       unreachable() # syntax error
   of SourceKind.Call:

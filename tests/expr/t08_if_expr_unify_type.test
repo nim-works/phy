@@ -1,0 +1,18 @@
+discard """
+"""
+(Module
+  (ProcDecl (Ident "p") (UnionTy (IntTy) (FloatTy)) (Params)
+    (Return (IntVal 100)))
+  
+  (ProcDecl (Ident "test1") (UnionTy (IntTy) (FloatTy)) (Params)
+    (Return
+      (If (Ident "true")
+        (FloatVal 0.5)
+        (Call (Ident "p")))))
+
+  (ProcDecl (Ident "test2") (UnionTy (IntTy) (FloatTy)) (Params)
+    (Return
+      (If (Ident "false")
+        (Call (Ident "p"))
+        (FloatVal 0.5))))
+)
