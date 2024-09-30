@@ -8,7 +8,7 @@
 
 import
   std/[algorithm, sequtils, tables],
-  passes/[builders, spec, trees],
+  passes/[builders, spec, trees, debugutils],
   phy/[reporting, types],
   vm/[utils]
 
@@ -485,43 +485,59 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
   of SourceKind.If:
     case t.len(n)
     of 2: # condition and body
-      bu.subTree If:
+      stmts.addStmt If:
         let (p, b) = t.pair(n) # predicate and body
         let cond = exprToIL(c, t, p, bu, stmts) # condition
         if cond.kind != tkBool:
           c.error("`If` condition must be a boolean expression")
-        let body = exprToIL(c, t, b, bu, stmts) # body
-        if body.kind notin {tkUnit, tkVoid}:
-          c.error("non-exhaustive `If` must be of type unit or void")
-          result = errorType()
-        else:
-          result = body
+        bu.subTree Stmts:
+          let body = exprToIL(c, t, b) # body
+          for s in body.stmts:
+            bu.add s
+          if body.typ.kind notin {tkUnit, tkVoid}:
+            c.error("non-exhaustive `If` must be of type unit or void")
+            result = errorType()
+          else:
+            discard "nothing to do here"
+      bu.add Node(kind: IntVal) # unit
+      result = prim(tkUnit)
     of 3:
-      let (p, b, e) = t.triplet(n) # predicate, body, else
-      let cond = exprToIL(c, t, p) # condition
+      let
+        (p, b, e) = t.triplet(n) # predicate, body, else
+        cond = exprToIL(c, t, p) # condition
       if cond.typ.kind != tkBool:
         c.error("`If` condition must be a boolean expression")
-      let body = exprToIL(c, t, b) # body
-      let els = exprToIL(c, t, e) # else
+      let
+        body = exprToIL(c, t, b) # body
+        els = exprToIL(c, t, e) # else
       case body.typ.kind
       of tkVoid, tkUnit:
-        bu.subTree If:
-          bu.inline(cond, stmts)
-          bu.inline(body, stmts)
-          bu.inline(els, stmts)
+        stmts.addStmt If:
+          bu.inline(cond, stmts) # this might need to be assigned to a local
+          bu.subTree Stmts:
+            for s in body.stmts: # TODO: should just be an overload
+              bu.add s
+          bu.subTree Stmts:
+            for s in els.stmts:
+              bu.add s
         if els.typ.kind notin {tkVoid, tkUnit}:
           c.error("else branch in `If` statement must be a unit or void expression")
-        result = body.typ
+        bu.add Node(kind: IntVal) # unit
+        result = prim(tkUnit)
       else:
         let tmp = c.newTemp(body.typ)
         stmts.addStmt If:
-          bu.inline(cond, stmts)
-          stmts.add body.stmts
-          c.genAsgn(Node(kind: Local, val: tmp), body.expr, body.typ, bu)
-          let fit = c.fitExpr(els, body.typ)
-          stmts.add fit.stmts
-          c.genAsgn(Node(kind: Local, val: tmp), fit.expr,
-                    fit.typ, bu)
+          bu.inline(cond, stmts) # this might need to be assigned to a local
+          bu.subTree Stmts:
+            for s in body.stmts:
+              bu.add s
+            c.genAsgn(Node(kind: Local, val: tmp), body.expr, body.typ, bu)
+          bu.subTree Stmts:
+            let fit = c.fitExpr(els, body.typ)
+            for s in fit.stmts:
+              bu.add s
+            c.genAsgn(Node(kind: Local, val: tmp), fit.expr,
+                      fit.typ, bu)
         bu.add Node(kind: Local, val: tmp)
         result = body.typ
     else:
