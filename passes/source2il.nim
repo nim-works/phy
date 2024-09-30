@@ -494,11 +494,15 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
           let body = exprToIL(c, t, b) # body
           for s in body.stmts:
             bu.add s
-          if body.typ.kind notin {tkUnit, tkVoid}:
+          case body.typ.kind
+          of tkUnit:
+            bu.subtree Drop:
+              bu.add body.expr
+          of tkVoid:
+            discard "nothing to do, this is fine"
+          else: # not unit or void
             c.error("non-exhaustive `If` must be of type unit or void")
             result = errorType()
-          else:
-            discard "nothing to do here"
       bu.add Node(kind: IntVal) # unit
       result = prim(tkUnit)
     of 3:
