@@ -540,13 +540,13 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
               bu.add s
           if body.typ.kind != tkVoid:
             bu.subTree Drop:
-              bu.add body.expr
+              bu.add body.expr # xxx: use `genUse`?
           bu.subTree Stmts:
             for s in els.stmts:
               bu.add s
           if els.typ.kind != tkVoid:
             bu.subTree Drop:
-              bu.add els.expr
+              bu.add els.expr # xxx: use `genUse`?
         case fitStrategy
         of bodyAndElseNoFit:
           c.error("if ($1) and else ($2) branches cannot be unified into a single type" %
