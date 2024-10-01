@@ -179,6 +179,17 @@ to the number of positions in the tuple type `T`, an error is reported.
 Given type `tuple(T[0], .., T[n])` for `T`, the type of the expression is
 `T[index]`.
 
+#### Expression Lists
+
+```grammar
+expr += (Exprs <expr>+)
+```
+
+A non-empty list of expressions, where the tail expression may be any type and
+preceeding ones must be `unit` or `void`. An error is reported if:
+* the expression list is empty
+* a non-tail expression is not of `unit` or `void` type
+
 ### Type Expressions
 
 ```grammar

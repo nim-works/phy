@@ -12,6 +12,8 @@ import
   phy/[reporting, types],
   vm/[utils]
 
+from strutils import `%`
+
 import passes/spec_source except NodeKind
 
 type
@@ -571,6 +573,31 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     bu.subTree Unreachable:
       discard
     result = prim(tkVoid)
+  of SourceKind.Exprs:
+    let nodeCount = t[n].val.int
+    if nodeCount == 0:
+      c.error("an empty expression list is disallowed")
+    let last = nodeCount - 1
+    var eb = bu
+    stmts.addStmt Stmts:
+      for i, si in t.pairs(n):
+        let e = c.exprToIL(t, si)
+        for s in e.stmts:
+          bu.add s
+        case e.typ.kind
+        of tkUnit:
+          bu.subTree Drop:
+            bu.add e.expr
+        else:
+          if i != last:
+            c.error("non-trailing expressions must be unit or void, got: $1" %
+                      [$e.typ.kind])
+        if i == last:
+          if e.typ.kind != tkVoid:
+            let tmp = Node(kind: Local, val: c.newTemp(e.typ))
+            c.genAsgn(tmp, e.expr, e.typ, bu)
+            eb.add tmp
+          result = e.typ
   of AllNodes - ExprNodes:
     unreachable()
 

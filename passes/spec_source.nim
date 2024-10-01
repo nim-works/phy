@@ -20,11 +20,12 @@ type
     Params
     ProcDecl
     TypeDecl
+    Exprs
     Module
 
 const
   ExprNodes* = {IntVal, FloatVal, Ident, Call, TupleCons, FieldAccess, Return,
-                Unreachable}
+                Unreachable, Exprs}
   DeclNodes* = {ProcDecl, TypeDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 
