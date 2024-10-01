@@ -178,66 +178,73 @@ proc buildGraph(tree; n): Graph =
                dst: uint32(start + off),
                noCopy: tree[e].kind == Rename)
 
+        if tree[e].kind == Rename:
+          # for a 'rename' edge, mark both the source and destination as
+          # pinned
+          result.nodes[result.edges[^1].src].keep = true
+          result.nodes[result.edges[^1].dst].keep = true
+
     cont.groups.b = result.groups.high.int32
 
 proc colorGraph(gr: var Graph) =
-  ## Assigns a color to every node in the graph.
+  ## Assigns a color to every node in the graph. The goal is to use as little
+  ## colors as possible (in the least amount of time).
   var
     next    = 1'u32
     markers = newSeq[PackedSet[uint32]](gr.conts.len)
       ## for each node group (i.e., continuation) the already seen colors.
       ## Used to prevent invalid color propagation
 
-  # pre-color nodes pairs that are forced to share the same register:
+  # iterate over all edges in pre-order and propagate colors forward. A color
+  # can only be propagated along an edge if no other node in the target node's
+  # group has said color yet
   for g in gr.groups.items:
     for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
-      if e.noCopy:
-        if gr.nodes[e.src].color == 0:
-          gr.nodes[e.src] = (true, next)
+      if gr.nodes[e.src].color == 0:
+        gr.nodes[e.src].color = next
+        inc next
+
+      let color = gr.nodes[e.src].color
+      if gr.nodes[e.dst].color == 0 and
+         gr.nodes[e.src].keep == gr.nodes[e.dst].keep:
+        # the target node doesn't have a color yet
+        if containsOrIncl(markers[g.target], color):
+          # the color cannot be propagated
+          doAssert not e.noCopy, "cannot satisfy constraints"
+          gr.nodes[e.dst].color = next
           inc next
+        else:
+          gr.nodes[e.dst].color = color
 
-        let color = gr.nodes[e.src].color
-        if gr.nodes[e.dst].color != color:
-          # TODO: use proper error reporting
-          doAssert gr.nodes[e.dst].color == 0, "cannot satisfy constraints"
-          doAssert not containsOrIncl(markers[g.target], color),
-                   "cannot satisfy constraints"
-          gr.nodes[e.dst] = (true, color)
+      # don't propagate colors between pinned and not-pinned nodes, so
+      # that the color used in a pinned subgraph isn't used anywhere else.
+      # Propagating colors to eagerly can lead to necessary backward
+      # propagation failing where it otherwise wouldn't
 
-  # assign unique colors to the rest:
+  # nodes without any edges don't have a color yet. Give them one too:
   for n in gr.nodes.mitems:
     if n.color == 0:
       n.color = next
       inc next
 
-  # the graph is now colored correctly, but allocating registers would
-  # result in rather inefficient code; coalesce first
-
-  proc mark(nodes: var seq[GraphNode], s: var PackedSet[uint32],
-            a, b: uint32) {.nimcall.} =
-    let color = nodes[a].color
-    # don't propagate a color if it would introduce a duplicate
-    if not nodes[b].keep and not s.containsOrIncl(color):
-      # mark the node as having its final color
-      nodes[b] = (true, color)
-
-  # propagate colors forward:
-  for g in gr.groups.items:
-    for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
-      mark(gr.nodes, markers[g.target], e.src, e.dst)
-
-  reset markers # free the memory already
-
-  # propagate colors backward:
-  for cont in gr.conts.ritems:
-    var marker: PackedSet[uint32]
-
-    for it in cont.nodes.items:
-      marker.incl gr.nodes[it].color
-
-    for g in gr.groups.toOpenArray(cont.groups.a, cont.groups.b):
+  # now do a backward propagation pass (reverse pre-order):
+  for i in countdown(gr.conts.high, 0):
+    let c = addr gr.conts[i]
+    for g in gr.groups.toOpenArray(c.groups.a, c.groups.b):
       for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
-        mark(gr.nodes, marker, e.dst, e.src)
+        let color = gr.nodes[e.dst].color
+        if e.noCopy:
+          # the color *must* be propagated backwards (otherwise it's an error)
+          if color != gr.nodes[e.src].color:
+            doAssert not containsOrIncl(markers[i], color),
+                     "cannot satisfy constraints"
+            gr.nodes[e.src].color = color
+
+        elif color < gr.nodes[e.src].color and
+             not markers[i].containsOrIncl(color):
+          # only propagate colors that were introduced *earlier*. This prevents
+          # undoing the progress of the forward propagation pass
+          gr.nodes[e.src].color = color
 
 proc alloc(c; typ: TypeId): Register =
   ## Returns a free register and marks it occupied.
