@@ -197,7 +197,7 @@ proc colorGraph(gr: var Graph) =
   # can only be propagated along an edge if no other node in the target node's
   # group has said color yet
   for i, c in gr.conts.pairs:
-    for g in gr.groups.items:
+    for g in gr.groups.toOpenArray(c.groups.a, c.groups.b).items:
       for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
         if gr.nodes[e.src].color == 0:
           gr.nodes[e.src].color = next
