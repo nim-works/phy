@@ -592,9 +592,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
                       [$e.typ.kind])
         if i == last:
           if e.typ.kind != tkVoid:
-            let tmp = Node(kind: Local, val: c.newTemp(e.typ))
-            c.genAsgn(tmp, e.expr, e.typ, bu)
-            eb.add tmp
+            eb.add e.expr
           result = e.typ
   of AllNodes - ExprNodes:
     unreachable()
