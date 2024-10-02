@@ -239,7 +239,7 @@ proc colorGraph(gr: var Graph) =
                      "cannot satisfy constraints"
             gr.nodes[e.src].color = color
 
-        elif color < gr.nodes[e.src].color and
+        elif color < gr.nodes[e.src].color and not gr.nodes[e.src].keep and
              not markers[i].containsOrIncl(color):
           # only propagate colors that were introduced *earlier*. This prevents
           # undoing the progress of the forward propagation pass
