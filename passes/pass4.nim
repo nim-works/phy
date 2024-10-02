@@ -12,8 +12,8 @@
 ## **What we want:**
 ## * each node having a register assigned
 ## * locals within a continuation to all have a different register assigned
-## * (good to have) as little total registers as possible
-## * (good to have) as little copies as possible
+## * (good to have) as few total registers as possible
+## * (good to have) as few copies as possible
 ##
 ## **How we get there:**
 ## 1. compute "islands" of nodes, using a simple, linear time graph
@@ -187,7 +187,7 @@ proc buildGraph(tree; n): Graph =
     cont.groups.b = result.groups.high.int32
 
 proc colorGraph(gr: var Graph) =
-  ## Assigns a color to every node in the graph. The goal is to use as little
+  ## Assigns a color to every node in the graph. The goal is to use as few
   ## colors as possible (in the least amount of time).
   var
     next    = 1'u32
