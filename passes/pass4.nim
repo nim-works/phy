@@ -198,30 +198,31 @@ proc colorGraph(gr: var Graph) =
   # iterate over all edges in pre-order and propagate colors forward. A color
   # can only be propagated along an edge if no other node in the target node's
   # group has said color yet
-  for g in gr.groups.items:
-    for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
-      if gr.nodes[e.src].color == 0:
-        gr.nodes[e.src].color = next
-        inc next
-
-      let color = gr.nodes[e.src].color
-      if gr.nodes[e.dst].color == 0 and
-         gr.nodes[e.src].keep == gr.nodes[e.dst].keep:
-        # the target node doesn't have a color yet
-        if containsOrIncl(markers[g.target], color):
-          # the color cannot be propagated
-          doAssert not e.noCopy, "cannot satisfy constraints"
-          gr.nodes[e.dst].color = next
+  for i, c in gr.conts.pairs:
+    for g in gr.groups.items:
+      for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
+        if gr.nodes[e.src].color == 0:
+          gr.nodes[e.src].color = next
+          markers[i].incl next
           inc next
-        else:
-          gr.nodes[e.dst].color = color
 
-      # don't propagate colors between pinned and not-pinned nodes, so
-      # that the color used in a pinned subgraph isn't used anywhere else.
-      # Propagating colors to eagerly can lead to necessary backward
-      # propagation failing where it otherwise wouldn't
+        let color = gr.nodes[e.src].color
+        if gr.nodes[e.dst].color == 0 and
+          gr.nodes[e.src].keep == gr.nodes[e.dst].keep:
+          # the target node doesn't have a color yet
+          if containsOrIncl(markers[g.target], color):
+            # the color cannot be propagated
+            doAssert not e.noCopy, "cannot satisfy constraints"
+          else:
+            gr.nodes[e.dst].color = color
 
-  # nodes without any edges don't have a color yet. Give them one too:
+        # don't propagate colors between pinned and not-pinned nodes, so
+        # that the color used in a pinned subgraph isn't used anywhere else.
+        # Propagating colors to eagerly can lead to necessary backward
+        # propagation failing where it otherwise wouldn't
+
+  # nodes without any outgoing edges might not have a color yet. Give them one
+  # too:
   for n in gr.nodes.mitems:
     if n.color == 0:
       n.color = next
