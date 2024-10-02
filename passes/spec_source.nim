@@ -15,12 +15,12 @@ type
     Call
     TupleCons
     FieldAccess
+    Exprs
     Return
     Unreachable
     Params
     ProcDecl
     TypeDecl
-    Exprs
     Module
 
 const
