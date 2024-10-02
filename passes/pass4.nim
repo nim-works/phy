@@ -131,10 +131,6 @@ func addUnique[T](s: var seq[T], it: T) {.inline.} =
 template localRef(id: uint32): Node =
   Node(kind: Local, val: id)
 
-iterator ritems[T](s: seq[T]): lent T =
-  for i in countdown(s.high, 0):
-    yield s[i]
-
 proc buildGraph(tree; n): Graph =
   ## Builds the assignment graph from the list of continuations at `n`.
 
