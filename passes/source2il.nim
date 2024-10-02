@@ -79,6 +79,12 @@ proc error(c; message: sink string) =
   ## Sends the error diagnostic `message` to the reporter.
   c.reporter.error(message)
 
+func add[T](bu: var Builder[T], trees: openArray[seq[TreeNode[T]]]) =
+  ## Appends all `trees` to the current sub-tree. The trees must each either
+  ## represent a single atomic node, or a complete subtree.
+  for t in trees.items:
+    bu.add t
+
 template addType(c; kind: NodeKind, body: untyped): uint32 =
   c.types.subTree kind:
     body
