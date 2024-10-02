@@ -580,8 +580,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     stmts.addStmt Stmts:
       for i, si in t.pairs(n):
         let e = c.exprToIL(t, si)
-        for s in e.stmts:
-          bu.add s
+        bu.add e.stmts
         case e.typ.kind
         of tkUnit:
           bu.subTree Drop:

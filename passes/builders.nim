@@ -48,6 +48,15 @@ func add*[T](bu: var Builder[T], nodes: openArray[TreeNode[T]]) =
     inc bu.buf[bu.parent].val
   bu.buf.add nodes
 
+func add*[T](bu: var Builder[T], trees: openArray[seq[TreeNode[T]]]) =
+  ## Appends all `trees` to the current sub-tree. The trees must each either
+  ## represent a single atomic node, or a complete subtree.
+  assert trees.len > 0
+  if bu.parent != -1:
+    inc bu.buf[bu.parent].val
+  for t in trees.items:
+    bu.buf.add t
+
 func copyFrom*[T](bu: var Builder[T], tree: PackedTree[T], n: NodeIndex) =
   ## Inserts the whole subtree from `tree` at `n` at the current buffer
   ## position. `tree` has to use the same underlying storage for literal
