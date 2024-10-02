@@ -7,22 +7,24 @@
 ##   * nodes represent continuation locals
 ##   * edges represent moves
 ##   * edges are in pre-order
-## * constraints requiring some nodes to share the same register
+## * constraints requiring some nodes to share the same phyiscal register
 ##
 ## **What we want:**
-## * each node having a register assigned
-## * locals within a continuation to all have a different register assigned
+## * each node having a physical register assigned
+## * locals within a continuation to all have a different phyiscal register
+##   assigned
 ## * (good to have) as few total registers as possible
 ## * (good to have) as few copies as possible
 ##
 ## **How we get there:**
-## 1. compute "islands" of nodes, using a simple, linear time graph
+## 1. assign virtual registers to nodes, using a simple, linear time graph
 ##    coloring scheme
-## 2. all nodes part of an island share the same register
-## 3. two different islands *may* share the same register, but only if both
-##    are never part of the same continuation
-## 4. rewrite the code, injecting assignments (i.e. copies) for all edges
-##    where the source and destination register differs
+## 2. all virtual registers only have a single live range
+## 3. use a live-range based allocation scheme for mapping virtual to physical
+##    registers
+## 4. inject assignments (i.e. copies) for all edges where the source and
+##    destination register differs
+## 5. lower continue-with-value exits into assignment + continue
 ##
 ## The graph being able to contain cycles is irrelevant for the algorithm,
 ## thanks to the pre-established order.
