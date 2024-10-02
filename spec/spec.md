@@ -189,7 +189,8 @@ A non-empty list of expressions, where the tail expression may be any type and
 preceding ones must be `unit` or `void`. An error is reported if a a non-tail
 expression is not of `unit` or `void` type.
 
-The type of the expression list is that of the trailing expression.
+The type of the expression list is inferred as `void` if any non-trailing
+expression is `void`, otherwise the type is that of the trailing expression.
 
 ### Type Expressions
 
