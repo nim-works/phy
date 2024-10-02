@@ -264,6 +264,11 @@ proc genAsgn(c; a: Node|NodeSeq, b: NodeSeq, typ: SemType, bu) =
     bu.add a
     genUse(b, bu)
 
+proc genDrop(a: Node|NodeSeq, bu) =
+  ## Emits a ``Drop a`` to `bu`
+  bu.subTree Drop:
+    genUse(a, bu)
+
 proc inline(bu; e: sink Expr; stmts) =
   ## Appends the trailing expression directly to `bu`.
   stmts.add e.stmts
@@ -589,8 +594,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         bu.add e.stmts
         case e.typ.kind
         of tkUnit:
-          bu.subTree Drop:
-            genUse(e.expr, bu)
+          genDrop(e.expr, bu)
         else:
           if i != last:
             c.error("non-trailing expressions must be unit or void, got: $1" %
