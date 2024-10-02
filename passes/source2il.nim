@@ -574,9 +574,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       discard
     result = prim(tkVoid)
   of SourceKind.Exprs:
-    let nodeCount = t[n].val.int
-    if nodeCount == 0:
-      c.error("an empty expression list is disallowed")
+    let nodeCount = t.len(n)
     let last = nodeCount - 1
     var eb = bu
     stmts.addStmt Stmts:
@@ -587,7 +585,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         case e.typ.kind
         of tkUnit:
           bu.subTree Drop:
-            bu.add e.expr
+            genUse(e.expr, bu)
         else:
           if i != last:
             c.error("non-trailing expressions must be unit or void, got: $1" %

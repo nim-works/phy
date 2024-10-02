@@ -186,9 +186,10 @@ expr += (Exprs <expr>+)
 ```
 
 A non-empty list of expressions, where the tail expression may be any type and
-preceeding ones must be `unit` or `void`. An error is reported if:
-* the expression list is empty
-* a non-tail expression is not of `unit` or `void` type
+preceding ones must be `unit` or `void`. An error is reported if a a non-tail
+expression is not of `unit` or `void` type.
+
+The type of the expression list is that of the trailing expression.
 
 ### Type Expressions
 
