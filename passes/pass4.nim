@@ -506,27 +506,36 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
   block:
     c.nodeToReg.setLen(gr.nodes.len)
 
+    # first, compute the last continuation (in terms of execution order) each
+    # color (i.e., virtual local) is live in
+    var ends: seq[uint32]
+    for i, cont in gr.conts.pairs:
+      for node in gr.nodes.toOpenArray(cont.nodes.a, cont.nodes.b).items:
+        # note: colors are 1-based
+        let idx = int(node.color - 1)
+        if idx >= ends.len:
+          ends.setLen(idx + 1)
+        ends[idx] = uint32(i)
+
+    # then do the actual mapping. Physical registers are kept allocated until
+    # the last use of their color (this is what the `ends` seq is for)
     var colorToReg: Table[uint32, Register]
-    for cont in gr.conts.items:
-      # 1. fill already allocated ones
+    for i, cont in gr.conts.pairs:
+      # 1. allocate a physical local for all not-yet mapped used virtual
+      # ones
       for id in cont.nodes.items:
         var reg = colorToReg.getOrDefault(gr.nodes[id].color, high(Register))
-        if reg != high(Register):
-          c.locals[reg].free = false
-          c.nodeToReg[id] = reg.uint32
-        else:
-          c.nodeToReg[id] = high(uint32) # mark as uninitialized
-
-      # 2. allocate the rest and update the associated color
-      for id in cont.nodes.items:
-        if c.nodeToReg[id] == high(uint32):
-          let reg = c.alloc(getType(tree, cont.n, id - cont.nodes.a))
-          c.nodeToReg[id] = reg
+        if reg == high(Register):
+          reg = c.alloc(getType(tree, cont.n, id - cont.nodes.a))
           colorToReg[gr.nodes[id].color] = reg
 
-      # 3. mark all registers as free again
+        c.nodeToReg[id] = reg
+
+      # 2. retire live physical locals corresponding to virtual ones that are
+      # not used beyond the current continuation
       for id in cont.nodes.items:
-        c.locals[c.nodeToReg[id]].free = true
+        if ends[gr.nodes[id].color - 1] == uint32(i):
+          c.locals[c.nodeToReg[id]].free = true
 
   # compute where copies are needed and, if necessary, the continuation ID map
   block:
