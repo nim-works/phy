@@ -79,6 +79,12 @@ proc error(c; message: sink string) =
   ## Sends the error diagnostic `message` to the reporter.
   c.reporter.error(message)
 
+func add[T](bu: var Builder[T], trees: openArray[seq[TreeNode[T]]]) =
+  ## Appends all `trees` to the current sub-tree. The trees must each either
+  ## represent a single atomic node, or a complete subtree.
+  for t in trees.items:
+    bu.add t
+
 template addType(c; kind: NodeKind, body: untyped): uint32 =
   c.types.subTree kind:
     body
@@ -502,8 +508,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
           c.error("`If` condition must be a boolean expression")
         bu.subTree Stmts:
           let body = exprToIL(c, t, b) # body
-          for s in body.stmts:
-            bu.add s
+          bu.add body.stmts
           case body.typ.kind
           of tkUnit:
             bu.subtree Drop:
@@ -543,14 +548,12 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         stmts.addStmt If:
           bu.inline(cond, stmts) # this might need to be assigned to a local
           bu.subTree Stmts:
-            for s in body.stmts: # FIXME: this should just use the overload
-              bu.add s
+            bu.add body.stmts
           if body.typ.kind != tkVoid:
             bu.subTree Drop:
               bu.add body.expr # xxx: use `genUse`?
           bu.subTree Stmts:
-            for s in els.stmts:
-              bu.add s
+            bu.add els.stmts
           if els.typ.kind != tkVoid:
             bu.subTree Drop:
               bu.add els.expr # xxx: use `genUse`?
@@ -579,12 +582,10 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         stmts.addStmt If:
           bu.inline(cond, stmts) # this might need to be assigned to a local
           bu.subTree Stmts:
-            for s in bd.stmts:
-              bu.add s
+            bu.add bd.stmts
             c.genAsgn(Node(kind: Local, val: tmp), bd.expr, bd.typ, bu)
           bu.subTree Stmts:
-            for s in el.stmts:
-              bu.add s
+            bu.add el.stmts
             c.genAsgn(Node(kind: Local, val: tmp), el.expr, el.typ, bu)
         bu.add Node(kind: Local, val: tmp)
         result = fit.typ
