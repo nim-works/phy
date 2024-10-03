@@ -3,10 +3,8 @@
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 0)
-    (Continuations
-      (Continuation (Params) (Locals)
-        (Continue 1 (List)))
-      (Continuation (Params) (Locals)
-        (Drop (IntVal 100))
-        (Loop 1 (List))))))
+  (ProcDef (Type 0) (Locals)
+    (Stmts
+      (Join 0)
+      (Drop (IntVal 100))
+      (Loop 0))))
