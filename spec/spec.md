@@ -70,7 +70,7 @@ entity with `name` part of `scope`.
 ### Expressions
 
 At the moment, a few names are automatically part of a scope: `+`, `-`, `==`,
-`<`, `<=`, `not`.
+`<`, `<=`, `not`, `true`, and `false`.
 
 #### Identifiers
 

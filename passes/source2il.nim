@@ -21,6 +21,9 @@ type
   NodeSeq    = seq[Node]
 
   EntityKind = enum
+    ekNone        ## non existent
+    ekBuiltin     ## some built-in special entity
+    ekBuiltinProc ## some built-in special
     ekProc
     ekType
 
@@ -67,6 +70,18 @@ type
     expr: NodeSeq
     typ: SemType
 
+const
+  BuiltIns = {
+    "+": ekBuiltinProc,
+    "-": ekBuiltinProc,
+    "==": ekBuiltinProc,
+    "<=": ekBuiltinProc,
+    "<": ekBuiltinProc,
+    "not": ekBuiltinProc,
+    "true": ekBuiltin,
+    "false": ekBuiltin
+  }.toTable
+
 using
   c: var ModuleCtx
   t: InTree
@@ -77,10 +92,30 @@ proc error(c; message: sink string) =
   ## Sends the error diagnostic `message` to the reporter.
   c.reporter.error(message)
 
+func lookup(c: ModuleCtx, name: string): Entity =
+  ## Implements the lookup action described in the specification.
+  result = c.scope.getOrDefault(name, Entity(kind: ekNone))
+  # built-ins are not added to any scope, and can thus be used to detect
+  # a lookup failure here
+  if result.kind == ekNone:
+    result.kind = BuiltIns.getOrDefault(name, ekNone)
+
 template addType(c; kind: NodeKind, body: untyped): uint32 =
   c.types.subTree kind:
     body
   (let r = c.numTypes; inc c.numTypes; r.uint32)
+
+proc expect(c; name: string, ent: Entity, kind: EntityKind): bool =
+  ## Convenience procedure for reporting an error if `ent` is not of the given
+  ## `kind`. Returns 'true' if it is.
+  if ent.kind == kind:
+    true
+  elif ent.kind == ekNone:
+    c.error("undeclared identifier: '" & name & "'")
+    false
+  else:
+    c.error("'" & name & "' is not a " & $kind & " name")
+    false
 
 proc expectNot(c; typ: sink SemType, kind: TypeKind): SemType =
   ## If `typ` has the given `kind`, reports an error and returns the error
@@ -135,16 +170,12 @@ proc evalType(c; t; n: NodeIndex): SemType =
 
     SemType(kind: tkUnion, elems: list)
   of Ident:
-    let name = t.getString(n)
-    if name in c.scope:
-      let ent = c.scope[name]
-      if ent.kind == ekType:
-        c.aliases[ent.id]
-      else:
-        c.error("'" & name & "' is not a type")
-        errorType()
+    let
+      name = t.getString(n)
+      ent  = c.lookup(name)
+    if c.expect(name, ent, ekType):
+      c.aliases[ent.id]
     else:
-      c.error("undeclared identifier: " & name)
       errorType()
   else:       unreachable() # syntax error
 
@@ -417,20 +448,26 @@ proc notToIL(c; t; n: NodeIndex, bu; stmts): SemType =
     result = errorType()
 
 proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
-  let name = t.getString(t.child(n, 0))
-  case name
-  of "+", "-":
-    result = binaryArithToIL(c, t, n, name, bu, stmts)
-  of "==", "<", "<=":
-    result = relToIL(c, t, n, name, bu, stmts)
-  of "not":
-    result = notToIL(c, t, n, bu, stmts)
-  elif name in c.scope:
-    # it could be a user-defined procedure
-    let ent = c.scope[name]
+  let
+    name = t.getString(t.child(n, 0))
+    ent  = c.lookup(name)
+
+  case ent.kind
+  of ekBuiltinProc:
+    case name
+    of "+", "-":
+      result = binaryArithToIL(c, t, n, name, bu, stmts)
+    of "==", "<", "<=":
+      result = relToIL(c, t, n, name, bu, stmts)
+    of "not":
+      result = notToIL(c, t, n, bu, stmts)
+    else:
+      unreachable()
+  of ekProc:
+    # a user-defined procedure
     # TODO: rework this logic so that the argument expressions are always
     #       analyzed, even on arity mismatch or when the callee is not a proc
-    if ent.kind == ekProc and t.len(n) == 1:
+    if t.len(n) == 1:
       # procedure arity is currently always 0
       let prc {.cursor.} = c.procList[ent.id]
       case prc.result.kind
@@ -456,16 +493,12 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
           bu.add Node(kind: Proc, val: ent.id.uint32)
 
       result = prc.result
-    elif ent.kind != ekProc:
-      c.error(name & " is not a procedure name")
-      bu.add Node(kind: IntVal)
-      result = errorType()
     else:
       c.error("expected 0 arguments, but got " & $(t.len(n) - 1))
       bu.add Node(kind: IntVal)
       result = errorType()
   else:
-    c.error("undeclared identifier: " & name)
+    discard c.expect(name, ent, ekProc) # always reports an error
     bu.add Node(kind: IntVal)
     result = errorType()
 
@@ -478,15 +511,24 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     bu.add Node(kind: FloatVal, val: c.literals.pack(t.getFloat(n)))
     result = prim(tkFloat)
   of SourceKind.Ident:
-    case t.getString(n)
-    of "false":
-      bu.add Node(kind: IntVal, val: 0)
-      result = prim(tkBool)
-    of "true":
-      bu.add Node(kind: IntVal, val: 1)
-      result = prim(tkBool)
-    else:
+    let
+      name = t.getString(n)
+      ent = c.lookup(name)
+    case ent.kind
+    of ekBuiltin:
+      case name
+      of "false":
+        bu.add Node(kind: IntVal, val: 0)
+        result = prim(tkBool)
+      of "true":
+        bu.add Node(kind: IntVal, val: 1)
+        result = prim(tkBool)
+    of ekNone:
       c.error("undeclared identifier: " & t.getString(n))
+      bu.add Node(kind: IntVal)
+      result = prim(tkError)
+    else:
+      c.error("'" & name & "' cannot be used in this context")
       bu.add Node(kind: IntVal)
       result = prim(tkError)
   of SourceKind.Call:
@@ -655,7 +697,7 @@ proc declToIL*(c; t; n: NodeIndex) =
   case t[n].kind
   of SourceKind.ProcDecl:
     let name = t.getString(t.child(n, 0))
-    if name in c.scope:
+    if c.lookup(name).kind != ekNone:
       c.error("redeclaration of '" & name & "'")
       return
 
@@ -696,7 +738,7 @@ proc declToIL*(c; t; n: NodeIndex) =
     c.procs.add finish(bu)
   of SourceKind.TypeDecl:
     let name = t.getString(t.child(n, 0))
-    if name in c.scope:
+    if c.lookup(name).kind != ekNone:
       c.error("redeclaration of '" & name & "'")
       return
 
