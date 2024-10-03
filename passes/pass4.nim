@@ -7,22 +7,24 @@
 ##   * nodes represent continuation locals
 ##   * edges represent moves
 ##   * edges are in pre-order
-## * constraints requiring some nodes to share the same register
+## * constraints requiring some nodes to share the same phyiscal register
 ##
 ## **What we want:**
-## * each node having a register assigned
-## * locals within a continuation to all have a different register assigned
-## * (good to have) as little total registers as possible
-## * (good to have) as little copies as possible
+## * each node having a physical register assigned
+## * locals within a continuation to all have a different phyiscal register
+##   assigned
+## * (good to have) as few total registers as possible
+## * (good to have) as few copies as possible
 ##
 ## **How we get there:**
-## 1. compute "islands" of nodes, using a simple, linear time graph
+## 1. assign virtual registers to nodes, using a simple, linear time graph
 ##    coloring scheme
-## 2. all nodes part of an island share the same register
-## 3. two different islands *may* share the same register, but only if both
-##    are never part of the same continuation
-## 4. rewrite the code, injecting assignments (i.e. copies) for all edges
-##    where the source and destination register differs
+## 2. all virtual registers only have a single live range
+## 3. use a live-range based allocation scheme for mapping virtual to physical
+##    registers
+## 4. inject assignments (i.e. copies) for all edges where the source and
+##    destination register differs
+## 5. lower continue-with-value exits into assignment + continue
 ##
 ## The graph being able to contain cycles is irrelevant for the algorithm,
 ## thanks to the pre-established order.
@@ -129,10 +131,6 @@ func addUnique[T](s: var seq[T], it: T) {.inline.} =
 template localRef(id: uint32): Node =
   Node(kind: Local, val: id)
 
-iterator ritems[T](s: seq[T]): lent T =
-  for i in countdown(s.high, 0):
-    yield s[i]
-
 proc buildGraph(tree; n): Graph =
   ## Builds the assignment graph from the list of continuations at `n`.
 
@@ -178,66 +176,74 @@ proc buildGraph(tree; n): Graph =
                dst: uint32(start + off),
                noCopy: tree[e].kind == Rename)
 
+        if tree[e].kind == Rename:
+          # for a 'rename' edge, mark both the source and destination as
+          # pinned
+          result.nodes[result.edges[^1].src].keep = true
+          result.nodes[result.edges[^1].dst].keep = true
+
     cont.groups.b = result.groups.high.int32
 
 proc colorGraph(gr: var Graph) =
-  ## Assigns a color to every node in the graph.
+  ## Assigns a color to every node in the graph. The goal is to use as few
+  ## colors as possible (in the least amount of time).
   var
     next    = 1'u32
     markers = newSeq[PackedSet[uint32]](gr.conts.len)
       ## for each node group (i.e., continuation) the already seen colors.
       ## Used to prevent invalid color propagation
 
-  # pre-color nodes pairs that are forced to share the same register:
-  for g in gr.groups.items:
-    for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
-      if e.noCopy:
+  # iterate over all edges in pre-order and propagate colors forward. A color
+  # can only be propagated along an edge if no other node in the target node's
+  # group has said color yet
+  for i, c in gr.conts.pairs:
+    for g in gr.groups.toOpenArray(c.groups.a, c.groups.b).items:
+      for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
         if gr.nodes[e.src].color == 0:
-          gr.nodes[e.src] = (true, next)
+          gr.nodes[e.src].color = next
+          markers[i].incl next
           inc next
 
         let color = gr.nodes[e.src].color
-        if gr.nodes[e.dst].color != color:
-          # TODO: use proper error reporting
-          doAssert gr.nodes[e.dst].color == 0, "cannot satisfy constraints"
-          doAssert not containsOrIncl(markers[g.target], color),
-                   "cannot satisfy constraints"
-          gr.nodes[e.dst] = (true, color)
+        if gr.nodes[e.dst].color == 0 and
+          gr.nodes[e.src].keep == gr.nodes[e.dst].keep:
+          # the target node doesn't have a color yet
+          if containsOrIncl(markers[g.target], color):
+            # the color cannot be propagated
+            doAssert not e.noCopy, "cannot satisfy constraints"
+          else:
+            gr.nodes[e.dst].color = color
 
-  # assign unique colors to the rest:
+        # don't propagate colors between pinned and not-pinned nodes, so
+        # that the color used in a pinned subgraph isn't used anywhere else.
+        # Propagating colors to eagerly can lead to necessary backward
+        # propagation failing where it otherwise wouldn't
+
+  # nodes without any outgoing edges might not have a color yet. Give them one
+  # too:
   for n in gr.nodes.mitems:
     if n.color == 0:
       n.color = next
       inc next
 
-  # the graph is now colored correctly, but allocating registers would
-  # result in rather inefficient code; coalesce first
-
-  proc mark(nodes: var seq[GraphNode], s: var PackedSet[uint32],
-            a, b: uint32) {.nimcall.} =
-    let color = nodes[a].color
-    # don't propagate a color if it would introduce a duplicate
-    if not nodes[b].keep and not s.containsOrIncl(color):
-      # mark the node as having its final color
-      nodes[b] = (true, color)
-
-  # propagate colors forward:
-  for g in gr.groups.items:
-    for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
-      mark(gr.nodes, markers[g.target], e.src, e.dst)
-
-  reset markers # free the memory already
-
-  # propagate colors backward:
-  for cont in gr.conts.ritems:
-    var marker: PackedSet[uint32]
-
-    for it in cont.nodes.items:
-      marker.incl gr.nodes[it].color
-
-    for g in gr.groups.toOpenArray(cont.groups.a, cont.groups.b):
+  # now do a backward propagation pass (reverse pre-order):
+  for i in countdown(gr.conts.high, 0):
+    let c = addr gr.conts[i]
+    for g in gr.groups.toOpenArray(c.groups.a, c.groups.b):
       for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
-        mark(gr.nodes, marker, e.dst, e.src)
+        let color = gr.nodes[e.dst].color
+        if e.noCopy:
+          # the color *must* be propagated backwards (otherwise it's an error)
+          if color != gr.nodes[e.src].color:
+            doAssert not containsOrIncl(markers[i], color),
+                     "cannot satisfy constraints"
+            gr.nodes[e.src].color = color
+
+        elif color < gr.nodes[e.src].color and not gr.nodes[e.src].keep and
+             not markers[i].containsOrIncl(color):
+          # only propagate colors that were introduced *earlier*. This prevents
+          # undoing the progress of the forward propagation pass
+          gr.nodes[e.src].color = color
 
 proc alloc(c; typ: TypeId): Register =
   ## Returns a free register and marks it occupied.
@@ -498,27 +504,36 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
   block:
     c.nodeToReg.setLen(gr.nodes.len)
 
+    # first, compute the last continuation (in terms of execution order) each
+    # color (i.e., virtual local) is live in
+    var ends: seq[uint32]
+    for i, cont in gr.conts.pairs:
+      for node in gr.nodes.toOpenArray(cont.nodes.a, cont.nodes.b).items:
+        # note: colors are 1-based
+        let idx = int(node.color - 1)
+        if idx >= ends.len:
+          ends.setLen(idx + 1)
+        ends[idx] = uint32(i)
+
+    # then do the actual mapping. Physical registers are kept allocated until
+    # the last use of their color (this is what the `ends` seq is for)
     var colorToReg: Table[uint32, Register]
-    for cont in gr.conts.items:
-      # 1. fill already allocated ones
+    for i, cont in gr.conts.pairs:
+      # 1. allocate a physical local for all not-yet mapped used virtual
+      # ones
       for id in cont.nodes.items:
         var reg = colorToReg.getOrDefault(gr.nodes[id].color, high(Register))
-        if reg != high(Register):
-          c.locals[reg].free = false
-          c.nodeToReg[id] = reg.uint32
-        else:
-          c.nodeToReg[id] = high(uint32) # mark as uninitialized
-
-      # 2. allocate the rest and update the associated color
-      for id in cont.nodes.items:
-        if c.nodeToReg[id] == high(uint32):
-          let reg = c.alloc(getType(tree, cont.n, id - cont.nodes.a))
-          c.nodeToReg[id] = reg
+        if reg == high(Register):
+          reg = c.alloc(getType(tree, cont.n, id - cont.nodes.a))
           colorToReg[gr.nodes[id].color] = reg
 
-      # 3. mark all registers as free again
+        c.nodeToReg[id] = reg
+
+      # 2. retire live physical locals corresponding to virtual ones that are
+      # not used beyond the current continuation
       for id in cont.nodes.items:
-        c.locals[c.nodeToReg[id]].free = true
+        if ends[gr.nodes[id].color - 1] == uint32(i):
+          c.locals[c.nodeToReg[id]].free = true
 
   # compute where copies are needed and, if necessary, the continuation ID map
   block:
