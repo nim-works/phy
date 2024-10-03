@@ -253,10 +253,12 @@ proc genUse(a: NodeSeq, bu) =
     bu.add a
 
 proc genAsgn(c; a: Node|NodeSeq, b: NodeSeq, typ: SemType, bu) =
-  ## Emits an ``a = b`` assignment to `bu`.
-  bu.subTree Asgn:
-    bu.add a
-    genUse(b, bu)
+  ## Emits an ``a = b`` assignment to `bu`. For convenience, if `typ` is a
+  ## ``tkVoid``, no assignment is emitted.
+  if typ.kind != tkVoid:
+    bu.subTree Asgn:
+      bu.add a
+      genUse(b, bu)
 
 proc inline(bu; e: sink Expr; stmts) =
   ## Appends the trailing expression directly to `bu`.
@@ -322,6 +324,11 @@ proc exprToIL(c; t: InTree, n: NodeIndex): Expr =
   var bu = initBuilder[NodeKind]()
   result.typ = exprToIL(c, t, n, bu, result.stmts)
   result.expr = finish(bu)
+  # verify some postconditions:
+  assert result.typ.kind != tkVoid or result.expr.len == 0,
+         "void `Expr` cannot have a trailing expression"
+  assert result.typ.kind in {tkVoid, tkError} or result.expr.len > 0,
+         "non-void `Expr` must have a trailing expression"
 
 template lenCheck(t; n: NodeIndex, bu; expected: int) =
   ## Exits the current analysis procedure with an error, if `n` doesn't have
@@ -433,7 +440,7 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
         stmts.addStmt Call:
           bu.add Node(kind: Proc, val: ent.id.uint32)
         # mark the normal control-flow path as dead:
-        bu.subTree Unreachable:
+        stmts.addStmt Unreachable:
           discard
       of ComplexTypes:
         # the value is not returned normally, but passed via an out parameter
@@ -645,16 +652,19 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       of 1: c.exprToIL(t, t.child(n, 0))
       else: unreachable() # syntax error
 
+    if e.typ.kind == tkVoid:
+      c.error("cannot return 'void' expression")
+      e.expr = @[Node(kind: IntVal)] # add a placholder
+      e.typ = prim(tkError)
+
     # apply the necessary to-supertype conversions:
     e = c.fitExpr(e, c.retType)
 
     stmts.add e.stmts
-    bu.subTree Return:
+    stmts.addStmt Return:
       case e.typ.kind
       of tkError:
         discard "do nothing"
-      of tkVoid:
-        c.error("cannot return 'void' expression")
       of ComplexTypes:
         # special handling for complex types: store through the out parameter
         stmts.addStmt Store:
@@ -669,7 +679,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
 
     result = prim(tkVoid)
   of SourceKind.Unreachable:
-    bu.subTree Unreachable:
+    stmts.addStmt Unreachable:
       discard
     result = prim(tkVoid)
   of AllNodes - ExprNodes:
@@ -733,10 +743,7 @@ proc exprToIL*(c; t): SemType =
         bu.add it
 
       # then the expression:
-      case e.typ.kind
-      of tkVoid:
-        bu.add e.expr
-      else:
+      if e.typ.kind != tkVoid:
         bu.subTree Return:
           genUse(e.expr, bu)
 
@@ -786,7 +793,6 @@ proc declToIL*(c; t; n: NodeIndex) =
     bu.subTree Stmts:
       for it in e.stmts.items:
         bu.add it
-      bu.add e.expr
 
     c.procs.add finish(bu)
   of SourceKind.TypeDecl:
