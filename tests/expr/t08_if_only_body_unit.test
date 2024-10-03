@@ -1,3 +1,4 @@
 discard """
+  output: "(): unit" 
 """
 (If (Ident "true") (TupleCons))
