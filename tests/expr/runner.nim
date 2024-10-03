@@ -20,6 +20,7 @@ import
     pass1,
     pass3,
     pass4,
+    pass7,
     pass10,
     source2il,
     spec_source,
@@ -99,6 +100,7 @@ checkSyntax(tree, lang10_checks, top)
 
 # lower to the L0 language:
 tree = tree.apply(pass10.lower(tree))
+tree = tree.apply(pass7.lower(tree))
 tree = tree.apply(pass4.lower(tree))
 tree = tree.apply(pass3.lower(tree, 8))
 tree = tree.apply(pass1.lower(tree, 8))
