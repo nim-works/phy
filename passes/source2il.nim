@@ -8,7 +8,7 @@
 
 import
   std/[algorithm, sequtils, tables],
-  passes/[builders, spec, trees, debugutils],
+  passes/[builders, spec, trees],
   phy/[reporting, types],
   vm/[utils]
 
