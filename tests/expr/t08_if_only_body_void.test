@@ -1,0 +1,8 @@
+discard """
+  description: "an if-then with void typed body is still a unit"
+"""
+(Module
+  (ProcDecl (Ident "a") (UnitTy) (Params)
+    (Return (If (Ident "true") (Unreachable))))
+  (ProcDecl (Ident "main") (UnitTy) (Params)
+    (Return (Call (Ident "a")))))
