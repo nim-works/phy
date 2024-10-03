@@ -266,6 +266,11 @@ proc genAsgn(c; a: Node|NodeSeq, b: NodeSeq, typ: SemType, bu) =
       bu.add a
       genUse(b, bu)
 
+proc genDrop(a: Node|NodeSeq, bu) =
+  ## Emits a ``Drop a`` to `bu`
+  bu.subTree Drop:
+    genUse(a, bu)
+
 proc inline(bu; e: sink Expr; stmts) =
   ## Appends the trailing expression directly to `bu`.
   stmts.add e.stmts
@@ -511,12 +516,11 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
           bu.add body.stmts
           case body.typ.kind
           of tkUnit:
-            bu.subtree Drop:
-              bu.add body.expr
+            genDrop(body.expr, bu)
           of tkVoid:
             discard "nothing to do, this is fine"
           else: # not unit or void
-            c.error("non-exhaustive `If` must be of type unit or void")
+            c.error("non-exhaustive `If` must be of type unit")
             result = errorType()
       bu.add Node(kind: IntVal) # unit
       result = prim(tkUnit)
