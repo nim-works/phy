@@ -249,7 +249,7 @@ proc newTemp(c; typ: SemType): uint32 =
   result = c.locals.len.uint32
   c.locals.add typ
 
-proc genUse(a: NodeSeq, bu) =
+proc genUse(a: Node|NodeSeq, bu) =
   ## Emits `a` to `bu`, wrapping the expression in a ``Copy`` operation when
   ## it's an lvalue expression.
   if a[0].kind in {Field, At, Local}:
