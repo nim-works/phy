@@ -266,10 +266,11 @@ proc genAsgn(c; a: Node|NodeSeq, b: NodeSeq, typ: SemType, bu) =
       bu.add a
       genUse(b, bu)
 
-proc genDrop(a: Node|NodeSeq, bu) =
-  ## Emits a ``Drop a`` to `bu`
-  bu.subTree Drop:
-    genUse(a, bu)
+proc genDrop(a: Node|NodeSeq, typ: SemType, bu) =
+  ## Emits a ``Drop a`` to `bu`, so long as `typ` is not `void`
+  if typ.kind != tkVoid:
+    bu.subTree Drop:
+      genUse(a, bu)
 
 proc inline(bu; e: sink Expr; stmts) =
   ## Appends the trailing expression directly to `bu`.
@@ -516,7 +517,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
           bu.add body.stmts
           case body.typ.kind
           of tkUnit:
-            genDrop(body.expr, bu)
+            genDrop(body.expr, body.typ, bu)
           of tkVoid:
             discard "nothing to do, this is fine"
           else: # not unit or void
@@ -554,11 +555,11 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
           bu.subTree Stmts:
             bu.add body.stmts
           if body.typ.kind != tkVoid:
-            genDrop(body.expr, bu)
+            genDrop(body.expr, body.typ, bu)
           bu.subTree Stmts:
             bu.add els.stmts
           if els.typ.kind != tkVoid:
-            genDrop(els.expr, bu)
+            genDrop(els.expr, body.typ, bu)
         case fitStrategy
         of bodyAndElseNoFit:
           c.error("if ($1) and else ($2) branches cannot be unified into a single type" %
