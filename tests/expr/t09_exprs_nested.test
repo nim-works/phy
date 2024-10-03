@@ -1,0 +1,5 @@
+discard """
+  output: "10: int"
+"""
+
+(Exprs (Exprs (IntVal 10)))

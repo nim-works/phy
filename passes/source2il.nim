@@ -598,21 +598,34 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     let nodeCount = t.len(n)
     let last = nodeCount - 1
     var eb = bu
-    stmts.addStmt Stmts:
-      for i, si in t.pairs(n):
-        let e = c.exprToIL(t, si)
-        bu.add e.stmts
-        case e.typ.kind
-        of tkUnit:
-          genDrop(e.expr, bu)
-        else:
-          if i != last:
-            c.error("non-trailing expressions must be unit or void, got: $1" %
-                      [$e.typ.kind])
-        if i == last:
-          if e.typ.kind != tkVoid:
-            eb.add e.expr
-          result = e.typ
+    case nodeCount
+    of 1:
+      result = c.exprToIL(t, t.child(n, 0), bu, stmts)
+    else:
+      stmts.addStmt Stmts:
+        for i, si in t.pairs(n):
+          let e = c.exprToIL(t, si)
+          bu.add e.stmts
+          if i == last:
+            result = e.typ
+          case e.typ.kind
+          of tkUnit:
+            if i == last:
+              eb.add e.expr
+            else:
+              genDrop(e.expr, bu)
+          of tkVoid:
+            discard "nothing else to do"
+          else:
+            if i == last:
+              eb.add e.expr
+            else:
+              # not an `errorType()` because it's likely just a missing drop?
+              c.error("non-trailing expressions must be unit or void, got: $1" %
+                        [$e.typ.kind])
+    if result.kind == tkVoid:
+      c.error("trailing expressions must not be void")
+      result = errorType()
   of AllNodes - ExprNodes:
     unreachable()
 
