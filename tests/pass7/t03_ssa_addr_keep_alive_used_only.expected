@@ -11,19 +11,17 @@
         (Drop
           (Addr (Local 0)))
         (SelectBool (IntVal 0)
-          (Continue 2
+          (Continue 2 (List))
+          (Continue 1
             (List
-              (Rename (Local 0))))
-          (Continue 1 (List))))
-      (Continuation (Params) (Locals)
-        (Drop (IntVal 100))
-        (Continue 3 (List)))
+              (Rename (Local 0))))))
       (Continuation
         (Params (Type 0))
         (Locals)
+        (Drop (IntVal 100))
         (Store (Type 0) (IntVal 0) (IntVal 0))
-        (Continue 3 (List)))
+        (Continue 2 (List)))
       (Continuation (Params) (Locals)
         (Drop (IntVal 200))
-        (Continue 4 (List)))
+        (Continue 3 (List)))
       (Continuation (Params)))))
