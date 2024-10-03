@@ -21,7 +21,7 @@ type
   NodeSeq    = seq[Node]
 
   EntityKind = enum
-    ekNone        ## non existent
+    ekNone        ## signals "non-existent"
     ekBuiltin     ## some built-in special entity
     ekBuiltinProc ## some built-in special
     ekProc
@@ -95,8 +95,6 @@ proc error(c; message: sink string) =
 func lookup(c: ModuleCtx, name: string): Entity =
   ## Implements the lookup action described in the specification.
   result = c.scope.getOrDefault(name, Entity(kind: ekNone))
-  # built-ins are not added to any scope, and can thus be used to detect
-  # a lookup failure here
   if result.kind == ekNone:
     result.kind = BuiltIns.getOrDefault(name, ekNone)
 
