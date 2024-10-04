@@ -266,10 +266,11 @@ proc genAsgn(c; a: Node|NodeSeq, b: NodeSeq, typ: SemType, bu) =
       bu.add a
       genUse(b, bu)
 
-proc genDrop(a: Node|NodeSeq, bu) =
-  ## Emits a ``Drop a`` to `bu`
-  bu.subTree Drop:
-    genUse(a, bu)
+proc genDrop(a: Node|NodeSeq, typ: SemType, bu) =
+  ## Emits a ``Drop a`` to `bu`, if `typ` is non-void
+  if typ.kind != tkVoid:
+    bu.subTree Drop:
+      genUse(a, bu)
 
 proc inline(bu; e: sink Expr; stmts) =
   ## Appends the trailing expression directly to `bu`.
@@ -597,11 +598,11 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
   of SourceKind.Exprs:
     let nodeCount = t.len(n)
     let last = nodeCount - 1
-    var eb = bu
     case nodeCount
     of 1:
       result = c.exprToIL(t, t.child(n, 0), bu, stmts)
     else:
+      var eb = bu
       stmts.addStmt Stmts:
         for i, si in t.pairs(n):
           let e = c.exprToIL(t, si)
@@ -613,16 +614,17 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
             if i == last:
               eb.add e.expr
             else:
-              genDrop(e.expr, bu)
+              genDrop(e.expr, e.typ, bu)
           of tkVoid:
             discard "nothing else to do"
           else:
             if i == last:
               eb.add e.expr
             else:
-              # not an `errorType()` because it's likely just a missing drop?
               c.error("non-trailing expressions must be unit or void, got: $1" %
                         [$e.typ.kind])
+              genDrop(e.expr, e.typ, bu) # error correction
+      bu = eb
     if result.kind == tkVoid:
       c.error("trailing expressions must not be void")
       result = errorType()

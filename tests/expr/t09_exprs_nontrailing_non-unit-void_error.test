@@ -1,0 +1,5 @@
+discard """
+  reject: "true"
+"""
+
+(Exprs (IntVal 10) (FloatVal 1.0))
