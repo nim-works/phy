@@ -2,4 +2,4 @@ discard """
   reject: "true"
 """
 
-(Exprs (TupleCons) (Unreachable))
+(Exprs (Unreachable))
