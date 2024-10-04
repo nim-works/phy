@@ -1,4 +1,5 @@
 discard """
+  description: "error if an expression lists ends with a `void` expression"
   reject: "true"
 """
 

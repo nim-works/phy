@@ -1,4 +1,5 @@
 discard """
+  description: "correctly unwrap nested expressions"
   output: "10: int"
 """
 
