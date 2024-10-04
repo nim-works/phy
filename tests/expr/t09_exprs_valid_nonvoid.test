@@ -1,5 +1,5 @@
 discard """
-  desciption: "valid multi-item expression list"
+  description: "valid multi-item expression list"
   output: "1.0: float"
 """
 
