@@ -602,29 +602,32 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     of 1:
       result = c.exprToIL(t, t.child(n, 0), bu, stmts)
     else:
-      var eb = bu
-      stmts.addStmt Stmts:
-        for i, si in t.pairs(n):
-          let e = c.exprToIL(t, si)
-          bu.add e.stmts
+      for i, si in t.pairs(n):
+        let e = c.exprToIL(t, si)
+        stmts.add e.stmts
+        if i == last:
+          result = e.typ
+        case e.typ.kind
+        of tkUnit:
           if i == last:
-            result = e.typ
-          case e.typ.kind
-          of tkUnit:
-            if i == last:
-              eb.add e.expr
-            else:
+            bu.add e.expr
+          else:
+            stmts.addStmt:
               genDrop(e.expr, e.typ, bu)
-          of tkVoid:
+        of tkVoid:
+          if i == last:
             discard "nothing else to do"
           else:
-            if i == last:
-              eb.add e.expr
-            else:
-              c.error("non-trailing expressions must be unit or void, got: $1" %
-                        [$e.typ.kind])
+            result = e.typ
+            return # leave early to eliminate remaining code
+        else:
+          if i == last:
+            bu.add e.expr
+          else:
+            c.error("non-trailing expressions must be unit or void, got: $1" %
+                      [$e.typ.kind])
+            stmts.addStmt:
               genDrop(e.expr, e.typ, bu) # error correction
-      bu = eb
     if result.kind == tkVoid:
       c.error("trailing expressions must not be void")
       result = errorType()

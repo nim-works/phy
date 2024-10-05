@@ -1,6 +1,6 @@
 discard """
   description: "Valid expression list with a `void` earlier"
-  output: "void"
+  output: "runtime error: ecUnreachable"
 """
 
 (Exprs (Unreachable) (TupleCons) (FloatVal 1.0))
