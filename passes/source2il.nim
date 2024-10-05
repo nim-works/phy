@@ -22,8 +22,8 @@ type
 
   EntityKind = enum
     ekNone        ## signals "non-existent"
-    ekBuiltin     ## some built-in special entity
-    ekBuiltinProc ## some built-in special
+    ekBuiltinVal  ## some built-in named value
+    ekBuiltinProc ## some built-in procedure
     ekProc
     ekType
 
@@ -78,8 +78,8 @@ const
     "<=": ekBuiltinProc,
     "<": ekBuiltinProc,
     "not": ekBuiltinProc,
-    "true": ekBuiltin,
-    "false": ekBuiltin
+    "true": ekBuiltinVal,
+    "false": ekBuiltinVal
   }.toTable
 
 using
@@ -513,7 +513,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       name = t.getString(n)
       ent = c.lookup(name)
     case ent.kind
-    of ekBuiltin:
+    of ekBuiltinVal:
       case name
       of "false":
         bu.add Node(kind: IntVal, val: 0)
