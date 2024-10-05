@@ -647,22 +647,17 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         stmts.add e.stmts
         if i == last:
           result = e.typ
-        case e.typ.kind
-        of tkUnit:
-          if i == last:
-            bu.add e.expr
-          else:
+          case e.typ.kind
+          of tkVoid: discard "error handled below"
+          else:      bu.add e.expr
+        else:
+          case e.typ.kind
+          of tkVoid:
+            result = e.typ
+            return # elim other exprs
+          of tkUnit:
             stmts.addStmt:
               genDrop(e.expr, e.typ, bu)
-        of tkVoid:
-          if i == last:
-            discard "nothing else to do"
-          else:
-            result = e.typ
-            return # leave early to eliminate remaining code
-        else:
-          if i == last:
-            bu.add e.expr
           else:
             c.error("non-trailing expressions must be unit or void, got: $1" %
                       [$e.typ.kind])
