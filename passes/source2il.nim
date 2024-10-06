@@ -636,36 +636,28 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       discard
     result = prim(tkVoid)
   of SourceKind.Exprs:
-    let nodeCount = t.len(n)
-    let last = nodeCount - 1
-    case nodeCount
-    of 1:
-      result = c.exprToIL(t, t.child(n, 0), bu, stmts)
-    else:
-      for i, si in t.pairs(n):
-        let e = c.exprToIL(t, si)
-        stmts.add e.stmts
-        if i == last:
+    let last = t.len(n) - 1
+    for i, si in t.pairs(n):
+      let e = c.exprToIL(t, si)
+      stmts.add e.stmts
+      if i == last:
+        result = e.typ
+        case e.typ.kind
+        of tkVoid: discard "okay, nothing to do"
+        else:      bu.add e.expr
+      else:
+        case e.typ.kind
+        of tkVoid:
           result = e.typ
-          case e.typ.kind
-          of tkVoid: discard "error handled below"
-          else:      bu.add e.expr
+          return # elim other exprs
+        of tkUnit:
+          stmts.addStmt:
+            genDrop(e.expr, e.typ, bu)
         else:
-          case e.typ.kind
-          of tkVoid:
-            result = e.typ
-            return # elim other exprs
-          of tkUnit:
-            stmts.addStmt:
-              genDrop(e.expr, e.typ, bu)
-          else:
-            c.error("non-trailing expressions must be unit or void, got: $1" %
-                      [$e.typ.kind])
-            stmts.addStmt:
-              genDrop(e.expr, e.typ, bu) # error correction
-    if result.kind == tkVoid:
-      c.error("trailing expressions must not be void")
-      result = errorType()
+          c.error("non-trailing expressions must be unit or void, got: $1" %
+                    [$e.typ.kind])
+          stmts.addStmt:
+            genDrop(e.expr, e.typ, bu) # error correction
   of AllNodes - ExprNodes:
     unreachable()
 
