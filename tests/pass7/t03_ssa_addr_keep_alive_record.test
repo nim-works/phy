@@ -14,6 +14,11 @@ discard """
     (Locals (Type 1))
     (Stmts
       (Drop (Addr (Field (Local 0) 0)))
-      (If (IntVal 0) (Drop (IntVal 100)))
+      (SelectBool (IntVal 0)
+        (Continue 1)
+        (Continue 0))
+      (Join 0)
+      (Drop (IntVal 100))
+      (Join 1)
       (Store (Type 0) (IntVal 0) (IntVal 200))
       (Return))))

@@ -1,0 +1,9 @@
+;$sexp
+(TypeDefs
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0)
+    (Continuations
+      (Continuation (Params) (Locals)
+        (Loop 0 (List))))))

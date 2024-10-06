@@ -1,4 +1,3 @@
-;$sexp
 (TypeDefs
   (Int 8)
   (ProcTy (Type 0))

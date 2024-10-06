@@ -7,30 +7,28 @@
   (ProcDef (Type 1)
     (Continuations
       (Continuation (Params)
-        (Locals (Type 0))
-        (Continue 1
+        (Locals)
+        (Continue 1 (IntVal 200) (List)))
+      (Continuation
+        (Params (Type 0))
+        (Locals)
+        (Continue 2
           (List
             (Move (Local 0)))))
       (Continuation
         (Params (Type 0))
         (Locals)
         (SelectBool (IntVal 1)
-          (Continue 3 (List))
-          (Continue 2
+          (Continue 3
+            (List
+              (Move (Local 0))))
+          (Continue 4
             (List
               (Move (Local 0))))))
       (Continuation
         (Params (Type 0))
         (Locals)
-        (Continue 5
-          (List
-            (Move (Local 0)))))
-      (Continuation (Params) (Locals)
-        (Continue 4 (IntVal 200) (List)))
-      (Continuation
-        (Params (Type 0))
-        (Locals)
-        (Loop 1
+        (Loop 2
           (List
             (Move (Local 0)))))
       (Continuation
@@ -38,5 +36,5 @@
         (Locals)
         (Drop
           (Copy (Local 0)))
-        (Continue 6 (List)))
+        (Continue 5 (List)))
       (Continuation (Params)))))

@@ -1,7 +1,7 @@
 discard """
   description: "
     Ensure joining control-flow paths, with the local being assigned to on
-    both, works.
+    only one, works.
   "
 """
 (TypeDefs
@@ -12,8 +12,11 @@ discard """
   (ProcDef (Type 1)
     (Locals (Type 0))
     (Stmts
-      (If (IntVal 0)
-        (Asgn (Local 0) (IntVal 100))
-        (Asgn (Local 0) (IntVal 200)))
+      (SelectBool (IntVal 0)
+        (Continue 1)
+        (Continue 0))
+      (Join 0)
+      (Asgn (Local 0) (IntVal 100))
+      (Join 1)
       (Drop (Copy (Local 0)))
       (Return))))

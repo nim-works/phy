@@ -1,4 +1,6 @@
-;$sexp
+discard """
+  output: "(UnhandledException 100)"
+"""
 (TypeDefs
   (Int 8)
   (ProcTy (Void)))

@@ -1,4 +1,4 @@
-## The test runner for the pass10 tests.
+## The test runner for the ``pass7`` tests.
 
 import
   std/[
@@ -10,8 +10,8 @@ import
     sexp
   ],
   generated/[
-    lang7_checks,
-    lang10_checks
+    lang4_checks,
+    lang7_checks
   ],
   passes/[
     changesets,
@@ -21,7 +21,6 @@ import
     pass3,
     pass4,
     pass7,
-    pass10,
     spec,
     trees
   ],
@@ -45,9 +44,9 @@ else:
 var tree = fromSexp[NodeKind](parseSexp("(Module " & readAll(s) & ")"))
 s.close()
 
-checkSyntax(tree, lang10_checks, top)
-tree = tree.apply(pass10.lower(tree))
 checkSyntax(tree, lang7_checks, top)
+tree = tree.apply(pass7.lower(tree))
+checkSyntax(tree, lang4_checks, top)
 
 # output the lowered code:
 stdout.writeLine(pretty(tree, tree.child(0)))
@@ -56,7 +55,6 @@ stdout.writeLine(pretty(tree, tree.child(2)))
 stdout.write("!BREAK!")
 
 # apply the remaining lowerings:
-tree = tree.apply(pass7.lower(tree))
 tree = tree.apply(pass4.lower(tree))
 tree = tree.apply(pass3.lower(tree, 8))
 tree = tree.apply(pass1.lower(tree, 8))

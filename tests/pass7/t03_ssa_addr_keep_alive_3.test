@@ -7,6 +7,11 @@
     (Locals (Type 0))
     (Stmts
       (Drop (Addr (Local 0)))
-      (If (IntVal 0) (Drop (IntVal 200)))
+      (SelectBool (IntVal 0)
+        (Continue 1)
+        (Continue 0))
+      (Join 0)
+      (Drop (IntVal 200))
+      (Join 1)
       (Drop (Load (Type 0) (IntVal 0)))
       (Return))))

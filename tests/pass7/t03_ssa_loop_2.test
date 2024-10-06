@@ -1,6 +1,3 @@
-discard """
-  description: "Test case: local assigned and used *outside* the loop"
-"""
 (TypeDefs
   (Int 8)
   (ProcTy (Void)))
@@ -9,9 +6,13 @@ discard """
   (ProcDef (Type 1)
     (Locals (Type 0))
     (Stmts
+      (Join 0)
+      (SelectBool (IntVal 1)
+        (Continue 1)
+        (Continue 2))
+      (Join 1)
       (Asgn (Local 0) (IntVal 200))
-      (Loop
-        (If (IntVal 1)
-          (Break 1)))
+      (Loop 0)
+      (Join 2)
       (Drop (Copy (Local 0)))
       (Return))))
