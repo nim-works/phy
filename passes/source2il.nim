@@ -648,9 +648,9 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       if i == last:
         voidGuard:
           result = e.typ
-        case e.typ.kind
-        of tkVoid: discard "okay, nothing to do"
-        else:      voidGuard: bu.add e.expr
+          case e.typ.kind
+          of tkVoid: discard "okay, nothing to do"
+          else:      bu.add e.expr
       else:
         case e.typ.kind
         of tkVoid:
