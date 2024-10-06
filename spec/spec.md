@@ -265,6 +265,9 @@ expression is any type outside of `unit` or `void`.
 The type of the expression list is inferred as `void` if any non-trailing
 expression is `void`, otherwise the type is that of the trailing expression.
 
+**Expression kind**: same as that of the trailing expression
+**Uses**: nothing
+
 ### Type Expressions
 
 ```grammar
