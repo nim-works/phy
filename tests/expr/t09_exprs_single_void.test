@@ -1,0 +1,6 @@
+discard """
+  description: "An expression list can end in a `void` expression"
+  output: "runtime error: ecUnreachable"
+"""
+
+(Exprs (Unreachable))

@@ -15,6 +15,7 @@ type
     Call
     TupleCons
     FieldAccess
+    Exprs
     Return
     Unreachable
     Params
@@ -24,7 +25,7 @@ type
 
 const
   ExprNodes* = {IntVal, FloatVal, Ident, Call, TupleCons, FieldAccess, Return,
-                Unreachable}
+                Unreachable, Exprs}
   DeclNodes* = {ProcDecl, TypeDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 

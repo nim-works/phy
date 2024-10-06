@@ -12,6 +12,8 @@ import
   phy/[reporting, types],
   vm/[utils]
 
+from strutils import `%`
+
 import passes/spec_source except NodeKind
 
 type
@@ -97,6 +99,12 @@ func lookup(c: ModuleCtx, name: string): Entity =
   result = c.scope.getOrDefault(name, Entity(kind: ekNone))
   if result.kind == ekNone:
     result.kind = BuiltIns.getOrDefault(name, ekNone)
+
+func add(bu; trees: openArray[NodeSeq]) =
+  ## Appends all `trees` to the current sub-tree. The trees must each either
+  ## represent a single atomic node, or a complete subtree.
+  for t in trees.items:
+    bu.add t
 
 template addType(c; kind: NodeKind, body: untyped): uint32 =
   c.types.subTree kind:
@@ -270,7 +278,7 @@ proc newTemp(c; typ: SemType): uint32 =
   result = c.locals.len.uint32
   c.locals.add typ
 
-proc genUse(a: NodeSeq, bu) =
+proc genUse(a: Node|NodeSeq, bu) =
   ## Emits `a` to `bu`, wrapping the expression in a ``Copy`` operation when
   ## it's an lvalue expression.
   if a[0].kind in {Field, At, Local}:
@@ -286,6 +294,12 @@ proc genAsgn(c; a: Node|NodeSeq, b: NodeSeq, typ: SemType, bu) =
     bu.subTree Asgn:
       bu.add a
       genUse(b, bu)
+
+proc genDrop(a: Node|NodeSeq, typ: SemType, bu) =
+  ## Emits a ``Drop a`` to `bu`, if `typ` is non-void.
+  if typ.kind != tkVoid:
+    bu.subTree Drop:
+      genUse(a, bu)
 
 proc inline(bu; e: sink Expr; stmts) =
   ## Appends the trailing expression directly to `bu`.
@@ -621,6 +635,37 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     stmts.addStmt Unreachable:
       discard
     result = prim(tkVoid)
+  of SourceKind.Exprs:
+    let last = t.len(n) - 1
+    var seenVoidExpr = false
+    template voidGuard(body: untyped) =
+      if not seenVoidExpr:
+        body
+    for i, si in t.pairs(n):
+      let e = c.exprToIL(t, si)
+      voidGuard:
+        stmts.add e.stmts
+      if i == last:
+        voidGuard:
+          result = e.typ
+          case e.typ.kind
+          of tkVoid: discard "okay, nothing to do"
+          else:      bu.add e.expr
+      else:
+        case e.typ.kind
+        of tkVoid:
+          result = e.typ
+          seenVoidExpr = true # check, but drop further stmts & exprs
+        of tkUnit:
+          voidGuard:
+            stmts.addStmt:
+              genDrop(e.expr, e.typ, bu)
+        else:
+          c.error("non-trailing expressions must be unit or void, got: $1" %
+                    [$e.typ.kind])
+          voidGuard:
+            stmts.addStmt:
+              genDrop(e.expr, e.typ, bu) # error correction
   of AllNodes - ExprNodes:
     unreachable()
 
