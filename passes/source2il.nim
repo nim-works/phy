@@ -100,7 +100,7 @@ func lookup(c: ModuleCtx, name: string): Entity =
   if result.kind == ekNone:
     result.kind = BuiltIns.getOrDefault(name, ekNone)
 
-func add(bu; trees: openArray[NodeTree]) =
+func add(bu; trees: openArray[NodeSeq]) =
   ## Appends all `trees` to the current sub-tree. The trees must each either
   ## represent a single atomic node, or a complete subtree.
   for t in trees.items:
@@ -637,27 +637,35 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     result = prim(tkVoid)
   of SourceKind.Exprs:
     let last = t.len(n) - 1
+    var keep = true
+    template keepGuard(body: untyped) =
+      if keep:
+        body
     for i, si in t.pairs(n):
       let e = c.exprToIL(t, si)
-      stmts.add e.stmts
+      keepGuard:
+        stmts.add e.stmts
       if i == last:
-        result = e.typ
+        keepGuard:
+          result = e.typ
         case e.typ.kind
         of tkVoid: discard "okay, nothing to do"
-        else:      bu.add e.expr
+        else:      keepGuard: bu.add e.expr
       else:
         case e.typ.kind
         of tkVoid:
           result = e.typ
-          return # elim other exprs
+          keep = false # check, but drop further stmts & exprs
         of tkUnit:
-          stmts.addStmt:
-            genDrop(e.expr, e.typ, bu)
+          keepGuard:
+            stmts.addStmt:
+              genDrop(e.expr, e.typ, bu)
         else:
           c.error("non-trailing expressions must be unit or void, got: $1" %
                     [$e.typ.kind])
-          stmts.addStmt:
-            genDrop(e.expr, e.typ, bu) # error correction
+          keepGuard:
+            stmts.addStmt:
+              genDrop(e.expr, e.typ, bu) # error correction
   of AllNodes - ExprNodes:
     unreachable()
 
