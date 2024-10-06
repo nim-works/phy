@@ -724,6 +724,37 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     stmts.addStmt Unreachable:
       discard
     result = prim(tkVoid)
+  of SourceKind.Exprs:
+    let last = t.len(n) - 1
+    var seenVoidExpr = false
+    template voidGuard(body: untyped) =
+      if not seenVoidExpr:
+        body
+    for i, si in t.pairs(n):
+      let e = c.exprToIL(t, si)
+      voidGuard:
+        stmts.add e.stmts
+      if i == last:
+        voidGuard:
+          result = e.typ
+          case e.typ.kind
+          of tkVoid: discard "okay, nothing to do"
+          else:      bu.add e.expr
+      else:
+        case e.typ.kind
+        of tkVoid:
+          result = e.typ
+          seenVoidExpr = true # check, but drop further stmts & exprs
+        of tkUnit:
+          voidGuard:
+            stmts.addStmt:
+              genDrop(e.expr, e.typ, bu)
+        else:
+          c.error("non-trailing expressions must be unit or void, got: $1" %
+                    [$e.typ.kind])
+          voidGuard:
+            stmts.addStmt:
+              genDrop(e.expr, e.typ, bu) # error correction
   of AllNodes - ExprNodes:
     unreachable($t[n].kind)
 
