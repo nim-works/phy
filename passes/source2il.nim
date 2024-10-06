@@ -100,7 +100,7 @@ func lookup(c: ModuleCtx, name: string): Entity =
   if result.kind == ekNone:
     result.kind = BuiltIns.getOrDefault(name, ekNone)
 
-func add[T](bu: var Builder[T], trees: openArray[seq[TreeNode[T]]]) =
+func add(bu; trees: openArray[NodeTree]) =
   ## Appends all `trees` to the current sub-tree. The trees must each either
   ## represent a single atomic node, or a complete subtree.
   for t in trees.items:
@@ -296,7 +296,7 @@ proc genAsgn(c; a: Node|NodeSeq, b: NodeSeq, typ: SemType, bu) =
       genUse(b, bu)
 
 proc genDrop(a: Node|NodeSeq, typ: SemType, bu) =
-  ## Emits a ``Drop a`` to `bu`, if `typ` is non-void
+  ## Emits a ``Drop a`` to `bu`, if `typ` is non-void.
   if typ.kind != tkVoid:
     bu.subTree Drop:
       genUse(a, bu)
