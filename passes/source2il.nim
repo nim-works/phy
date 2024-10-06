@@ -637,33 +637,33 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     result = prim(tkVoid)
   of SourceKind.Exprs:
     let last = t.len(n) - 1
-    var keep = true
-    template keepGuard(body: untyped) =
-      if keep:
+    var seenVoidExpr = false
+    template voidGuard(body: untyped) =
+      if not seenVoidExpr:
         body
     for i, si in t.pairs(n):
       let e = c.exprToIL(t, si)
-      keepGuard:
+      voidGuard:
         stmts.add e.stmts
       if i == last:
-        keepGuard:
+        voidGuard:
           result = e.typ
         case e.typ.kind
         of tkVoid: discard "okay, nothing to do"
-        else:      keepGuard: bu.add e.expr
+        else:      voidGuard: bu.add e.expr
       else:
         case e.typ.kind
         of tkVoid:
           result = e.typ
-          keep = false # check, but drop further stmts & exprs
+          seenVoidExpr = true # check, but drop further stmts & exprs
         of tkUnit:
-          keepGuard:
+          voidGuard:
             stmts.addStmt:
               genDrop(e.expr, e.typ, bu)
         else:
           c.error("non-trailing expressions must be unit or void, got: $1" %
                     [$e.typ.kind])
-          keepGuard:
+          voidGuard:
             stmts.addStmt:
               genDrop(e.expr, e.typ, bu) # error correction
   of AllNodes - ExprNodes:
