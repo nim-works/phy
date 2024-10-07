@@ -63,9 +63,25 @@ the same type.
 *Entities* are part of *scopes*. They're queried from their scope via their
 name. This is referred to as *looking up the entity* (or just *lookup* ).
 
-For the remainder of this document, `lookup(scope, name)` refers to looking up
-the entity with name `name` in scope `scope`. Lookup fails when there's no
-entity with `name` part of `scope`.
+Scopes can be nested. Except for the *top-level scope*, each scope has a
+parent scope.
+
+For the remainder of this document, `local_lookup(scope, name)` refers to
+looking up the entity with name `name` in scope `scope`. Lookup fails when
+there's no entity with `name` part of `scope`.
+
+`lookup(scope, name)` means looking up an entity in `scope` and all its parent
+scopes. `lookup(scope, name)` is equivalent to `local_lookup(scope, name)`,
+and - if that fails and there is a parent scope - recursively performing
+`lookup(parent(scope), name)`.
+
+There is always a *current* scope.
+
+*Opening a scope* means:
+1. creating a new, empty scope, with the current scope as the parent
+2. making the new scope the current scope
+
+*Closing a scope* means replacing the current scope with its parent.
 
 ### Expressions
 
@@ -79,10 +95,18 @@ ident ::= (Ident name:<string>)
 expr ::= <ident>
 ```
 
-If `name` is "true" or "false", the expression is of type `bool` and refers to
-the `true` or `false` value, respectively.
+Refers to a previously declared entity.
 
-Otherwise, an error is reported.
+Let `E` be the entity `lookup(S, name)` (where `S` is the current scope)
+succeeds with. An error is reported when:
+* the lookup fails, or
+* `E` is neither a local variable nor the built-in `true` or `false`
+
+If `E` is a local variable, the type of the expression is that of the local
+variable. If `E` is the built-in `true` or `false` entity, the type is `bool`.
+
+**Expression kind**: r-value for boolean literals, otherwise l-value
+**Uses**: nothing
 
 #### Literals
 
@@ -192,6 +216,39 @@ expression is any type outside of `unit` or `void`.
 The type of the expression list is inferred as `void` if any non-trailing
 expression is `void`, otherwise the type is that of the trailing expression.
 
+**Expression kind**: same as the trailing expression
+**Uses**: nothing
+
+#### Assignment
+
+```grammar
+expr += (Asgn lhs:<expr> rhs:<expr>)
+```
+
+Changes the |object| stored in the location identified by l-value expression
+`lhs`. If the location already stores an |object|, the |object| is first
+destroyed.
+
+If `rhs` is an r-value expression, the assignment is a *move assignment*, and
+the returned |object| is moved into the target location.
+
+If the `rhs` is an l-value expression, the assignment is a *copy assignment*,
+and a copy of the source |object| is created and moved into the target location.
+
+> Future work: guarantee move assignments for l-value expressions in a select
+> set of cases
+
+Let `A` be the type of `lhs` and `B` be the type of `rhs`. An error is reported
+when:
+* `lhs` is not an l-value expression, or
+* `B` is `void`, or
+* `B` is not the same type as or a subtype of `A`
+
+The type of an assignment is always `unit`.
+
+**Expression kind**: r-value
+**Uses**: the `rhs` expression
+
 ### Type Expressions
 
 ```grammar
@@ -252,6 +309,9 @@ Let `S` be the current scope. If `lookup(S, name)` succeeds, an error is
 reported. Otherwise, `name` is added to `S`, referring to the declared
 procedure.
 
+A procedure declarations opens a new scope for the body and closes it
+afterwards.
+
 `body` must be of type `void`. It is the computation that is run when the
 procedure is called.
 
@@ -273,6 +333,28 @@ to the name, meaning that replacing the identifier with the provided expression
 verbatim does *not* necessarily yield a program with the same meaning.
 
 `name` is added to `S` after any lookup takes place in `typ`.
+
+#### Local Variable
+
+```grammar
+local_decl ::= (Decl name:<ident> expr:<expr>)
+```
+
+Declares a local variable, with the type inferred from `expr`, and assigns
+`expr` to `name`. The assignment happens as-if performed by `(Asgn name expr)`.
+
+Let `T` be the type of `expr`. An error is reported when:
+* `T` is `void`, or
+* `lookup(S, name)` (where `S` is the current scope) succeeds
+
+`name` is added to the current scope *after* any lookup in `expr` happens.
+
+```grammar
+expr += <local_decl>
+```
+
+The declaration of a local can be used as an expression. Such expression is an
+r-value expression of type `unit`.
 
 ### Modules
 
