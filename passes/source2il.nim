@@ -38,6 +38,8 @@ type
     result*: SemType
       ## the return type
 
+  Scope = Table[string, Entity]
+
   ModuleCtx* = object
     ## The translation/analysis context for a single module.
     reporter: ref ReportContext[string]
@@ -54,8 +56,8 @@ type
       ## the in-progress procedure section
     procList*: seq[ProcInfo]
 
-    scope: Table[string, Entity]
-      ## maps names to their associated entity
+    scopes: seq[Scope]
+      ## the stack of scopes. The last item always represents the current scope
 
     # procedure context:
     retType: SemType
@@ -111,9 +113,32 @@ proc error(c; message: sink string) =
 
 func lookup(c: ModuleCtx, name: string): Entity =
   ## Implements the lookup action described in the specification.
-  result = c.scope.getOrDefault(name, Entity(kind: ekNone))
-  if result.kind == ekNone:
-    result.kind = BuiltIns.getOrDefault(name, ekNone)
+  var i = c.scopes.high
+  while i >= 0:
+    result = c.scopes[i].getOrDefault(name, Entity(kind: ekNone))
+    if result.kind != ekNone:
+      return
+    dec i
+
+  # try the builtins
+  result.kind = BuiltIns.getOrDefault(name, ekNone)
+
+func addDecl(c; name: string, entity: sink Entity) =
+  ## Adds the `entity` with name `name` to the current scope, ignoring whether
+  ## it already existed.
+  c.scopes[^1][name] = entity
+
+func removeDecl(c; name: string) =
+  ## Removes the entity with `name` from the current scope.
+  c.scopes[^1].del(name)
+
+func openScope(c) =
+  ## Opens a new scope and makes it the current one.
+  c.scopes.add default(typeof(c.scopes[0]))
+
+func closeScope(c) =
+  ## Closes the current scope and makes its parent the current one.
+  c.scopes.shrink(c.scopes.len - 1)
 
 func add(bu; trees: openArray[NodeSeq]) =
   ## Appends all `trees` to the current sub-tree. The trees must each either
@@ -688,7 +713,8 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   ## Creates a new empty module translation/analysis context.
   ModuleCtx(reporter: reporter,
             types: initBuilder[NodeKind](TypeDefs),
-            procs: initBuilder[NodeKind](ProcDefs))
+            procs: initBuilder[NodeKind](ProcDefs),
+            scopes: @[default(Scope)]) # start with the top-level scope
 
 proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
   ## Closes the module context and returns the accumulated translated code.
@@ -773,13 +799,16 @@ proc declToIL*(c; t; n: NodeIndex) =
 
     # register the proc before analysing/translating the body
     c.procList.add ProcInfo(result: c.retType)
-    c.scope[name] = Entity(kind: ekProc, id: c.procList.high)
+    c.addDecl(name, Entity(kind: ekProc, id: c.procList.high))
 
+    c.openScope()
     let e = c.exprToIL(t, t.child(n, 3))
+    c.closeScope()
+
     # the body expression must always be a void expression
     if e.typ.kind != tkVoid:
       c.error("a procedure body must be a 'void' expression")
-      c.scope.del(name) # remove again
+      c.removeDecl(name) # remove again
       c.procList.del(c.procList.high)
       return
 
@@ -803,6 +832,6 @@ proc declToIL*(c; t; n: NodeIndex) =
     let typ = evalType(c, t, t.child(n, 1))
     # add the type to the scope, regardless of whether `typ` is an error
     c.aliases.add typ
-    c.scope[name] = Entity(kind: ekType, id: c.aliases.high)
+    c.addDecl(name, Entity(kind: ekType, id: c.aliases.high))
   of AllNodes - DeclNodes:
     unreachable() # syntax error
