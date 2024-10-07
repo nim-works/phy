@@ -112,6 +112,7 @@ there's no `else`). An error is reported if:
   subtype of `A` 
 
 The type of the `If` expression is the common type between `A` and `B`.
+
 #### `Return`
 
 ```grammar
