@@ -64,6 +64,16 @@ type
     locals: seq[SemType]
       ## all locals part of the procedure
 
+  ExprFlag {.pure.} = enum
+    Lvalue ## the expression is an lvalue. The flags absence implies
+           ## that the expression is an rvalue or void expression
+
+  ExprType = tuple
+    ## Returned by expression analysis. Carries additional attributes about
+    ## the expression, not just the type.
+    typ: SemType
+    attribs: set[ExprFlag]
+
   Expr = object
     # XXX: the target IL doesn't support expression lists (yet), so we have
     #      to apply the necessary lowering here, for now. Efficiency doesn't
@@ -71,6 +81,7 @@ type
     stmts: seq[NodeSeq] # can be empty
     expr: NodeSeq
     typ: SemType
+    attribs: set[ExprFlag]
 
 const
   BuiltIns = {
@@ -89,6 +100,10 @@ using
   t: InTree
   bu: var Builder[NodeKind]
   stmts: var seq[NodeSeq]
+
+template `+`(t: SemType, a: set[ExprFlag]): ExprType =
+  ## Convenience shortcut for creating an ``ExprType``.
+  (typ: t, attribs: a)
 
 proc error(c; message: sink string) =
   ## Sends the error diagnostic `message` to the reporter.
@@ -359,11 +374,11 @@ proc fitExpr(c; e: sink Expr, target: SemType): Expr =
     result = Expr(stmts: e.stmts, expr: @[Node(kind: IntVal)],
                   typ: errorType())
 
-proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType
+proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType
 
 proc exprToIL(c; t: InTree, n: NodeIndex): Expr =
   var bu = initBuilder[NodeKind]()
-  result.typ = exprToIL(c, t, n, bu, result.stmts)
+  (result.typ, result.attribs) = exprToIL(c, t, n, bu, result.stmts)
   result.expr = finish(bu)
   # verify some postconditions:
   assert result.typ.kind != tkVoid or result.expr.len == 0,
@@ -514,14 +529,14 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
     bu.add Node(kind: IntVal)
     result = errorType()
 
-proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
+proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
   case t[n].kind
   of SourceKind.IntVal:
     bu.add Node(kind: IntVal, val: c.literals.pack(t.getInt(n)))
-    result = prim(tkInt)
+    result = prim(tkInt) + {}
   of SourceKind.FloatVal:
     bu.add Node(kind: FloatVal, val: c.literals.pack(t.getFloat(n)))
-    result = prim(tkFloat)
+    result = prim(tkFloat) + {}
   of SourceKind.Ident:
     let
       name = t.getString(n)
@@ -531,20 +546,20 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       case name
       of "false":
         bu.add Node(kind: IntVal, val: 0)
-        result = prim(tkBool)
+        result = prim(tkBool) + {}
       of "true":
         bu.add Node(kind: IntVal, val: 1)
-        result = prim(tkBool)
+        result = prim(tkBool) + {}
     of ekNone:
       c.error("undeclared identifier: " & t.getString(n))
       bu.add Node(kind: IntVal)
-      result = prim(tkError)
+      result = prim(tkError) + {}
     else:
       c.error("'" & name & "' cannot be used in this context")
       bu.add Node(kind: IntVal)
-      result = prim(tkError)
+      result = prim(tkError) + {}
   of SourceKind.Call:
-    result = callToIL(c, t, n, bu, stmts)
+    result = callToIL(c, t, n, bu, stmts) + {}
   of SourceKind.TupleCons:
     if t.len(n) > 0:
       var elems = newSeq[SemType](t.len(n))
@@ -556,10 +571,10 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         elems[i] = e.typ
 
         if e.typ.kind == tkError:
-          return errorType()
+          return errorType() + {}
         elif e.typ.kind == tkVoid:
           c.error("tuple element cannot be 'void'")
-          return errorType()
+          return errorType() + {}
 
         stmts.add e.stmts
         # add an assignment for the field:
@@ -569,15 +584,15 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
             bu.add Node(kind: Immediate, val: i.uint32)
           c.genAsgn(dest, e.expr, e.typ, bu)
 
-      result = SemType(kind: tkTuple, elems: elems)
       # now that we know the type, correct it:
-      c.locals[tmp.val] = result
+      c.locals[tmp.val] = SemType(kind: tkTuple, elems: elems)
 
       bu.add tmp
+      result = c.locals[tmp.val] + {}
     else:
       # it's a unit value
       bu.add Node(kind: IntVal)
-      result = prim(tkUnit)
+      result = prim(tkUnit) + {}
   of SourceKind.FieldAccess:
     let
       (a, b) = t.pair(n)
@@ -586,18 +601,18 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     of tkTuple:
       let idx = t.getInt(b)
       if idx >= 0 and idx < tup.typ.elems.len:
-        result = tup.typ.elems[idx]
+        result = tup.typ.elems[idx] + tup.attribs
         bu.subTree Field:
           bu.inline(tup, stmts)
           bu.add Node(kind: Immediate, val: idx.uint32)
       else:
         c.error("tuple has no element with index " & $idx)
-        result = errorType()
+        result = errorType() + {Lvalue}
     of tkError:
-      result = tup.typ
+      result = tup.typ + {}
     else:
       c.error("expected 'tuple' value")
-      result = errorType()
+      result = errorType() + {}
   of SourceKind.Return:
     var e =
       case t.len(n)
@@ -630,11 +645,11 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       else:
         bu.add e.expr
 
-    result = prim(tkVoid)
+    result = prim(tkVoid) + {}
   of SourceKind.Unreachable:
     stmts.addStmt Unreachable:
       discard
-    result = prim(tkVoid)
+    result = prim(tkVoid) + {}
   of SourceKind.Exprs:
     let last = t.len(n) - 1
     var seenVoidExpr = false
@@ -647,14 +662,14 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         stmts.add e.stmts
       if i == last:
         voidGuard:
-          result = e.typ
+          result = e.typ + e.attribs
           case e.typ.kind
           of tkVoid: discard "okay, nothing to do"
           else:      bu.add e.expr
       else:
         case e.typ.kind
         of tkVoid:
-          result = e.typ
+          result = e.typ + e.attribs
           seenVoidExpr = true # check, but drop further stmts & exprs
         of tkUnit:
           voidGuard:
