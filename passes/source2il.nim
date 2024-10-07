@@ -675,6 +675,20 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
     else:
       c.error("expected 'tuple' value")
       result = errorType() + {}
+  of SourceKind.Asgn:
+    let (a, b) = t.pair(n)
+    stmts.addStmt Asgn:
+      # emit the destination expression in-place
+      let dst = c.exprToIL(t, a, bu, stmts)
+      if Lvalue notin dst.attribs:
+        c.error("LHS expression must be an l-value expression")
+
+      let src = c.fitExpr(c.exprToIL(t, b), dst.typ)
+      stmts.add src.stmts
+      genUse(src.expr, bu)
+
+    bu.add Node(kind: IntVal)
+    result = prim(tkUnit) + {}
   of SourceKind.Return:
     var e =
       case t.len(n)
