@@ -90,6 +90,8 @@ using
   bu: var Builder[NodeKind]
   stmts: var seq[NodeSeq]
 
+const unitExpr = Expr(expr: @[Node(kind: IntVal)], typ: prim(tkUnit))
+
 proc error(c; message: sink string) =
   ## Sends the error diagnostic `message` to the reporter.
   c.reporter.error(message)
@@ -278,6 +280,12 @@ proc newTemp(c; typ: SemType): uint32 =
   result = c.locals.len.uint32
   c.locals.add typ
 
+proc genLocal(val: uint32, typ: SemType, bu) =
+  ## Emits a ``Local val`` to `bu`, so long as `typ` is not `tkVoid`.
+  case typ.kind
+  of tkVoid: discard "nothing to generate"
+  else: bu.add Node(kind: Local, val: val)
+
 proc genUse(a: Node|NodeSeq, bu) =
   ## Emits `a` to `bu`, wrapping the expression in a ``Copy`` operation when
   ## it's an lvalue expression.
@@ -351,6 +359,14 @@ proc fitExpr(c; e: sink Expr, target: SemType): Expr =
         genUse(e.expr, bu)
 
       result.expr = @[Node(kind: Local, val: tmp)]
+    of tkUnit:
+      case e.typ.kind
+      of tkVoid:
+        result = e
+      else:
+        result = Expr(stmts: e.stmts, expr: @[Node(kind: IntVal)], typ: target)
+        result.stmts.addStmt:
+          genDrop(e.expr, e.typ, bu)
     else:
       unreachable()
   else:
@@ -514,6 +530,20 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
     bu.add Node(kind: IntVal)
     result = errorType()
 
+proc commonType(a, b: Expr): SemType =
+  ## Finds the common type between `a` and `b`, or produces an error.
+  if a.typ.kind in {tkUnit, tkVoid} and b.typ.kind in {tkUnit, tkVoid}:
+    if {a.typ.kind, b.typ.kind} == {tkVoid}:
+      prim(tkVoid)
+    else:
+      prim(tkUnit)
+  elif a.typ == b.typ or b.typ.isSubtypeOf(a.typ):
+    a.typ
+  elif a.typ.isSubtypeOf(b.typ):
+    b.typ
+  else:
+    errorType()
+
 proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
   case t[n].kind
   of SourceKind.IntVal:
@@ -544,94 +574,37 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       bu.add Node(kind: IntVal)
       result = prim(tkError)
   of SourceKind.If:
-    case t.len(n)
-    of 2: # condition and body
-      stmts.addStmt If:
-        let
-          (p, b) = t.pair(n) # predicate and body
-          cond = exprToIL(c, t, p, bu, stmts) # condition
-        if cond.kind != tkBool:
-          c.error("`If` condition must be a boolean expression")
-        bu.subTree Stmts:
-          let body = exprToIL(c, t, b) # body
-          bu.add body.stmts
-          case body.typ.kind
-          of tkUnit:
-            genDrop(body.expr, body.typ, bu)
-          of tkVoid:
-            discard "nothing to do, this is fine"
-          else: # not unit or void
-            c.error("non-exhaustive `If` must be of type unit")
-            result = errorType()
-      bu.add Node(kind: IntVal) # unit
-      result = prim(tkUnit)
-    of 3:
-      let
-        (p, b, e) = t.triplet(n) # predicate, body, else
-        cond = exprToIL(c, t, p) # condition
-      if cond.typ.kind != tkBool:
-        c.error("`If` condition must be a boolean expression")
-      let
-        body = exprToIL(c, t, b) # body
-        els = exprToIL(c, t, e) # else
-      const
-        bodyAndElseStmts = 0
-        elseFitToBody    = 1
-        bodyFitToElse    = 2
-        bodyAndElseNoFit = 3
-      let fitStrategy: range[0..3] =
-        if body.typ.kind in {tkUnit, tkVoid} and els.typ.kind in {tkUnit, tkVoid}:
-          bodyAndElseStmts
-        elif body.typ == els.typ or els.typ.isSubtypeOf(body.typ):
-          elseFitToBody
-        elif body.typ.isSubtypeOf(els.typ):
-          bodyFitToElse
-        else:
-          bodyAndElseNoFit
-      case fitStrategy
-      of bodyAndElseStmts, bodyAndElseNoFit:
-        stmts.addStmt If:
-          bu.inline(cond, stmts) # this might need to be assigned to a local
-          bu.subTree Stmts:
-            bu.add body.stmts
-          genDrop(body.expr, body.typ, bu)
-          bu.subTree Stmts:
-            bu.add els.stmts
-          genDrop(els.expr, body.typ, bu)
-        case fitStrategy
-        of bodyAndElseNoFit:
+    let
+      (p, b) = t.pair(n) # predicate and body, always present
+      cond = exprToIL(c, t, p)
+    if cond.typ.kind != tkBool:
+      c.error("`If` condition must be a boolean expression")
+
+    let
+      body = exprToIL(c, t, b)
+      els = if t.len(n) == 3: exprToIL(c, t, t.child(n, 2))
+            else:             unitExpr
+      typ = commonType(body, els)
+      (fb, fe) =
+        case typ.kind
+        of tkError:
           c.error("if ($1) and else ($2) branches cannot be unified into a single type" %
                   [$body.typ.kind, $els.typ.kind])
-          result = errorType()
-        of bodyAndElseStmts:
-          bu.add Node(kind: IntVal) # unit
-          result = prim(tkUnit)
+          (body, els)
         else:
-          unreachable()
-      of elseFitToBody, bodyFitToElse:
-        let
-          (fit, elseToBody) =
-            case fitStrategy
-            of elseFitToBody:
-              (c.fitExpr(els, body.typ), true)
-            of bodyFitToElse:
-              (c.fitExpr(body, els.typ), false)
-            else:
-              unreachable()
-          (bd, el) = if elseToBody: (body, fit) else: (fit, els)
-          tmp = c.newTemp(fit.typ)
-        stmts.addStmt If:
-          bu.inline(cond, stmts) # this might need to be assigned to a local
-          bu.subTree Stmts:
-            bu.add bd.stmts
-            c.genAsgn(Node(kind: Local, val: tmp), bd.expr, bd.typ, bu)
-          bu.subTree Stmts:
-            bu.add el.stmts
-            c.genAsgn(Node(kind: Local, val: tmp), el.expr, el.typ, bu)
-        bu.add Node(kind: Local, val: tmp)
-        result = fit.typ
-    else:
-      unreachable() # syntax error
+          (c.fitExpr(body, typ), c.fitExpr(els, typ))
+      tmp = c.newTemp(typ)
+    
+    stmts.addStmt If:
+      bu.inline(cond, stmts)
+      bu.subTree Stmts:
+        bu.add fb.stmts
+        c.genAsgn(Node(kind: Local, val: tmp), fb.expr, fb.typ, bu)
+      bu.subTree Stmts:
+        bu.add fe.stmts
+        c.genAsgn(Node(kind: Local, val: tmp), fe.expr, fe.typ, bu)
+    genLocal(tmp, typ, bu)
+    result = typ
   of SourceKind.Call:
     result = callToIL(c, t, n, bu, stmts)
   of SourceKind.TupleCons:
