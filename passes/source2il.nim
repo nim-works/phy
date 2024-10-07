@@ -28,6 +28,7 @@ type
     ekBuiltinProc ## some built-in procedure
     ekProc
     ekType
+    ekLocal
 
   Entity = object
     kind: EntityKind
@@ -561,6 +562,32 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
     bu.add Node(kind: IntVal)
     result = errorType()
 
+proc localDeclToIL(c; t; n: NodeIndex, bu, stmts) =
+  ## Translates a procedure-local declaration to a the target IL.
+  let
+    (npos, init) = t.pair(n)
+    name = t.getString(npos)
+
+  if c.lookup(name).kind != ekNone:
+    c.error("redeclaration of " & name)
+    # don't abort; override the existing entity for the sake of error
+    # correction
+
+  var e = c.exprToIL(t, init)
+  if e.typ.kind == tkVoid:
+    c.error("cannot initialize local with `void` expression")
+    # turn into an error expression:
+    e.typ = errorType()
+    e.expr = @[Node(kind: IntVal)]
+
+  let local = c.newTemp(e.typ)
+  stmts.add e.stmts
+  stmts.addStmt:
+    c.genAsgn(Node(kind: Local, val: local), e.expr, e.typ, bu)
+
+  # register the declaration *after* analyzing the expression
+  c.addDecl(name, Entity(kind: ekLocal, id: local.int))
+
 proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
   case t[n].kind
   of SourceKind.IntVal:
@@ -582,6 +609,9 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
       of "true":
         bu.add Node(kind: IntVal, val: 1)
         result = prim(tkBool) + {}
+    of ekLocal:
+      bu.add Node(kind: Local, val: ent.id.uint32)
+      result = c.locals[ent.id] + {Lvalue}
     of ekNone:
       c.error("undeclared identifier: " & t.getString(n))
       bu.add Node(kind: IntVal)
@@ -713,6 +743,10 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
           voidGuard:
             stmts.addStmt:
               genDrop(e.expr, e.typ, bu) # error correction
+  of SourceKind.Decl:
+    localDeclToIL(c, t, n, bu, stmts)
+    bu.add Node(kind: IntVal)
+    result = prim(tkUnit) + {}
   of AllNodes - ExprNodes:
     unreachable()
 
