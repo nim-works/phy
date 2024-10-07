@@ -411,6 +411,13 @@ proc exprToIL(c; t: InTree, n: NodeIndex): Expr =
   assert result.typ.kind in {tkVoid, tkError} or result.expr.len > 0,
          "non-void `Expr` must have a trailing expression"
 
+proc scopedExprToIL(c; t; n: NodeIndex): Expr =
+  ## Analyzes the given expression and generates the IL for it. Analysis
+  ## happens within a new scope, which is discarded afterwards.
+  c.openScope()
+  result = c.exprToIL(t, n)
+  c.closeScope()
+
 template lenCheck(t; n: NodeIndex, bu; expected: int) =
   ## Exits the current analysis procedure with an error, if `n` doesn't have
   ## `expected` children.
@@ -730,7 +737,7 @@ proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
 proc exprToIL*(c; t): SemType =
   ## Translates the given source language expression to the highest-level IL
   ## and turns it into a procedure. Also returns the type of the expression.
-  var e = exprToIL(c, t, NodeIndex(0))
+  var e = c.scopedExprToIL(t, NodeIndex(0))
   result = e.typ
 
   if e.typ.kind in ComplexTypes:
@@ -745,7 +752,7 @@ proc exprToIL*(c; t): SemType =
       initTree(@[TreeNode[SourceKind](kind: SourceKind.Return, val: 1)] & t.nodes,
                t.literals)
     # analyse again:
-    e = c.exprToIL(t, NodeIndex(0))
+    e = c.scopedExprToIL(t, NodeIndex(0))
 
   defer:
     c.resetProcContext()
@@ -801,10 +808,7 @@ proc declToIL*(c; t; n: NodeIndex) =
     c.procList.add ProcInfo(result: c.retType)
     c.addDecl(name, Entity(kind: ekProc, id: c.procList.high))
 
-    c.openScope()
-    let e = c.exprToIL(t, t.child(n, 3))
-    c.closeScope()
-
+    let e = c.scopedExprToIL(t, t.child(n, 3))
     # the body expression must always be a void expression
     if e.typ.kind != tkVoid:
       c.error("a procedure body must be a 'void' expression")
