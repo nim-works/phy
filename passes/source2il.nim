@@ -12,7 +12,7 @@ import
   phy/[reporting, types],
   vm/[utils]
 
-from strutils import `%`
+from std/strutils import `%`
 
 import passes/spec_source except NodeKind
 
@@ -89,6 +89,8 @@ using
   t: InTree
   bu: var Builder[NodeKind]
   stmts: var seq[NodeSeq]
+
+const unitExpr = Expr(expr: @[Node(kind: IntVal)], typ: prim(tkUnit))
 
 proc error(c; message: sink string) =
   ## Sends the error diagnostic `message` to the reporter.
@@ -275,8 +277,17 @@ proc resetProcContext(c) =
 
 proc newTemp(c; typ: SemType): uint32 =
   ## Allocates a new temporary of `typ` type.
-  result = c.locals.len.uint32
-  c.locals.add typ
+  case typ.kind
+  of tkVoid: discard "do not create a temp for void"
+  else:
+    result = c.locals.len.uint32
+    c.locals.add typ
+
+proc genLocal(val: uint32, typ: SemType, bu) =
+  ## Emits a ``Local val`` to `bu`, so long as `typ` is not `tkVoid`.
+  case typ.kind
+  of tkVoid: discard "nothing to generate"
+  else: bu.add Node(kind: Local, val: val)
 
 proc genUse(a: Node|NodeSeq, bu) =
   ## Emits `a` to `bu`, wrapping the expression in a ``Copy`` operation when
@@ -296,7 +307,7 @@ proc genAsgn(c; a: Node|NodeSeq, b: NodeSeq, typ: SemType, bu) =
       genUse(b, bu)
 
 proc genDrop(a: Node|NodeSeq, typ: SemType, bu) =
-  ## Emits a ``Drop a`` to `bu`, if `typ` is non-void.
+  ## Emits a ``Drop a`` to `bu`, so long as `typ` is not `void`.
   if typ.kind != tkVoid:
     bu.subTree Drop:
       genUse(a, bu)
@@ -323,36 +334,39 @@ proc fitExpr(c; e: sink Expr, target: SemType): Expr =
   if e.typ == target:
     result = e
   elif e.typ.isSubtypeOf(target):
-    result = Expr(stmts: e.stmts, typ: target)
-    case target.kind
-    of tkUnion:
-      # construct a union
-      let
-        tmp = c.newTemp(target)
-        idx = find(target.elems, e.typ)
+    if e.typ.kind == tkVoid:
+      result = e
+    else:
+      result = Expr(stmts: e.stmts, typ: target)
+      case target.kind
+      of tkUnion:
+        # construct a union
+        let
+          tmp = c.newTemp(target)
+          idx = find(target.elems, e.typ)
 
-      # ignore the type not being found in the union. This indicates that an
-      # error occurred during union construction
+        # ignore the type not being found in the union. This indicates that an
+        # error occurred during union construction
 
-      # emit the tag assignment:
-      result.stmts.addStmt Asgn:
-        bu.subTree Field:
-          bu.add Node(kind: Local, val: tmp)
-          bu.add Node(kind: Immediate, val: 0)
-        bu.add Node(kind: IntVal, val: c.literals.pack(idx))
-
-      # emit the value assignment:
-      result.stmts.addStmt Asgn:
-        bu.subTree Field:
+        # emit the tag assignment:
+        result.stmts.addStmt Asgn:
           bu.subTree Field:
             bu.add Node(kind: Local, val: tmp)
-            bu.add Node(kind: Immediate, val: 1)
-          bu.add Node(kind: Immediate, val: idx.uint32)
-        genUse(e.expr, bu)
+            bu.add Node(kind: Immediate, val: 0)
+          bu.add Node(kind: IntVal, val: c.literals.pack(idx))
 
-      result.expr = @[Node(kind: Local, val: tmp)]
-    else:
-      unreachable()
+        # emit the value assignment:
+        result.stmts.addStmt Asgn:
+          bu.subTree Field:
+            bu.subTree Field:
+              bu.add Node(kind: Local, val: tmp)
+              bu.add Node(kind: Immediate, val: 1)
+            bu.add Node(kind: Immediate, val: idx.uint32)
+          genUse(e.expr, bu)
+
+        result.expr = @[Node(kind: Local, val: tmp)]
+      else:
+        unreachable()
   else:
     # TODO: this needs a better error message
     c.error("type mismatch")
@@ -543,6 +557,38 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       c.error("'" & name & "' cannot be used in this context")
       bu.add Node(kind: IntVal)
       result = prim(tkError)
+  of SourceKind.If:
+    let
+      (p, b) = t.pair(n) # predicate and body, always present
+      cond = exprToIL(c, t, p)
+    if cond.typ.kind != tkBool:
+      c.error("`If` condition must be a boolean expression")
+
+    let
+      body = exprToIL(c, t, b)
+      els = if t.len(n) == 3: exprToIL(c, t, t.child(n, 2))
+            else:             unitExpr
+      typ = commonType(body.typ, els.typ)
+      (fb, fe) =
+        case typ.kind
+        of tkError:
+          c.error("if ($1) and else ($2) branches cannot be unified into a single type" %
+                  [$body.typ.kind, $els.typ.kind])
+          (body, els)
+        else:
+          (c.fitExpr(body, typ), c.fitExpr(els, typ))
+      tmp = c.newTemp(typ)
+    
+    stmts.addStmt If:
+      bu.inline(cond, stmts)
+      bu.subTree Stmts:
+        bu.add fb.stmts
+        c.genAsgn(Node(kind: Local, val: tmp), fb.expr, fb.typ, bu)
+      bu.subTree Stmts:
+        bu.add fe.stmts
+        c.genAsgn(Node(kind: Local, val: tmp), fe.expr, fe.typ, bu)
+    genLocal(tmp, typ, bu)
+    result = typ
   of SourceKind.Call:
     result = callToIL(c, t, n, bu, stmts)
   of SourceKind.TupleCons:
@@ -667,7 +713,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
             stmts.addStmt:
               genDrop(e.expr, e.typ, bu) # error correction
   of AllNodes - ExprNodes:
-    unreachable()
+    unreachable($t[n].kind)
 
 proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   ## Creates a new empty module translation/analysis context.

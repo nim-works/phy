@@ -12,6 +12,7 @@ type
     Immediate, IntVal, FloatVal
     Ident,
     VoidTy, UnitTy, BoolTy, IntTy, FloatTy, TupleTy, UnionTy
+    If
     Call
     TupleCons
     FieldAccess
@@ -24,8 +25,8 @@ type
     Module
 
 const
-  ExprNodes* = {IntVal, FloatVal, Ident, Call, TupleCons, FieldAccess, Return,
-                Unreachable, Exprs}
+  ExprNodes* = {IntVal, FloatVal, Ident, If, Call, TupleCons, FieldAccess,
+                Return, Unreachable, Exprs}
   DeclNodes* = {ProcDecl, TypeDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 

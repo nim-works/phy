@@ -94,6 +94,25 @@ expr += <int_val>
 
 The `IntVal` expression always has type `int`, `FloatVal` always type `float`.
 
+#### `If`
+
+```grammar
+expr += (If cond:<expr> body:<expr> else:<expr>?)
+```
+
+`If` is a control-flow expression, which requires a boolean expression in the
+`cond` position. If the `cond` expression evaluates to `true`, it will execute
+the `body` expression, otherwise the `else` expression -- if there's no `else`
+expression, it is assumed to be `unit`.
+
+Let `A` be the type of `body` and `B` be type of `else` (which is `unit`, if
+there's no `else`). An error is reported if:
+* `cond` is a not a boolean expression, or
+* `A` is not the same type as `B`, and `A` is not a subtype of `B` nor is `B` a
+  subtype of `A` 
+
+The type of the `If` expression is the common type between `A` and `B`.
+
 #### `Return`
 
 ```grammar

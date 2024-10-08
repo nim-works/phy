@@ -1,0 +1,5 @@
+discard """
+  description: "An if-then with void typed body is still a unit"
+  output: "(): unit"
+"""
+(If (Ident "false") (Unreachable))
