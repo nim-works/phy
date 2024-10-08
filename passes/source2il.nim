@@ -534,12 +534,7 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
 
 proc commonType(a, b: Expr): SemType =
   ## Finds the common type between `a` and `b`, or produces an error.
-  if a.typ.kind in {tkUnit, tkVoid} and b.typ.kind in {tkUnit, tkVoid}:
-    if {a.typ.kind, b.typ.kind} == {tkVoid}:
-      prim(tkVoid)
-    else:
-      prim(tkUnit)
-  elif a.typ == b.typ or b.typ.isSubtypeOf(a.typ):
+  if a.typ == b.typ or b.typ.isSubtypeOf(a.typ):
     a.typ
   elif a.typ.isSubtypeOf(b.typ):
     b.typ
