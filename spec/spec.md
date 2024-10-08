@@ -260,6 +260,15 @@ and a copy of the source |object| is created and moved into the target location.
 > Future work: guarantee move assignments for l-value expressions in a select
 > set of cases
 
+Evaluation happens as follows:
+1. the effects of `lhs` are computed, as well as the location `lhs` names
+2. `rhs` is evaluated
+3. if the assignment is a *copy assignment*: a copy of the `rhs` |object|
+   is created
+4. the |object| (if any) stored in the destination location is destroyed
+5. the source |object| (or the copy thereof) is moved into the destination
+   location
+
 Let `A` be the type of `lhs` and `B` be the type of `rhs`. An error is reported
 when:
 * `lhs` is not an l-value expression, or
