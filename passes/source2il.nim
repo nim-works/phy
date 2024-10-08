@@ -406,6 +406,11 @@ proc fitExpr(c; e: sink Expr, target: SemType): Expr =
           genUse(e.expr, bu)
 
         result.expr = @[Node(kind: Local, val: tmp)]
+      of tkError:
+        # error correction: keep the original expression as is when fitting
+        # to the error type
+        result.typ = e.typ
+        result.expr = e.expr
       else:
         unreachable()
   else:
