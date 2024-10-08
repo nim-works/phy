@@ -365,10 +365,6 @@ proc fitExpr(c; e: sink Expr, target: SemType): Expr =
           genUse(e.expr, bu)
 
         result.expr = @[Node(kind: Local, val: tmp)]
-      of tkUnit:
-        result = Expr(stmts: e.stmts, expr: @[Node(kind: IntVal)], typ: target)
-        result.stmts.addStmt:
-          genDrop(e.expr, e.typ, bu)
       else:
         unreachable()
   else:
