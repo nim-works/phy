@@ -665,7 +665,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
         bu.add fe.stmts
         c.genAsgn(Node(kind: Local, val: tmp), fe.expr, fe.typ, bu)
     genLocal(tmp, typ, bu)
-    result = typ
+    result = typ + {}
   of SourceKind.Call:
     result = callToIL(c, t, n, bu, stmts) + {}
   of SourceKind.TupleCons:
