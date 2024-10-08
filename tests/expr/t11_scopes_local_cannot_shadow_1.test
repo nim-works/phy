@@ -1,0 +1,8 @@
+discard """
+  description: "Both If branches are part of their own scope"
+  reject: true
+"""
+(ProcDecl (Ident "x") (UnitTy) (Params)
+  (Exprs
+    (Decl (Ident "x") (IntVal 100))
+    (Return)))
