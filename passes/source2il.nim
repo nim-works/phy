@@ -532,15 +532,6 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
     bu.add Node(kind: IntVal)
     result = errorType()
 
-proc commonType(a, b: Expr): SemType =
-  ## Finds the common type between `a` and `b`, or produces an error.
-  if a.typ == b.typ or b.typ.isSubtypeOf(a.typ):
-    a.typ
-  elif a.typ.isSubtypeOf(b.typ):
-    b.typ
-  else:
-    errorType()
-
 proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
   case t[n].kind
   of SourceKind.IntVal:
@@ -581,7 +572,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       body = exprToIL(c, t, b)
       els = if t.len(n) == 3: exprToIL(c, t, t.child(n, 2))
             else:             unitExpr
-      typ = commonType(body, els)
+      typ = commonType(body.typ, els.typ)
       (fb, fe) =
         case typ.kind
         of tkError:
