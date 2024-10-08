@@ -1,0 +1,9 @@
+discard """
+  description: "
+    The declared local is not visible to the initializer expression
+  "
+  reject: true
+"""
+(Exprs
+  (Decl (Ident "x") (Ident "x"))
+  (Ident "x"))

@@ -1,0 +1,11 @@
+discard """
+  description: "Both If branches are part of their own scope"
+  output: "100: int"
+"""
+(If (Ident "true")
+  (Exprs
+    (Decl (Ident "x") (IntVal 100))
+    (Ident "x"))
+  (Exprs
+    (Decl (Ident "x") (IntVal 200))
+    (Ident "x")))

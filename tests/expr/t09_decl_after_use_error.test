@@ -1,0 +1,8 @@
+discard """
+  description: "Locals don't exist prior to their declaration"
+  reject: true
+"""
+(Exprs
+  (Decl (Ident "y") (Ident "x"))
+  (Decl (Ident "x") (IntVal 100))
+  (Ident "x"))

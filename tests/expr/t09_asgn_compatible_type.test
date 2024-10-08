@@ -1,0 +1,12 @@
+discard """
+  output: "1.5: union(int, float)"
+"""
+(Module
+  (ProcDecl (Ident "union") (UnionTy (IntTy) (FloatTy)) (Params)
+    (Return (IntVal 100)))
+
+  (ProcDecl (Ident "test") (UnionTy (IntTy) (FloatTy)) (Params)
+    (Exprs
+      (Decl (Ident "x") (Call (Ident "union")))
+      (Asgn (Ident "x") (FloatVal 1.5))
+      (Return (Ident "x")))))

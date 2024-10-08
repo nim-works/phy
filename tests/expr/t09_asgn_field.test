@@ -1,0 +1,9 @@
+discard """
+  output: "(1,): (int,)"
+"""
+(Exprs
+  (Decl (Ident "x") (TupleCons (IntVal 0)))
+  (Asgn
+    (FieldAccess (Ident "x") (IntVal 0))
+    (IntVal 1))
+  (Ident "x"))

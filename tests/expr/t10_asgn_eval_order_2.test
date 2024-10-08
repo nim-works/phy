@@ -1,0 +1,14 @@
+discard """
+  description: "
+    The actual assignment happens after both expressions had their effects
+    computed.
+  "
+  output: "6: int"
+"""
+(Exprs
+  (Decl (Ident "x") (IntVal 0))
+  (Asgn (Ident "x")
+    (Exprs
+      (Asgn (Ident "x") (IntVal 5))
+      (IntVal 6)))
+  (Ident "x"))

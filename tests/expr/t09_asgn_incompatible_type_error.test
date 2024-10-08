@@ -1,0 +1,7 @@
+discard """
+  reject: true
+"""
+(Exprs
+  (Decl (Ident "x") (IntVal 1))
+  (Asgn (Ident "x") (FloatVal 1.5))
+  (Ident "x"))

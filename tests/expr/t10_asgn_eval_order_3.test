@@ -1,0 +1,14 @@
+discard """
+  description: "
+    The lhs expression has its effects computed before the rhs is evaluated
+  "
+  output: "6: int"
+"""
+(Exprs
+  (Decl (Ident "x") (IntVal 0))
+  (Asgn
+    (Exprs
+      (Asgn (Ident "x") (IntVal 5))
+      (Ident "x"))
+    (Call (Ident "+") (Ident "x") (IntVal 1)))
+  (Ident "x"))

@@ -1,0 +1,6 @@
+discard """
+  output: "1: int"
+"""
+(Exprs
+  (Decl (Ident "x") (IntVal 1))
+  (Ident "x"))

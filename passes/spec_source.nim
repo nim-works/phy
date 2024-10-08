@@ -17,16 +17,18 @@ type
     TupleCons
     FieldAccess
     Exprs
+    Asgn
     Return
     Unreachable
     Params
     ProcDecl
+    Decl
     TypeDecl
     Module
 
 const
   ExprNodes* = {IntVal, FloatVal, Ident, If, Call, TupleCons, FieldAccess,
-                Return, Unreachable, Exprs}
+                Asgn, Return, Unreachable, Exprs, Decl}
   DeclNodes* = {ProcDecl, TypeDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 

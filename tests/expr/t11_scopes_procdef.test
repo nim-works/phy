@@ -1,0 +1,13 @@
+discard """
+  description: "A `ProcDef` body is part of a new scope"
+"""
+(Module)
+  (ProcDef (Ident "test1") (UnitTy) (Params)
+    (Exprs
+      (Decl (Ident "local") (IntVal 100))
+      (Return)))
+
+  (ProcDef (Ident "test2") (UnitTy) (Params)
+    (Exprs
+      (Decl (Ident "local") (IntVal 100))
+      (Return)))
