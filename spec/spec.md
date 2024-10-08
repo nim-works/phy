@@ -169,6 +169,9 @@ there's no `else`). An error is reported if:
 
 The type of the `If` expression is the common type between `A` and `B`.
 
+**Expression kind**: r-value
+**Uses**: `cond`, `body`, and - if present - `else`
+
 #### `Return`
 
 ```grammar
