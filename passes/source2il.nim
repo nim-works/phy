@@ -541,8 +541,6 @@ proc commonType(a, b: Expr): SemType =
   else:
     errorType()
 
-import passes/debugutils
-
 proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
   case t[n].kind
   of SourceKind.IntVal:
