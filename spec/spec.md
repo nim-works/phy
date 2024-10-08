@@ -129,6 +129,9 @@ expr += (If cond:<expr> body:<expr> else:<expr>?)
 the `body` expression, otherwise the `else` expression -- if there's no `else`
 expression, it is assumed to be `unit`.
 
+For both `body` and `else`, a new scope is opened for the expressions and
+closed afterwards.
+
 Let `A` be the type of `body` and `B` be type of `else` (which is `unit`, if
 there's no `else`). An error is reported if:
 * `cond` is a not a boolean expression, or

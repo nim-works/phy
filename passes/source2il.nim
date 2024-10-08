@@ -642,8 +642,8 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
       c.error("`If` condition must be a boolean expression")
 
     let
-      body = exprToIL(c, t, b)
-      els = if t.len(n) == 3: exprToIL(c, t, t.child(n, 2))
+      body = scopedExprToIL(c, t, b)
+      els = if t.len(n) == 3: scopedExprToIL(c, t, t.child(n, 2))
             else:             unitExpr
       typ = commonType(body.typ, els.typ)
       (fb, fe) =
