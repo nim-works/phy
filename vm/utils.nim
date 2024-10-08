@@ -26,16 +26,19 @@ iterator items*[T](s: HOslice[T]): T =
 
 type IInfo = typeof(instantiationInfo())
 
-func unreachableImpl(loc: IInfo) {.noinline, noreturn.} =
+func unreachableImpl(loc: IInfo, extra = "") {.noinline, noreturn.} =
   var msg: string
   msg.toLocation(loc.filename, loc.line, loc.column + 1)
   msg.add" unreachable"
+  if extra.len != 0:
+    msg.add " "
+    msg.add extra
   raiseAssert(msg)
 
-template unreachable*() =
+template unreachable*(xtraMsg = "") =
   ## Use ``unreachable`` to mark a point in the program as unreachable. This
   ## is preferred over ``assert false``.
-  unreachableImpl(instantiationInfo(-1))
+  unreachableImpl(instantiationInfo(-1), xtraMsg)
 
 # ------- checked arithmetic
 

@@ -111,3 +111,12 @@ proc size*(t: SemType): int =
     for it in t.elems.items:
       s = max(s, size(it))
     s + 8 # +8 for the tag
+
+proc commonType*(a, b: SemType): SemType =
+  ## Finds the common type between `a` and `b`, or produces an error.
+  if a == b or b.isSubtypeOf(a):
+    a
+  elif a.isSubtypeOf(b):
+    b
+  else:
+    errorType()
