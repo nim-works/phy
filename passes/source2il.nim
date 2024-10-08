@@ -582,11 +582,6 @@ proc localDeclToIL(c; t; n: NodeIndex, bu, stmts) =
     (npos, init) = t.pair(n)
     name = t.getString(npos)
 
-  if c.lookup(name).kind != ekNone:
-    c.error("redeclaration of " & name)
-    # don't abort; override the existing entity for the sake of error
-    # correction
-
   var e = c.exprToIL(t, init)
   if e.typ.kind == tkVoid:
     c.error("cannot initialize local with `void` expression")
@@ -598,6 +593,13 @@ proc localDeclToIL(c; t; n: NodeIndex, bu, stmts) =
   stmts.add e.stmts
   stmts.addStmt:
     c.genAsgn(Node(kind: Local, val: local), e.expr, e.typ, bu)
+
+  # verify that the name isn't in use already *after* analyzing the
+  # initializer; the expression could introduce an entity with the same name
+  if c.lookup(name).kind != ekNone:
+    c.error("redeclaration of " & name)
+    # don't abort; override the existing entity for the sake of error
+    # correction
 
   # register the declaration *after* analyzing the expression
   c.addDecl(name, Entity(kind: ekLocal, id: local.int))
