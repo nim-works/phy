@@ -92,12 +92,19 @@ proc expectChar(s: Stream, c: char) =
   if s.readChar() != c:
     raise AssemblerError.newException("expected '" & c & "' got")
 
-proc parseInt(s: Stream): int =
+proc parseIntLike[T](s: Stream, _: typedesc[T]): T =
   var str = ""
   while (let c = s.peekChar(); c notin {' ', '\t', '\n', '\r', '\0'}):
     str.add s.readChar()
 
-  expect parseInt(str, result, 0) == str.len, "expected integer value"
+  var temp: BiggestInt
+  if parseHex(str, temp) != str.len:
+    # error; might be a normal integer
+    if parseBiggestInt(str, temp) != str.len:
+      raise ValueError.newException("expected integer value")
+
+  # cut off too large values
+  result = cast[T](temp)
 
 proc parseFloat(s: Stream): float =
   var str = ""
@@ -143,7 +150,7 @@ proc consumeTok(p: var SexpParser): TTokKind =
 
 proc parseValue(s: Stream, typ: ValueType): Value =
   case typ
-  of vtRef, vtInt: cast[Value](parseInt(s))
+  of vtRef, vtInt: parseIntLike(s, Value)
   of vtFloat:      cast[Value](parseFloat(s))
 
 proc parseTypedVal(s: Stream): TypedValue =
@@ -221,16 +228,16 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
           (c.InstrType shl instrCShift))
 
   template instrA(): Instr =
-    makeInstr(int32 s.parseInt(), 0, 0)
+    makeInstr(s.parseIntLike(int32), 0, 0)
 
   template instrAB(): Instr =
-    makeInstr(int32 s.parseInt(), (s.space(); int16 s.parseInt()))
+    makeInstr(s.parseIntLike(int32), (s.space(); s.parseIntLike(int8)))
 
   template instrAC(): Instr =
-    makeInstr(int32 s.parseInt(), 0, (s.space(); int8 s.parseInt()))
+    makeInstr(s.parseIntLike(int32), 0, (s.space(); s.parseIntLike(int8)))
 
   template instrC(): Instr =
-    makeInstr(0, 0, int8 s.parseInt())
+    makeInstr(0, 0, s.parseIntLike(int8))
 
   case op
   of opcNop, opcDrop, opcDup, opcSwap, opcAddInt, opcSubInt, opcMulInt,
@@ -252,11 +259,11 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
      opcFloatToUint, opcSIntToFloat, opcFloatToSInt:
     instrC()
   of opcBranch:
-    makeInstr(s.parseLabel(a), c = (s.space(); int8 s.parseInt()))
+    makeInstr(s.parseLabel(a), c = (s.space(); s.parseIntLike(int8)))
   of opcJmp:
     makeInstr(s.parseLabel(a))
   of opcCall:
-    makeInstr(int32 a.procs[s.ident()], (s.space(); int16 s.parseInt()))
+    makeInstr(int32 a.procs[s.ident()], (s.space(); s.parseIntLike(int16)))
   of opcIndCall:
     instrAB()
   of opcGetLocal, opcSetLocal, opcPopLocal:
