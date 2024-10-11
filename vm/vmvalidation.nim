@@ -149,7 +149,7 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
     pop(vtInt)
     push(vtInt)
     check imm8(instr) in 0..63, "width not in range 0..63"
-  of opcNegInt, opcNot:
+  of opcNegInt, opcNot, opcBitNot:
     pop(vtInt)
     push(vtInt)
   of opcAddFloat, opcSubFloat, opcMulFloat, opcDivFloat:
@@ -158,7 +158,7 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
   of opcNegFloat:
     pop(vtFloat)
     push(vtFloat)
-  of opcBitNot, opcOffset:
+  of opcOffset:
     pop(vtInt)
     pop(vtInt)
     push(vtInt)
