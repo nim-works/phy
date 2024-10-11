@@ -133,6 +133,12 @@ proc jump(c; op: Opcode, target: int; extra = 0'i8) =
   let target = c.prepareJump(target)
   c.instr(op, target, extra)
 
+proc exit(c; target: int) =
+  ## Emits the jump at the end of a continuation. The jump is omitted when
+  ## unnecessary.
+  if target != c.current + 1:
+    c.jump(opcJmp, target)
+
 proc xjump(c; op: Opcode): int =
   ## Emits a jump-like instruction with opcode `op` and returns its
   ## instruction position.
@@ -445,7 +451,7 @@ proc genExit(c; tree; exit: NodeIndex) =
   of Continue:
     case tree.len(exit)
     of 1:
-      c.jump(opcJmp, tree[exit, 0].imm)
+      c.exit(tree[exit, 0].imm)
     of 2:
       # continue with argument can only mean return
       c.genExpr(tree, tree.child(exit, 1))
@@ -462,23 +468,23 @@ proc genExit(c; tree; exit: NodeIndex) =
     let (sel, a, b) = triplet(tree, exit)
     c.genExpr(tree, sel)
     c.jump(opcBranch, tree[a, 0].imm)
-    c.jump(opcJmp, tree[b, 0].imm)
+    c.exit(tree[b, 0].imm)
   of Select:
     let
       typ = parseType(tree, c.types, tree[exit, 0].typ)
       val = tree.child(exit, 1) # the value to select the target with
     for it in tree.items(exit, 2, ^2):
       c.genChoice(tree, typ, val, it)
-    c.jump(opcJmp, tree[tree.last(tree.last(exit)), 0].imm)
+    c.exit(tree[tree.last(tree.last(exit)), 0].imm)
   of CheckedCall:
     c.genCall(tree, exit, 0, ^3)
     c.genEh(tree, tree.last(exit))
-    c.jump(opcJmp, tree[tree.child(exit, ^2), 0].imm)
+    c.exit(tree[tree.child(exit, ^2), 0].imm)
   of CheckedCallAsgn:
     c.genCall(tree, exit, 1, ^3)
     c.genEh(tree, tree.last(exit))
     c.instr(opcPopLocal, tree[exit, 1].id)
-    c.jump(opcJmp, tree[tree.child(exit, ^2), 0].imm)
+    c.exit(tree[tree.child(exit, ^2), 0].imm)
   of Unreachable:
     c.instr(opcUnreachable)
   else:
