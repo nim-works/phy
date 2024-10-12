@@ -23,17 +23,15 @@
         (Drop
           (Copy (Local 1)))
         (SelectBool (IntVal 1)
-          (Continue 4
+          (Continue 3
             (List
               (Move (Local 0))
               (Move (Local 1))))
-          (Continue 3 (List))))
-      (Continuation (Params) (Locals)
-        (Continue 10 (List)))
+          (Continue 8 (List))))
       (Continuation
         (Params (Type 0) (Type 0))
         (Locals)
-        (Continue 5
+        (Continue 4
           (List
             (Move (Local 0))
             (Move (Local 1)))))
@@ -41,30 +39,24 @@
         (Params (Type 0) (Type 0))
         (Locals)
         (SelectBool (IntVal 1)
-          (Continue 7
+          (Continue 5
             (List
               (Move (Local 0))))
-          (Continue 6
+          (Continue 7
             (List
               (Move (Local 1))))))
       (Continuation
         (Params (Type 0))
         (Locals)
-        (Continue 9
-          (List
-            (Move (Local 0)))))
-      (Continuation
-        (Params (Type 0))
-        (Locals)
         (Drop
           (Copy (Local 0)))
-        (Continue 8 (IntVal 100)
+        (Continue 6 (IntVal 100)
           (List
             (Move (Local 0)))))
       (Continuation
         (Params (Type 0) (Type 0))
         (Locals)
-        (Loop 5
+        (Loop 4
           (List
             (Move (Local 1))
             (Move (Local 0)))))
@@ -75,5 +67,5 @@
           (List
             (Move (Local 0)))))
       (Continuation (Params) (Locals)
-        (Continue 11 (List)))
+        (Continue 9 (List)))
       (Continuation (Params)))))

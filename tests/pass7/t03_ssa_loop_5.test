@@ -12,14 +12,22 @@ discard """
   (ProcDef (Type 1)
     (Locals (Type 0) (Type 0))
     (Stmts
-      (Loop
-        (Stmts
-          (If (IntVal 1) (Break 1))
-          (Loop
-            (Stmts
-              (If (IntVal 1) (Break 1))
-              (Drop (Copy (Local 0)))
-              (Asgn (Local 1) (IntVal 100))))
-          (Asgn (Local 0) (IntVal 200))
-          (Drop (Copy (Local 1)))))
+      (Join 0)
+      (SelectBool (IntVal 1)
+        (Continue 1)
+        (Continue 2))
+      (Join 1)
+      (Join 3)
+      (SelectBool (IntVal 1)
+        (Continue 4)
+        (Continue 5))
+      (Join 4)
+      (Drop (Copy (Local 0)))
+      (Asgn (Local 1) (IntVal 100))
+      (Loop 3)
+      (Join 5)
+      (Asgn (Local 0) (IntVal 200))
+      (Drop (Copy (Local 1)))
+      (Loop 0)
+      (Join 2)
       (Return))))
