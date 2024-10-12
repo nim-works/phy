@@ -98,13 +98,16 @@ const
     "false": ekBuiltinVal
   }.toTable
 
+  UnitNode = Node(kind: IntVal)
+    ## the node representing the unitary value
+  unitExpr = Expr(expr: @[UnitNode], typ: prim(tkUnit))
+    ## the expression evaluating to the unitary value
+
 using
   c: var ModuleCtx
   t: InTree
   bu: var Builder[NodeKind]
   stmts: var seq[NodeSeq]
-
-const unitExpr = Expr(expr: @[Node(kind: IntVal)], typ: prim(tkUnit))
 
 template `+`(t: SemType, a: set[ExprFlag]): ExprType =
   ## Convenience shortcut for creating an ``ExprType``.
@@ -705,8 +708,8 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
       bu.add tmp
       result = c.locals[tmp.val] + {}
     else:
-      # it's a unit value
-      bu.add Node(kind: IntVal)
+      # it's the unit value
+      bu.add UnitNode
       result = prim(tkUnit) + {}
   of SourceKind.FieldAccess:
     let
@@ -740,7 +743,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
       stmts.add src.stmts
       genUse(src.expr, bu)
 
-    bu.add Node(kind: IntVal)
+    bu.add UnitNode
     result = prim(tkUnit) + {}
   of SourceKind.Return:
     var e =
@@ -770,7 +773,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
             bu.add Node(kind: Local, val: c.returnParam)
           genUse(e.expr, bu)
 
-        bu.add Node(kind: IntVal) # return the unitary value
+        bu.add UnitNode # return the unitary value
       else:
         bu.add e.expr
 
@@ -812,7 +815,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
               genDrop(e.expr, e.typ, bu) # error correction
   of SourceKind.Decl:
     localDeclToIL(c, t, n, bu, stmts)
-    bu.add Node(kind: IntVal)
+    bu.add UnitNode
     result = prim(tkUnit) + {}
   of AllNodes - ExprNodes:
     unreachable($t[n].kind)
