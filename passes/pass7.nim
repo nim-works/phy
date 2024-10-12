@@ -128,9 +128,10 @@ proc close(c; n; term = termOther) =
 proc start(c; n) =
   if c.bblocks[^1].term == termNone:
     # the previous BB isn't finished yet
-    if c.bblocks[^1].stmts.a != n or c.bblocks[^1].params.len > 0:
-      # the current BB has parameters, or is non empty; cannot merge. Close it
-      # first and then start a new one
+    if c.bblocks.len == 1 or c.bblocks[^1].stmts.a != n or
+       c.bblocks[^1].params.len > 0:
+      # the current BB is the entry BB, has parameters, or is non empty; cannot
+      # merge. Close it first and then start a new one
       c.current.outgoing.add c.bblocks.len.int32
       c.close(n)
       c.bblocks.add BBlock(stmts: n .. n)
