@@ -27,6 +27,10 @@ type
     termPass # goto + pass value
     termCheckedCallAsgn
 
+  BlockFlag = enum
+    bfIndirectAccess ## an indirect memory access happens within the block
+    bfExcept         ## the block is entry point of an exception handler
+
   BBlock = object
     params: seq[LocalId]
       ## the locals passed to the block as parameters
@@ -38,8 +42,7 @@ type
 
     isLoopStart: bool
       ## whether this block is the target of a loop back-edge
-    hasIndirectAccess: bool
-      ## whether there's a read or write through a pointer
+    flags: set[BlockFlag]
 
     term: Terminator
     outgoing: seq[int32] ## outgoing edges
@@ -112,7 +115,7 @@ proc scanUsages(tree; n; bb: var BBlock) =
     if tree[it].kind in {Copy, At, Field, Addr} and tree[it, 0].kind == Local:
       bb.needs.incl tree[it, 0].id
     elif tree[it].kind in IndirectAccess:
-      bb.hasIndirectAccess = true
+      bb.flags.incl bfIndirectAccess
 
 template current(c): BBlock =
   c.bblocks[^1]
@@ -196,6 +199,12 @@ proc scanStmt(c; tree; n) =
   of Join:
     c.start(n)
     c.map[tree[n, 0].imm] = c.bblocks.high.int32
+  of Except:
+    assert c.current.term != termNone, "execution falls through to `Except`"
+    c.start(tree.next(n))
+    c.map[tree[n, 0].imm] = c.bblocks.high.int32
+    c.current.params.add tree[n, 1].id
+    c.current.flags.incl bfExcept
   of Asgn:
     # if possible, a split is introduced at assignments
     let (dst, src) = tree.pair(n)
@@ -258,7 +267,7 @@ proc genContinue(c; src: Table[LocalId, uint32], bb: BBlock, edge: int, bu) =
 proc genBlock(c; tree; bb: BBlock, bu) =
   ## Emits the code for the given basic block.
   var locals: Table[LocalId, uint32]
-  bu.subTree Continuation:
+  bu.subTree (if bfExcept in bb.flags: Except else: Continuation):
     bu.subTree Params:
       for i, it in bb.params.pairs:
         bu.add Node(kind: Type, val: getType(c, tree, it).uint32)
@@ -423,7 +432,7 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
     # * a read or write through a pointer happens
     if c.pinned.len > 0:
       for it in c.bblocks.mitems:
-        if it.hasIndirectAccess:
+        if bfIndirectAccess in it.flags:
           it.needs.incl c.pinned * it.has
 
     loopStart = i
