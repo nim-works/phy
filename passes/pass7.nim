@@ -25,6 +25,7 @@ type
     termOther
     termLoop
     termPass # goto + pass value
+    termCheckedCall
     termCheckedCallAsgn
 
   BlockFlag = enum
@@ -170,12 +171,13 @@ proc scanStmt(c; tree; n) =
     c.returns.add c.bblocks.high # needs to be patched later
   of Raise:
     c.current.addExcEdge(tree, tree.child(n, 1))
-    c.close(n)
+    # a raise exit also passes along a value
+    c.close(n, termPass)
   of CheckedCall:
     scanUsages(tree, n, c.current)
     c.current.outgoing.add c.bblocks.len.int32
     c.current.addExcEdge(tree, tree.child(n, ^1))
-    c.close(n)
+    c.close(n, termCheckedCall)
     c.start(tree.next(n))
   of CheckedCallAsgn:
     scanUsages(tree, n, c.current)
@@ -248,8 +250,9 @@ proc genList(c; src: Table[LocalId, uint32], bb: BBlock, edge: int, bu) =
     if dst < c.bblocks.len: # ignore the exit continuation
       let
         dst = addr c.bblocks[dst]
-        hasImplicit = bb.term == termPass or
-                      (bb.term == termCheckedCallAsgn and edge == 0)
+        # some exits have an implicit argument
+        hasImplicit = bb.term in {termPass, termCheckedCallAsgn} or
+                      (bb.term == termCheckedCall and edge == 1)
 
       for i in ord(hasImplicit)..<dst.params.len:
         # pinned locals must be renamed
@@ -310,11 +313,13 @@ proc genBlock(c; tree; bb: BBlock, bu) =
           copyAndPatch(tree, tree.child(n, 0), locals, bu)
           c.genList(locals, bb, 0, bu)
     of Raise:
-      if bb.outgoing.len == 0:
-        bu.subTree Raise:
-          copyAndPatch(tree, tree.child(n, 0), locals, bu)
+      bu.subTree Raise:
+        copyAndPatch(tree, tree.child(n, 0), locals, bu)
+        if bb.outgoing.len == 0:
           bu.subTree Unwind:
             discard
+        else:
+          c.genContinue(locals, bb, 0, bu)
     of SelectBool:
       bu.subTree SelectBool:
         copyAndPatch(tree, tree.child(n, 0), locals, bu)
