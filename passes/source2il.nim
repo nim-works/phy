@@ -585,7 +585,7 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
     result = errorType()
 
 proc localDeclToIL(c; t; n: NodeIndex, bu, stmts) =
-  ## Translates a procedure-local declaration to a the target IL.
+  ## Translates a procedure-local declaration to the target IL.
   let
     (npos, init) = t.pair(n)
     name = t.getString(npos)
