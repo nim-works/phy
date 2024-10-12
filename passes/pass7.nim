@@ -41,8 +41,6 @@ type
     has: PackedSet[LocalId]
       ## all locals available to the block
 
-    isLoopStart: bool
-      ## whether this block is the target of a loop back-edge
     flags: set[BlockFlag]
 
     term: Terminator
@@ -396,10 +394,6 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
       # a loop must be backward control-flow, all other control-flow must be
       # facing forward
       assert it <= i == (bb.term == termLoop), "illegal control-flow"
-
-    # also mark the basic-blocks at the start of a loop:
-    if bb.term == termLoop:
-      c.bblocks[bb.outgoing[0]].isLoopStart = true
 
   block:
     var
