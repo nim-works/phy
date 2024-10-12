@@ -8,8 +8,6 @@
 .local lo0 int
   Call p0 0
   PopLocal lo0
-  Jmp L3
-.label L3
   GetLocal lo0
   Ret
 .end

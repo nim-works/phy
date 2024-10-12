@@ -402,17 +402,28 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
 
   block:
     var
-      loopStart = -1
-      inLoop = false
+      previous = -1
       i = 0
 
-    # forward propagation pass. Outermost loops are iterated twice
+    # reaching definitions analysis: compute for every BB the set of available
+    # locals (stored in the `has` set), which is a forward data-flow problem.
+    # The BBs are sorted in reverse postorder (with the BBs with the back-edges
+    # coming immediately after the other BBs part of the loop). There are also
+    # no jumps to *within a loop*, meaning that a loop's entry BB dominates all
+    # other BBs part of the loop. It follows that:
+    # * after one iteration (in reverse postorder) over a loop's BBs:
+    #   * the reaching definitions of the entry BB were propagated to all BBs
+    #     in the loop
+    #   * the reaching definitions from all within the loop are propagated to
+    #     the back-edge (and thus the entry BB)
+    # * after a second iteration, all reaching definitions from within the
+    #   loop were propagated along every edge leaving the loop
+    #
+    # We therefore know that a loop must only ever be executed twice (at most).
+    # BBs part of a block are visited 2 + N times, where N is the nesting
+    # depth.
     while i < c.bblocks.len:
       let it = addr c.bblocks[i]
-
-      if not inLoop and i > loopStart and it.isLoopStart:
-        inLoop = true
-        loopStart = i
 
       for param in it.params.items:
         it.needs.excl param
@@ -425,14 +436,14 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
           # that information available to follow-up blocks, for pinned locals
           c.bblocks[o].has.incl it.needs * c.pinned
 
-      if inLoop and it.term == termLoop and it.outgoing[0] == loopStart:
-        # end of the loop reached; jump back to the start of it
-        swap(i, loopStart) # prevent inner loops from being repeated
-        inLoop = false
+      if it.term == termLoop and i > previous:
+        # found a not-yet followed back edge -> follow it
+        previous = i
+        i = it.outgoing[0]
       else:
-        inc i
+        inc i # go to the next BB
 
-    # handle pinned locals: mark them as needed in every block where:
+    # handle pinned locals: mark them as live in every block where:
     # * they're available
     # * a read or write through a pointer happens
     if c.pinned.len > 0:
@@ -440,18 +451,34 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
         if bfIndirectAccess in it.flags:
           it.needs.incl c.pinned * it.has
 
-    loopStart = i
+    # liveness analysis: compute for every BB the set of locals live at the
+    # start of it, which is a backward data-flow problem. Iterating over the
+    # BB in postorder, given the CFG constraints listed above, it follows that:
+    # * after one iteration over a loop, the live set for the entry BB is
+    #   correct
+    # * after a second iteration, the live set for the loop's other BBs is
+    #   correct too
+    # Note that instead of following loops eagerly (like in the forward pass),
+    # they need to be followed outermost to innermost (i.e., the outermost
+    # loop has to complete a full iteration before any of its nested loops are
+    # repeated)
+    var
+      looping = false
+      entry = 0
+
+    previous = c.bblocks.len # set to something greater than any valid BB index
     i = c.bblocks.high
 
-    # backward propagation pass. Outermost loops are processed twice
     while i >= 0:
       let it = addr c.bblocks[i]
 
-      if not inLoop and i < loopStart and it.term == termLoop:
-        inLoop = true
-        loopStart = i
+      if not looping and i < previous and it.term == termLoop:
+        previous = i
+        looping = true # don't repeat nested loops
+        entry = it.outgoing[0] # the entry BB of the loop
 
-      # a block needs access to every locals its targets need access to:
+      # all locals live in outgoing blocks and of which a definition reaches
+      # here are also live in the current block
       for o in it.outgoing.items:
         it.needs.incl c.bblocks[o].needs * c.bblocks[o].has
 
@@ -459,10 +486,10 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
       for param in it.params.items:
         it.needs.excl param
 
-      if inLoop and c.bblocks[loopStart].outgoing[0] == i:
-        # start of the loop reached; jump back to the end of it
-        swap(i, loopStart)
-        inLoop = false
+      if looping and entry == i:
+        # entry of the loop reached -> follow the back-edge (in reverse)
+        looping = false # now repeat nested loops
+        i = previous
       else:
         dec i
 

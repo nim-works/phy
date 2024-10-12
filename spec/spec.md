@@ -11,6 +11,14 @@ the given name.
 An *expression* is a term or a control-flow instruction. All expressions have a
 *type*.
 
+Expressions are further subdivided into:
+* *l-value* expressions: an expression that refers to a location
+* *r-value* expressions: an expression that produces a new value
+* `void` expressions: control-flow instructions that don't produce a value
+
+> TODO: reorder the definitions such that the term "locations" is defined
+>       before it's used here
+
 A *statement* is a computation without a type.
 
 > Note: at the moment, the grammar describes the grammar of the parse-tree,
@@ -58,6 +66,48 @@ the same type.
 
 `union(...)` is the supertype of all its operand types.
 
+### Values, Objects, Locations, and Cells
+
+A *value* is something that inhabits a type. An *aggregate value* is a value
+inhabiting a composite type.
+
+An *object* represents a *value*. If an object represents an aggregate value,
+it has *sub-objects*. *Object*s are stored in *locations*, which can have
+sub-locations storing the sub-objects, if any. A location not part of any
+other location is called a *cell*.
+
+Each object constructed at some point has a unique identity, even if it
+represents the same value as another object. An object can only be stored in
+a single location at a time (which is referred to as its *owner*), but can
+move locations (thereby changing the owner).
+
+Changing the object stored in a sub-location also modifies the object of the
+parent location, but without changing its *identity*.
+
+> Note: the term "object" is intended as a placeholder until a better,
+> less overloaded term is found.
+
+> Note: "constructing a value" is sometimes used interchangeably with
+> "constructing an object"
+
+### Normal, Linear, and Affine Types
+
+How an object representing a value inhabiting a type is allowed to be used
+depends on whether the type is a normal, linear, or affine type:
+
+| Type   | No Use | Single Use | Multi Use |
+| ------ | ------ | ---------- | --------- |
+| Normal | Yes    | Yes        | Yes       |
+| Affine | Yes    | Yes        | No        |
+| Linear | No     | Yes        | No        |
+
+What constitutes a *use* of an object is described in this document.
+
+Using an r-value expression means using the object it produces. Using an l-
+value expression means using the object stored in the named location.
+
+> note: at the moment, all types are *normal* types
+
 ### Lookup
 
 *Entities* are part of *scopes*. They're queried from their scope via their
@@ -70,7 +120,7 @@ entity with `name` part of `scope`.
 ### Expressions
 
 At the moment, a few names are automatically part of a scope: `+`, `-`, `==`,
-`<`, `<=`, `not`.
+`<`, `<=`, `not`, `true`, and `false`.
 
 #### Identifiers
 
@@ -84,6 +134,9 @@ the `true` or `false` value, respectively.
 
 Otherwise, an error is reported.
 
+**Expression kind**: r-value
+**Uses**: nothing
+
 #### Literals
 
 ```grammar
@@ -93,6 +146,31 @@ expr += <int_val>
 ```
 
 The `IntVal` expression always has type `int`, `FloatVal` always type `float`.
+
+**Expression kind**: r-value
+**Uses**: nothing
+
+#### `If`
+
+```grammar
+expr += (If cond:<expr> body:<expr> else:<expr>?)
+```
+
+`If` is a control-flow expression, which requires a boolean expression in the
+`cond` position. If the `cond` expression evaluates to `true`, it will execute
+the `body` expression, otherwise the `else` expression -- if there's no `else`
+expression, it is assumed to be `unit`.
+
+Let `A` be the type of `body` and `B` be type of `else` (which is `unit`, if
+there's no `else`). An error is reported if:
+* `cond` is a not a boolean expression, or
+* `A` is not the same type as `B`, and `A` is not a subtype of `B` nor is `B` a
+  subtype of `A` 
+
+The type of the `If` expression is the common type between `A` and `B`.
+
+**Expression kind**: r-value
+**Uses**: `cond`, `body`, and - if present - `else`
 
 #### `Return`
 
@@ -109,6 +187,9 @@ is reported if:
 The type of the `Return` expression is `void`. It returns control from the
 current procedure to its caller.
 
+**Expression kind**: `void`
+**Uses**: `expr`, if present
+
 #### `Unreachable`
 
 ```grammar
@@ -121,6 +202,9 @@ the `Unreachable` expression, the program immediately terminates. A compiler
 an `Unreachable` expression within a procedure.
 
 The type of the `Unreachable` expression is `void`.
+
+**Expression kind**: `void`
+**Uses**: nothing
 
 #### Calls
 
@@ -149,20 +233,28 @@ After evaluating the arguments (if any), control is passed to the callee.
 
 > TODO: specification for the built-in operations is missing
 
+**Expression kind**: r-value or `void`, depending on the return type
+**Uses**: each argument expression
+
 #### Tuple Constructors
 
 ```grammar
-expr += (TupleCons)         # first form
-      | (TupleCons <expr>+) # second form
+expr += (TupleCons)
 ```
 
-The first form constructs a value of type `unit`.
+Constructs a value of type `unit`.
 
-The second form construct a value of type `tuple(T1..Tn)`, where `T1` is the
-type of the first expression, `T2` the type of the second expression (if any),
-and so on.
+```grammar
+expr += (TupleCons <expr>+)
+```
+
+Constructs a value of type `tuple(T0..Tn)`, where `T0` is the type of the first
+expression, `T1` the type of the second expression (if any), and so on.
 
 An error is reported if any `Tx` is `void`.
+
+**Expression kind**: r-value
+**Uses**: each operand expression
 
 #### Tuple Elimination
 
@@ -178,6 +270,25 @@ to the number of positions in the tuple type `T`, an error is reported.
 
 Given type `tuple(T[0], .., T[n])` for `T`, the type of the expression is
 `T[index]`.
+
+**Expression kind**: same as `tup`
+**Uses**: nothing
+
+#### Expression Lists
+
+```grammar
+expr += (Exprs <expr>+)
+```
+
+A non-empty list of expressions, where the tail expression may be any type and
+preceding ones must be `unit` or `void`. An error is reported if a non-tail
+expression is any type outside of `unit` or `void`.
+
+The type of the expression list is inferred as `void` if any non-trailing
+expression is `void`, otherwise the type is that of the trailing expression.
+
+**Expression kind**: same as that of the trailing expression
+**Uses**: nothing
 
 ### Type Expressions
 

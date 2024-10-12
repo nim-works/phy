@@ -12,6 +12,8 @@ import
   phy/[reporting, types],
   vm/[utils]
 
+from std/strutils import `%`
+
 import passes/spec_source except NodeKind
 
 type
@@ -21,6 +23,9 @@ type
   NodeSeq    = seq[Node]
 
   EntityKind = enum
+    ekNone        ## signals "non-existent"
+    ekBuiltinVal  ## some built-in named value
+    ekBuiltinProc ## some built-in procedure
     ekProc
     ekType
 
@@ -67,20 +72,58 @@ type
     expr: NodeSeq
     typ: SemType
 
+const
+  BuiltIns = {
+    "+": ekBuiltinProc,
+    "-": ekBuiltinProc,
+    "==": ekBuiltinProc,
+    "<=": ekBuiltinProc,
+    "<": ekBuiltinProc,
+    "not": ekBuiltinProc,
+    "true": ekBuiltinVal,
+    "false": ekBuiltinVal
+  }.toTable
+
 using
   c: var ModuleCtx
   t: InTree
   bu: var Builder[NodeKind]
   stmts: var seq[NodeSeq]
 
+const unitExpr = Expr(expr: @[Node(kind: IntVal)], typ: prim(tkUnit))
+
 proc error(c; message: sink string) =
   ## Sends the error diagnostic `message` to the reporter.
   c.reporter.error(message)
+
+func lookup(c: ModuleCtx, name: string): Entity =
+  ## Implements the lookup action described in the specification.
+  result = c.scope.getOrDefault(name, Entity(kind: ekNone))
+  if result.kind == ekNone:
+    result.kind = BuiltIns.getOrDefault(name, ekNone)
+
+func add(bu; trees: openArray[NodeSeq]) =
+  ## Appends all `trees` to the current sub-tree. The trees must each either
+  ## represent a single atomic node, or a complete subtree.
+  for t in trees.items:
+    bu.add t
 
 template addType(c; kind: NodeKind, body: untyped): uint32 =
   c.types.subTree kind:
     body
   (let r = c.numTypes; inc c.numTypes; r.uint32)
+
+proc expect(c; name: string, ent: Entity, kind: EntityKind): bool =
+  ## Convenience procedure for reporting an error if `ent` is not of the given
+  ## `kind`. Returns 'true' if it is.
+  if ent.kind == kind:
+    true
+  elif ent.kind == ekNone:
+    c.error("undeclared identifier: '" & name & "'")
+    false
+  else:
+    c.error("'" & name & "' is not a " & $kind & " name")
+    false
 
 proc expectNot(c; typ: sink SemType, kind: TypeKind): SemType =
   ## If `typ` has the given `kind`, reports an error and returns the error
@@ -135,16 +178,12 @@ proc evalType(c; t; n: NodeIndex): SemType =
 
     SemType(kind: tkUnion, elems: list)
   of Ident:
-    let name = t.getString(n)
-    if name in c.scope:
-      let ent = c.scope[name]
-      if ent.kind == ekType:
-        c.aliases[ent.id]
-      else:
-        c.error("'" & name & "' is not a type")
-        errorType()
+    let
+      name = t.getString(n)
+      ent  = c.lookup(name)
+    if c.expect(name, ent, ekType):
+      c.aliases[ent.id]
     else:
-      c.error("undeclared identifier: " & name)
       errorType()
   else:       unreachable() # syntax error
 
@@ -238,10 +277,19 @@ proc resetProcContext(c) =
 
 proc newTemp(c; typ: SemType): uint32 =
   ## Allocates a new temporary of `typ` type.
-  result = c.locals.len.uint32
-  c.locals.add typ
+  case typ.kind
+  of tkVoid: discard "do not create a temp for void"
+  else:
+    result = c.locals.len.uint32
+    c.locals.add typ
 
-proc genUse(a: NodeSeq, bu) =
+proc genLocal(val: uint32, typ: SemType, bu) =
+  ## Emits a ``Local val`` to `bu`, so long as `typ` is not `tkVoid`.
+  case typ.kind
+  of tkVoid: discard "nothing to generate"
+  else: bu.add Node(kind: Local, val: val)
+
+proc genUse(a: Node|NodeSeq, bu) =
   ## Emits `a` to `bu`, wrapping the expression in a ``Copy`` operation when
   ## it's an lvalue expression.
   if a[0].kind in {Field, At, Local}:
@@ -257,6 +305,12 @@ proc genAsgn(c; a: Node|NodeSeq, b: NodeSeq, typ: SemType, bu) =
     bu.subTree Asgn:
       bu.add a
       genUse(b, bu)
+
+proc genDrop(a: Node|NodeSeq, typ: SemType, bu) =
+  ## Emits a ``Drop a`` to `bu`, so long as `typ` is not `void`.
+  if typ.kind != tkVoid:
+    bu.subTree Drop:
+      genUse(a, bu)
 
 proc inline(bu; e: sink Expr; stmts) =
   ## Appends the trailing expression directly to `bu`.
@@ -280,36 +334,39 @@ proc fitExpr(c; e: sink Expr, target: SemType): Expr =
   if e.typ == target:
     result = e
   elif e.typ.isSubtypeOf(target):
-    result = Expr(stmts: e.stmts, typ: target)
-    case target.kind
-    of tkUnion:
-      # construct a union
-      let
-        tmp = c.newTemp(target)
-        idx = find(target.elems, e.typ)
+    if e.typ.kind == tkVoid:
+      result = e
+    else:
+      result = Expr(stmts: e.stmts, typ: target)
+      case target.kind
+      of tkUnion:
+        # construct a union
+        let
+          tmp = c.newTemp(target)
+          idx = find(target.elems, e.typ)
 
-      # ignore the type not being found in the union. This indicates that an
-      # error occurred during union construction
+        # ignore the type not being found in the union. This indicates that an
+        # error occurred during union construction
 
-      # emit the tag assignment:
-      result.stmts.addStmt Asgn:
-        bu.subTree Field:
-          bu.add Node(kind: Local, val: tmp)
-          bu.add Node(kind: Immediate, val: 0)
-        bu.add Node(kind: IntVal, val: c.literals.pack(idx))
-
-      # emit the value assignment:
-      result.stmts.addStmt Asgn:
-        bu.subTree Field:
+        # emit the tag assignment:
+        result.stmts.addStmt Asgn:
           bu.subTree Field:
             bu.add Node(kind: Local, val: tmp)
-            bu.add Node(kind: Immediate, val: 1)
-          bu.add Node(kind: Immediate, val: idx.uint32)
-        genUse(e.expr, bu)
+            bu.add Node(kind: Immediate, val: 0)
+          bu.add Node(kind: IntVal, val: c.literals.pack(idx))
 
-      result.expr = @[Node(kind: Local, val: tmp)]
-    else:
-      unreachable()
+        # emit the value assignment:
+        result.stmts.addStmt Asgn:
+          bu.subTree Field:
+            bu.subTree Field:
+              bu.add Node(kind: Local, val: tmp)
+              bu.add Node(kind: Immediate, val: 1)
+            bu.add Node(kind: Immediate, val: idx.uint32)
+          genUse(e.expr, bu)
+
+        result.expr = @[Node(kind: Local, val: tmp)]
+      else:
+        unreachable()
   else:
     # TODO: this needs a better error message
     c.error("type mismatch")
@@ -417,20 +474,26 @@ proc notToIL(c; t; n: NodeIndex, bu; stmts): SemType =
     result = errorType()
 
 proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
-  let name = t.getString(t.child(n, 0))
-  case name
-  of "+", "-":
-    result = binaryArithToIL(c, t, n, name, bu, stmts)
-  of "==", "<", "<=":
-    result = relToIL(c, t, n, name, bu, stmts)
-  of "not":
-    result = notToIL(c, t, n, bu, stmts)
-  elif name in c.scope:
-    # it could be a user-defined procedure
-    let ent = c.scope[name]
+  let
+    name = t.getString(t.child(n, 0))
+    ent  = c.lookup(name)
+
+  case ent.kind
+  of ekBuiltinProc:
+    case name
+    of "+", "-":
+      result = binaryArithToIL(c, t, n, name, bu, stmts)
+    of "==", "<", "<=":
+      result = relToIL(c, t, n, name, bu, stmts)
+    of "not":
+      result = notToIL(c, t, n, bu, stmts)
+    else:
+      unreachable()
+  of ekProc:
+    # a user-defined procedure
     # TODO: rework this logic so that the argument expressions are always
     #       analyzed, even on arity mismatch or when the callee is not a proc
-    if ent.kind == ekProc and t.len(n) == 1:
+    if t.len(n) == 1:
       # procedure arity is currently always 0
       let prc {.cursor.} = c.procList[ent.id]
       case prc.result.kind
@@ -456,16 +519,12 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
           bu.add Node(kind: Proc, val: ent.id.uint32)
 
       result = prc.result
-    elif ent.kind != ekProc:
-      c.error(name & " is not a procedure name")
-      bu.add Node(kind: IntVal)
-      result = errorType()
     else:
       c.error("expected 0 arguments, but got " & $(t.len(n) - 1))
       bu.add Node(kind: IntVal)
       result = errorType()
   else:
-    c.error("undeclared identifier: " & name)
+    discard c.expect(name, ent, ekProc) # always reports an error
     bu.add Node(kind: IntVal)
     result = errorType()
 
@@ -478,17 +537,58 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     bu.add Node(kind: FloatVal, val: c.literals.pack(t.getFloat(n)))
     result = prim(tkFloat)
   of SourceKind.Ident:
-    case t.getString(n)
-    of "false":
-      bu.add Node(kind: IntVal, val: 0)
-      result = prim(tkBool)
-    of "true":
-      bu.add Node(kind: IntVal, val: 1)
-      result = prim(tkBool)
-    else:
+    let
+      name = t.getString(n)
+      ent = c.lookup(name)
+    case ent.kind
+    of ekBuiltinVal:
+      case name
+      of "false":
+        bu.add Node(kind: IntVal, val: 0)
+        result = prim(tkBool)
+      of "true":
+        bu.add Node(kind: IntVal, val: 1)
+        result = prim(tkBool)
+    of ekNone:
       c.error("undeclared identifier: " & t.getString(n))
       bu.add Node(kind: IntVal)
       result = prim(tkError)
+    else:
+      c.error("'" & name & "' cannot be used in this context")
+      bu.add Node(kind: IntVal)
+      result = prim(tkError)
+  of SourceKind.If:
+    let
+      (p, b) = t.pair(n) # predicate and body, always present
+      cond = exprToIL(c, t, p)
+    if cond.typ.kind != tkBool:
+      c.error("`If` condition must be a boolean expression")
+
+    let
+      body = exprToIL(c, t, b)
+      els = if t.len(n) == 3: exprToIL(c, t, t.child(n, 2))
+            else:             unitExpr
+      typ = commonType(body.typ, els.typ)
+      (fb, fe) =
+        case typ.kind
+        of tkError:
+          c.error("if ($1) and else ($2) branches cannot be unified into a single type" %
+                  [$body.typ.kind, $els.typ.kind])
+          (body, els)
+        else:
+          (c.fitExpr(body, typ), c.fitExpr(els, typ))
+      tmp = c.newTemp(typ)
+    
+    stmts.addStmt If:
+      bu.inline(cond, stmts)
+      bu.subTree Stmts:
+        bu.add fb.stmts
+        c.genAsgn(Node(kind: Local, val: tmp), fb.expr, fb.typ, bu)
+      bu.subTree Stmts:
+        bu.add fe.stmts
+        c.genAsgn(Node(kind: Local, val: tmp), fe.expr, fe.typ, bu)
+    genLocal(tmp, typ, bu)
+    result = typ
   of SourceKind.Call:
     result = callToIL(c, t, n, bu, stmts)
   of SourceKind.TupleCons:
@@ -581,8 +681,39 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     stmts.addStmt Unreachable:
       discard
     result = prim(tkVoid)
+  of SourceKind.Exprs:
+    let last = t.len(n) - 1
+    var seenVoidExpr = false
+    template voidGuard(body: untyped) =
+      if not seenVoidExpr:
+        body
+    for i, si in t.pairs(n):
+      let e = c.exprToIL(t, si)
+      voidGuard:
+        stmts.add e.stmts
+      if i == last:
+        voidGuard:
+          result = e.typ
+          case e.typ.kind
+          of tkVoid: discard "okay, nothing to do"
+          else:      bu.add e.expr
+      else:
+        case e.typ.kind
+        of tkVoid:
+          result = e.typ
+          seenVoidExpr = true # check, but drop further stmts & exprs
+        of tkUnit:
+          voidGuard:
+            stmts.addStmt:
+              genDrop(e.expr, e.typ, bu)
+        else:
+          c.error("non-trailing expressions must be unit or void, got: $1" %
+                    [$e.typ.kind])
+          voidGuard:
+            stmts.addStmt:
+              genDrop(e.expr, e.typ, bu) # error correction
   of AllNodes - ExprNodes:
-    unreachable()
+    unreachable($t[n].kind)
 
 proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   ## Creates a new empty module translation/analysis context.
@@ -655,7 +786,7 @@ proc declToIL*(c; t; n: NodeIndex) =
   case t[n].kind
   of SourceKind.ProcDecl:
     let name = t.getString(t.child(n, 0))
-    if name in c.scope:
+    if c.lookup(name).kind != ekNone:
       c.error("redeclaration of '" & name & "'")
       return
 
@@ -696,7 +827,7 @@ proc declToIL*(c; t; n: NodeIndex) =
     c.procs.add finish(bu)
   of SourceKind.TypeDecl:
     let name = t.getString(t.child(n, 0))
-    if name in c.scope:
+    if c.lookup(name).kind != ekNone:
       c.error("redeclaration of '" & name & "'")
       return
 
