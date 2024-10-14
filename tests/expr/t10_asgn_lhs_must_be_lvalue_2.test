@@ -1,0 +1,10 @@
+discard """
+  description: "
+    An expression list with a trailing l-value expression is an l-value
+    expression
+  "
+  output: "(): unit"
+"""
+(Exprs
+  (Decl (Ident "x") (IntVal 1))
+  (Asgn (Exprs (Ident "x")) (IntVal 2)))

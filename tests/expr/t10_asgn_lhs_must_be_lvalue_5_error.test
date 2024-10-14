@@ -1,0 +1,7 @@
+discard """
+  description: "A tuple constructor is not an l-value expression"
+  reject: true
+"""
+(Asgn
+  (TupleCons (IntVal 100))
+  (TupleCons (IntVal 200)))

@@ -28,6 +28,7 @@ type
     ekBuiltinProc ## some built-in procedure
     ekProc
     ekType
+    ekLocal
 
   Entity = object
     kind: EntityKind
@@ -37,6 +38,8 @@ type
   ProcInfo* = object
     result*: SemType
       ## the return type
+
+  Scope = Table[string, Entity]
 
   ModuleCtx* = object
     ## The translation/analysis context for a single module.
@@ -54,8 +57,8 @@ type
       ## the in-progress procedure section
     procList*: seq[ProcInfo]
 
-    scope: Table[string, Entity]
-      ## maps names to their associated entity
+    scopes: seq[Scope]
+      ## the stack of scopes. The last item always represents the current scope
 
     # procedure context:
     retType: SemType
@@ -64,6 +67,16 @@ type
     locals: seq[SemType]
       ## all locals part of the procedure
 
+  ExprFlag {.pure.} = enum
+    Lvalue ## the expression is an lvalue. The flags absence implies
+           ## that the expression is an rvalue or void expression
+
+  ExprType = tuple
+    ## Returned by expression analysis. Carries additional attributes about
+    ## the expression, not just the type.
+    typ: SemType
+    attribs: set[ExprFlag]
+
   Expr = object
     # XXX: the target IL doesn't support expression lists (yet), so we have
     #      to apply the necessary lowering here, for now. Efficiency doesn't
@@ -71,6 +84,7 @@ type
     stmts: seq[NodeSeq] # can be empty
     expr: NodeSeq
     typ: SemType
+    attribs: set[ExprFlag]
 
 const
   BuiltIns = {
@@ -84,13 +98,20 @@ const
     "false": ekBuiltinVal
   }.toTable
 
+  UnitNode = Node(kind: IntVal)
+    ## the node representing the unitary value
+  unitExpr = Expr(expr: @[UnitNode], typ: prim(tkUnit))
+    ## the expression evaluating to the unitary value
+
 using
   c: var ModuleCtx
   t: InTree
   bu: var Builder[NodeKind]
   stmts: var seq[NodeSeq]
 
-const unitExpr = Expr(expr: @[Node(kind: IntVal)], typ: prim(tkUnit))
+template `+`(t: SemType, a: set[ExprFlag]): ExprType =
+  ## Convenience shortcut for creating an ``ExprType``.
+  (typ: t, attribs: a)
 
 proc error(c; message: sink string) =
   ## Sends the error diagnostic `message` to the reporter.
@@ -98,9 +119,32 @@ proc error(c; message: sink string) =
 
 func lookup(c: ModuleCtx, name: string): Entity =
   ## Implements the lookup action described in the specification.
-  result = c.scope.getOrDefault(name, Entity(kind: ekNone))
-  if result.kind == ekNone:
-    result.kind = BuiltIns.getOrDefault(name, ekNone)
+  var i = c.scopes.high
+  while i >= 0:
+    result = c.scopes[i].getOrDefault(name, Entity(kind: ekNone))
+    if result.kind != ekNone:
+      return
+    dec i
+
+  # try the builtins
+  result.kind = BuiltIns.getOrDefault(name, ekNone)
+
+func addDecl(c; name: string, entity: sink Entity) =
+  ## Adds the `entity` with name `name` to the current scope, ignoring whether
+  ## it already existed.
+  c.scopes[^1][name] = entity
+
+func removeDecl(c; name: string) =
+  ## Removes the entity with `name` from the current scope.
+  c.scopes[^1].del(name)
+
+func openScope(c) =
+  ## Opens a new scope and makes it the current one.
+  c.scopes.add default(typeof(c.scopes[0]))
+
+func closeScope(c) =
+  ## Closes the current scope and makes its parent the current one.
+  c.scopes.shrink(c.scopes.len - 1)
 
 func add(bu; trees: openArray[NodeSeq]) =
   ## Appends all `trees` to the current sub-tree. The trees must each either
@@ -365,6 +409,11 @@ proc fitExpr(c; e: sink Expr, target: SemType): Expr =
           genUse(e.expr, bu)
 
         result.expr = @[Node(kind: Local, val: tmp)]
+      of tkError:
+        # error correction: keep the original expression as is when fitting
+        # to the error type
+        result.typ = e.typ
+        result.expr = e.expr
       else:
         unreachable()
   else:
@@ -373,17 +422,24 @@ proc fitExpr(c; e: sink Expr, target: SemType): Expr =
     result = Expr(stmts: e.stmts, expr: @[Node(kind: IntVal)],
                   typ: errorType())
 
-proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType
+proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType
 
 proc exprToIL(c; t: InTree, n: NodeIndex): Expr =
   var bu = initBuilder[NodeKind]()
-  result.typ = exprToIL(c, t, n, bu, result.stmts)
+  (result.typ, result.attribs) = exprToIL(c, t, n, bu, result.stmts)
   result.expr = finish(bu)
   # verify some postconditions:
   assert result.typ.kind != tkVoid or result.expr.len == 0,
          "void `Expr` cannot have a trailing expression"
   assert result.typ.kind in {tkVoid, tkError} or result.expr.len > 0,
          "non-void `Expr` must have a trailing expression"
+
+proc scopedExprToIL(c; t; n: NodeIndex): Expr =
+  ## Analyzes the given expression and generates the IL for it. Analysis
+  ## happens within a new scope, which is discarded afterwards.
+  c.openScope()
+  result = c.exprToIL(t, n)
+  c.closeScope()
 
 template lenCheck(t; n: NodeIndex, bu; expected: int) =
   ## Exits the current analysis procedure with an error, if `n` doesn't have
@@ -528,14 +584,42 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
     bu.add Node(kind: IntVal)
     result = errorType()
 
-proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
+proc localDeclToIL(c; t; n: NodeIndex, bu, stmts) =
+  ## Translates a procedure-local declaration to the target IL.
+  let
+    (npos, init) = t.pair(n)
+    name = t.getString(npos)
+
+  var e = c.exprToIL(t, init)
+  if e.typ.kind == tkVoid:
+    c.error("cannot initialize local with `void` expression")
+    # turn into an error expression:
+    e.typ = errorType()
+    e.expr = @[Node(kind: IntVal)]
+
+  let local = c.newTemp(e.typ)
+  stmts.add e.stmts
+  stmts.addStmt:
+    c.genAsgn(Node(kind: Local, val: local), e.expr, e.typ, bu)
+
+  # verify that the name isn't in use already *after* analyzing the
+  # initializer; the expression could introduce an entity with the same name
+  if c.lookup(name).kind != ekNone:
+    c.error("redeclaration of " & name)
+    # don't abort; override the existing entity for the sake of error
+    # correction
+
+  # register the declaration *after* analyzing the expression
+  c.addDecl(name, Entity(kind: ekLocal, id: local.int))
+
+proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
   case t[n].kind
   of SourceKind.IntVal:
     bu.add Node(kind: IntVal, val: c.literals.pack(t.getInt(n)))
-    result = prim(tkInt)
+    result = prim(tkInt) + {}
   of SourceKind.FloatVal:
     bu.add Node(kind: FloatVal, val: c.literals.pack(t.getFloat(n)))
-    result = prim(tkFloat)
+    result = prim(tkFloat) + {}
   of SourceKind.Ident:
     let
       name = t.getString(n)
@@ -545,18 +629,21 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       case name
       of "false":
         bu.add Node(kind: IntVal, val: 0)
-        result = prim(tkBool)
+        result = prim(tkBool) + {}
       of "true":
         bu.add Node(kind: IntVal, val: 1)
-        result = prim(tkBool)
+        result = prim(tkBool) + {}
+    of ekLocal:
+      bu.add Node(kind: Local, val: ent.id.uint32)
+      result = c.locals[ent.id] + {Lvalue}
     of ekNone:
       c.error("undeclared identifier: " & t.getString(n))
       bu.add Node(kind: IntVal)
-      result = prim(tkError)
+      result = prim(tkError) + {}
     else:
       c.error("'" & name & "' cannot be used in this context")
       bu.add Node(kind: IntVal)
-      result = prim(tkError)
+      result = prim(tkError) + {}
   of SourceKind.If:
     let
       (p, b) = t.pair(n) # predicate and body, always present
@@ -565,8 +652,8 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
       c.error("`If` condition must be a boolean expression")
 
     let
-      body = exprToIL(c, t, b)
-      els = if t.len(n) == 3: exprToIL(c, t, t.child(n, 2))
+      body = scopedExprToIL(c, t, b)
+      els = if t.len(n) == 3: scopedExprToIL(c, t, t.child(n, 2))
             else:             unitExpr
       typ = commonType(body.typ, els.typ)
       (fb, fe) =
@@ -588,9 +675,9 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         bu.add fe.stmts
         c.genAsgn(Node(kind: Local, val: tmp), fe.expr, fe.typ, bu)
     genLocal(tmp, typ, bu)
-    result = typ
+    result = typ + {}
   of SourceKind.Call:
-    result = callToIL(c, t, n, bu, stmts)
+    result = callToIL(c, t, n, bu, stmts) + {}
   of SourceKind.TupleCons:
     if t.len(n) > 0:
       var elems = newSeq[SemType](t.len(n))
@@ -602,10 +689,10 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         elems[i] = e.typ
 
         if e.typ.kind == tkError:
-          return errorType()
+          return errorType() + {}
         elif e.typ.kind == tkVoid:
           c.error("tuple element cannot be 'void'")
-          return errorType()
+          return errorType() + {}
 
         stmts.add e.stmts
         # add an assignment for the field:
@@ -615,15 +702,15 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
             bu.add Node(kind: Immediate, val: i.uint32)
           c.genAsgn(dest, e.expr, e.typ, bu)
 
-      result = SemType(kind: tkTuple, elems: elems)
       # now that we know the type, correct it:
-      c.locals[tmp.val] = result
+      c.locals[tmp.val] = SemType(kind: tkTuple, elems: elems)
 
       bu.add tmp
+      result = c.locals[tmp.val] + {}
     else:
-      # it's a unit value
-      bu.add Node(kind: IntVal)
-      result = prim(tkUnit)
+      # it's the unit value
+      bu.add UnitNode
+      result = prim(tkUnit) + {}
   of SourceKind.FieldAccess:
     let
       (a, b) = t.pair(n)
@@ -632,18 +719,32 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
     of tkTuple:
       let idx = t.getInt(b)
       if idx >= 0 and idx < tup.typ.elems.len:
-        result = tup.typ.elems[idx]
+        result = tup.typ.elems[idx] + tup.attribs
         bu.subTree Field:
           bu.inline(tup, stmts)
           bu.add Node(kind: Immediate, val: idx.uint32)
       else:
         c.error("tuple has no element with index " & $idx)
-        result = errorType()
+        result = errorType() + {Lvalue}
     of tkError:
-      result = tup.typ
+      result = tup.typ + {}
     else:
       c.error("expected 'tuple' value")
-      result = errorType()
+      result = errorType() + {}
+  of SourceKind.Asgn:
+    let (a, b) = t.pair(n)
+    stmts.addStmt Asgn:
+      # emit the destination expression in-place
+      let dst = c.exprToIL(t, a, bu, stmts)
+      if Lvalue notin dst.attribs:
+        c.error("LHS expression must be an l-value expression")
+
+      let src = c.fitExpr(c.exprToIL(t, b), dst.typ)
+      stmts.add src.stmts
+      genUse(src.expr, bu)
+
+    bu.add UnitNode
+    result = prim(tkUnit) + {}
   of SourceKind.Return:
     var e =
       case t.len(n)
@@ -672,15 +773,15 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
             bu.add Node(kind: Local, val: c.returnParam)
           genUse(e.expr, bu)
 
-        bu.add Node(kind: IntVal) # return the unitary value
+        bu.add UnitNode # return the unitary value
       else:
         bu.add e.expr
 
-    result = prim(tkVoid)
+    result = prim(tkVoid) + {}
   of SourceKind.Unreachable:
     stmts.addStmt Unreachable:
       discard
-    result = prim(tkVoid)
+    result = prim(tkVoid) + {}
   of SourceKind.Exprs:
     let last = t.len(n) - 1
     var seenVoidExpr = false
@@ -693,14 +794,14 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
         stmts.add e.stmts
       if i == last:
         voidGuard:
-          result = e.typ
+          result = e.typ + e.attribs
           case e.typ.kind
           of tkVoid: discard "okay, nothing to do"
           else:      bu.add e.expr
       else:
         case e.typ.kind
         of tkVoid:
-          result = e.typ
+          result = e.typ + e.attribs
           seenVoidExpr = true # check, but drop further stmts & exprs
         of tkUnit:
           voidGuard:
@@ -712,6 +813,10 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): SemType =
           voidGuard:
             stmts.addStmt:
               genDrop(e.expr, e.typ, bu) # error correction
+  of SourceKind.Decl:
+    localDeclToIL(c, t, n, bu, stmts)
+    bu.add UnitNode
+    result = prim(tkUnit) + {}
   of AllNodes - ExprNodes:
     unreachable($t[n].kind)
 
@@ -719,7 +824,8 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   ## Creates a new empty module translation/analysis context.
   ModuleCtx(reporter: reporter,
             types: initBuilder[NodeKind](TypeDefs),
-            procs: initBuilder[NodeKind](ProcDefs))
+            procs: initBuilder[NodeKind](ProcDefs),
+            scopes: @[default(Scope)]) # start with the top-level scope
 
 proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
   ## Closes the module context and returns the accumulated translated code.
@@ -735,7 +841,7 @@ proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
 proc exprToIL*(c; t): SemType =
   ## Translates the given source language expression to the highest-level IL
   ## and turns it into a procedure. Also returns the type of the expression.
-  var e = exprToIL(c, t, NodeIndex(0))
+  var e = c.scopedExprToIL(t, NodeIndex(0))
   result = e.typ
 
   if e.typ.kind in ComplexTypes:
@@ -750,7 +856,7 @@ proc exprToIL*(c; t): SemType =
       initTree(@[TreeNode[SourceKind](kind: SourceKind.Return, val: 1)] & t.nodes,
                t.literals)
     # analyse again:
-    e = c.exprToIL(t, NodeIndex(0))
+    e = c.scopedExprToIL(t, NodeIndex(0))
 
   defer:
     c.resetProcContext()
@@ -804,13 +910,13 @@ proc declToIL*(c; t; n: NodeIndex) =
 
     # register the proc before analysing/translating the body
     c.procList.add ProcInfo(result: c.retType)
-    c.scope[name] = Entity(kind: ekProc, id: c.procList.high)
+    c.addDecl(name, Entity(kind: ekProc, id: c.procList.high))
 
-    let e = c.exprToIL(t, t.child(n, 3))
+    let e = c.scopedExprToIL(t, t.child(n, 3))
     # the body expression must always be a void expression
     if e.typ.kind != tkVoid:
       c.error("a procedure body must be a 'void' expression")
-      c.scope.del(name) # remove again
+      c.removeDecl(name) # remove again
       c.procList.del(c.procList.high)
       return
 
@@ -834,6 +940,6 @@ proc declToIL*(c; t; n: NodeIndex) =
     let typ = evalType(c, t, t.child(n, 1))
     # add the type to the scope, regardless of whether `typ` is an error
     c.aliases.add typ
-    c.scope[name] = Entity(kind: ekType, id: c.aliases.high)
+    c.addDecl(name, Entity(kind: ekType, id: c.aliases.high))
   of AllNodes - DeclNodes:
     unreachable() # syntax error

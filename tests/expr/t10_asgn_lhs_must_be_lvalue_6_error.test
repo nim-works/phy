@@ -1,0 +1,7 @@
+discard """
+  description: "A projection from an r-value is not an l-value"
+  reject: true
+"""
+(Asgn
+  (FieldAccess (TupleCons (IntVal 100)) (IntVal 0))
+  (IntVal 200))

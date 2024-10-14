@@ -1,0 +1,7 @@
+discard """
+  description: "A call expression is not an l-value expression"
+  reject: true
+"""
+(Asgn
+  (Call (Ident "+") (IntVal 1) (IntVal 2))
+  (IntVal 3))
