@@ -1,0 +1,14 @@
+discard """
+  output: "(Done 16)"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Type 0)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) (Locals)
+    (Continuations
+      (Continuation (Params) 0
+        (Continue 1
+          (BitAnd (Type 0) (IntVal 16) (IntVal 48))))
+      (Continuation (Params (Type 0))))))
