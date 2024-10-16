@@ -1,0 +1,11 @@
+discard """
+  arguments: "--compileOnly"
+"""
+(TypeDefs
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0) (Locals)
+    (Stmts
+      (Join 0)
+      (Loop 0))))
