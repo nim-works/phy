@@ -105,6 +105,12 @@ using
 
 proc `==`(a, b: TypeId): bool {.borrow.}
 
+func ascendingPair[T](a, b: T): (T, T) {.inline.} =
+  ## Constructs a tuple from `a` and `b` where the first element is always the
+  ## smaller one.
+  if a < b: (a, b)
+  else:     (b, a)
+
 func id(n: Node): uint32 {.inline.} =
   assert n.kind == Local, $n.kind
   n.val
@@ -221,14 +227,7 @@ proc colorGraph(gr: var Graph) =
         elif e.noCopy and gr.nodes[e.dst].color != color:
           # problem: the source and destination should have the same color,
           # they but don't. Register an ordered conflict pair
-          var
-            a = color
-            b = gr.nodes[e.dst].color
-          if b < a:
-            swap(a, b)
-
-          # color `a` is now always older than `b`
-          conflicts.add (a, b)
+          conflicts.add ascendingPair(color, gr.nodes[e.dst].color)
 
         # don't propagate colors between pinned and not-pinned nodes, so
         # that the color used in a pinned subgraph isn't used anywhere else.
