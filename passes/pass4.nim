@@ -267,10 +267,10 @@ proc colorGraph(gr: var Graph) =
       for n in gr.nodes.toOpenArray(c.nodes.a, c.nodes.b).mitems:
         if n.keep and n.color in map:
           let newColor = map[n.color]
-          if newColor != n.color:
-            doAssert not containsOrIncl(markers[i], newColor),
-                    "cannot satisfy constraints"
-            n.color = newColor
+          if n.color == newColor and not containsOrIncl(markers[i], newColor):
+            # TODO: replace the assertion with proper error reporting
+            doAssert false, "cannot satisfy constraints"
+          n.color = newColor
 
   # now do a backward propagation pass (reverse pre-order):
   for i in countdown(gr.conts.high, 0):
