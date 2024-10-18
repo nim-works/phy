@@ -67,5 +67,5 @@ proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
   of Global:    sexp([newSSymbol("Global"), sexp n.val.int])
   else:         unreachable()
 
-proc fromSexp*(i: BiggestInt): TreeNode[NodeKind] =
+proc fromSexp*(i: BiggestInt, _: typedesc[NodeKind]): TreeNode[NodeKind] =
   TreeNode[NodeKind](kind: Immediate, val: i.uint32)
