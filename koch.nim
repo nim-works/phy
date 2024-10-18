@@ -19,7 +19,8 @@ Commands:
   Programs: seq[(string, string, bool)] = @[
     ("tester", "tools/tester.nim", true),
     ("passtool", "tools/passtool/passtool.nim", true),
-    ("repl", "tools/repl.nim", false)
+    ("repl", "tools/repl.nim", false),
+    ("phy", "phy/phy.nim", false)
   ]
     ## maps program names to the associated path and whether the program
     ## doesn't depend on generated modules
