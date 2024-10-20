@@ -1,0 +1,11 @@
+discard """
+  output: "(UnhandledException 100)"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) (Locals)
+    (Stmts
+      (Raise (IntVal 100) (Unwind)))))

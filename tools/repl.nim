@@ -19,6 +19,7 @@ import
     pass1,
     pass3,
     pass4,
+    pass7,
     pass10,
     source2il,
     spec_source,
@@ -127,6 +128,7 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
 
     # lower to L0:
     m = m.apply(pass10.lower(m))
+    m = m.apply(pass7.lower(m))
     m = m.apply(pass4.lower(m))
     m = m.apply(pass3.lower(m, 8))
     m = m.apply(pass1.lower(m, 8))

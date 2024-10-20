@@ -5,16 +5,11 @@
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1)
-    (Continuations
-      (Continuation (Params) (Locals)
-        (Continue 1 (IntVal 100) (List)))
-      (Continuation
-        (Params (Type 0)))))
-  (ProcDef (Type 2)
-    (Continuations
-      (Continuation (Params) (Locals)
-        (Drop
-          (Call (Proc 0)))
-        (Continue 1 (List)))
-      (Continuation (Params)))))
+  (ProcDef (Type 1) (Locals)
+    (Stmts
+      (Return (IntVal 100))))
+  (ProcDef (Type 2) (Locals)
+    (Stmts
+      (Drop
+        (Call (Proc 0)))
+      (Return))))
