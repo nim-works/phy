@@ -174,7 +174,7 @@ proc run*(env: var VmEnv, prc: ProcIndex): string =
     result.addInt res.stub.int
   of yrkUnhandledException:
     result.add " "
-    result.add $res.exc
+    result.add $res.exc.uintVal
   of yrkUser:
     unreachable() # shouldn't happen
 
