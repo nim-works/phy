@@ -73,7 +73,8 @@ Usage:
 Options:
   --source:lang               the language the input file uses
   --target:lang               the language to translate/lower to
-  --tester                    enable some tester-specific functionality
+  --runner                    makes the program suitable for being used as a
+                              test runner
 
 Commands:
   c                           translates/lowers the code from the source
@@ -85,9 +86,9 @@ Commands:
 var
   gShow: set[Language]
     ## the set of languages for which the IR should be printed once available
-  gTester = false
-    ## whether the program is invoked as part of testing. This enables some
-    ## accomodations for the tester
+  gRunner = false
+    ## whether the program is used as a test runner. This enables some
+    ## accommodations for the tester
 
 proc error(msg: string) =
   echo "Error: ", msg
@@ -120,12 +121,12 @@ template genericPrint(lang: Language, body: untyped) =
   if L in gShow:
     # for the tester, the output is formatted such that it's easy
     # to detect where the end is
-    if not gTester:
+    if not gRunner:
       stdout.writeLine("---- " & $L)
 
     body
 
-    if gTester:
+    if gRunner:
       stdout.write("!BREAK!")
     else:
       stdout.writeLine("----")
@@ -227,8 +228,8 @@ proc main(args: openArray[string]) =
       error "unknown option: " & key
     of cmdLongOption:
       case key
-      of "tester":
-        gTester = true
+      of "runner":
+        gRunner = true
       of "source":
         source = parseEnum[Language](arg)
       of "target":
@@ -264,7 +265,7 @@ proc main(args: openArray[string]) =
     error "a filename must be provided"
 
   var s = openFileStream(input, fmRead)
-  if gTester:
+  if gRunner:
     # skip the test file header, if any
     if s.readLine() == "discard \"\"\"":
       while not s.readLine().endsWith("\"\"\""):
@@ -301,7 +302,7 @@ proc main(args: openArray[string]) =
       (code, typ) = sourceToIL(text)
       newSource = lang10
       print(code, newSource)
-    elif gTester:
+    elif gRunner:
       # in order to reduce visual noise in tests, the ``(Module ...)`` top
       # level node is added implicitly
       code = fromSexp[spec.NodeKind](parseSexp("(Module " & text & ")"))
