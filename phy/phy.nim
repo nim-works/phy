@@ -142,7 +142,7 @@ proc print(env: VmEnv) =
     stdout.write(disassemble(env))
 
 proc sourceToIL(text: string): (PackedTree[spec.NodeKind], SemType) =
-  ## Given a S-expression representation of the source language (`text`),
+  ## Given an S-expression representation of the source language (`text`),
   ## analyzes it and translates it to the highest-level IL. Also returns the
   ## return of the procedure to executre, or ``tkError`` if there is no
   ## procedure to run.
