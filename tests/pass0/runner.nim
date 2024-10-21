@@ -13,6 +13,9 @@ import
   experimental/[
     sexp
   ],
+  common/[
+    vmexec
+  ],
   generated/[
     lang0_checks
   ],
@@ -65,42 +68,5 @@ if args.len > 1 and args[0] == "--noRun":
   stdout.write("(Done)")
   quit(0)
 
-var
-  thread = vm.initThread(env, env.procs.high.ProcIndex, 1024, @[])
-  res = run(env, thread, nil)
-env.dispose(move thread)
-
-# XXX: the rendering logic is - for the largest part - the same as for the VM
-#      runner. The code should not be duplicated like this
-# render the result:
-var output = "(" & substr($res.kind, 3)
-case res.kind
-of yrkDone:
-  case env.types[res.typ].kind
-  of tkVoid, tkProc, tkForeign:
-    discard
-  of tkInt:
-    output.add " "
-    if res.result.uintVal <= high(int64).uint64:
-      # the signed and unsigned interpretation yield the same value
-      output.addInt res.result.uintVal
-    else:
-      # output both interpretations
-      output.add "(" & $res.result.uintVal & " or " & $res.result.intVal & ")"
-  of tkFloat:
-    output.add " " & $res.result.floatVal
-of yrkError:
-  output.add " "
-  output.add $res.error
-of yrkStubCalled:
-  output.add " "
-  output.addInt res.stub.int
-of yrkUnhandledException:
-  output.add " "
-  output.addInt res.exc.intVal
-of yrkUser:
-  unreachable()
-
-output.add ")"
 # output it:
-stdout.write(output)
+stdout.write(run(env, env.procs.high.ProcIndex))
