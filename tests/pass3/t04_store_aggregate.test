@@ -1,5 +1,5 @@
 discard """
-  output: "(Error)"
+  output: "(Error ecIllegalAccess)"
 """
 (TypeDefs
   (Int 8)

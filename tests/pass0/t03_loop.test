@@ -1,5 +1,5 @@
 discard """
-  arguments: "--noRun"
+  arguments: "c"
 """
 (TypeDefs
   (ProcTy (Void))

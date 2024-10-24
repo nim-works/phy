@@ -334,7 +334,11 @@ proc main(args: openArray[string]) =
     # handle the eval command:
     if cmd == Eval:
       if env.procs.len == 0:
-        error "there's nothing to run"
+        if gRunner:
+          discard "okay, silently ignore"
+          return
+        else:
+          error "there's nothing to run"
 
       if source == langSource:
         # we have type high-level type information
