@@ -2,7 +2,7 @@ discard """
   description: "
     Ensure liveness/reaching definitions analysis works with infinite loops.
   "
-  arguments: "--compileOnly"
+  arguments: "c"
 """
 (TypeDefs
   (Int 8)
