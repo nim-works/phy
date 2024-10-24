@@ -14,7 +14,8 @@ import
     os,
     osproc,
     strutils,
-    streams
+    streams,
+    tables
   ],
   experimental/[
     colortext,
@@ -23,6 +24,16 @@ import
   ]
 
 type
+  Placeholder = enum
+    phFile = "file"
+    phArgs = "args"
+
+  RunnerDesc = object
+    ## Describes the how the command for invoking a runner is built.
+    exe: string
+    args: seq[string]
+    defaults: Table[Placeholder, string]
+
   Content = object
     case isSexp: bool
     of true:  sexp: SexpNode
@@ -209,6 +220,8 @@ proc compare(res: tuple[output: string, code: int], spec: TestSpec): TestResult 
     # the runer crashed, or there was some unexpected error
     result = TestResult(kind: rkFailure, output: res.output)
 
+proc runTest(desc: RunnerDesc, file: string): bool
+
 var
   nimExe = findExe("nim")
   runner = ""
@@ -241,7 +254,7 @@ let currDir = getCurrentDir()
 if file.len == 0:
   # the process is the test driver
   let testDir = currDir / "tests"
-  var dirs: seq[tuple[path: string, runnerExe: string]]
+  var dirs: seq[tuple[path: string, runner: RunnerDesc]]
 
   # discover all test directories and build the associated runner
   # executables:
@@ -265,7 +278,7 @@ if file.len == 0:
           stdout.write(p.output)
           quit(1)
 
-        dirs.add (it.path, exe)
+        dirs.add (it.path, RunnerDesc(exe: exe, args: @["${args}", "${file}"]))
 
   stdout.flushFile()
 
@@ -273,19 +286,13 @@ if file.len == 0:
     total = 0
     success = 0
   # now run the tests:
-  # XXX: concurrent execution of the processes is currently not possible,
-  #      as they'd clobber each others' output
-  for (dir, exe) in dirs.items:
+  # XXX: parallel execution of tests is still missing
+  for (dir, runner) in dirs.items:
     for it in walkDir(dir, relative=false):
       if it.path.endsWith(".test"):
         inc total
-        let p =
-          startProcess(getAppFilename(),
-                       args=["--runner:" & exe, it.path.relativePath(currDir)],
-                       options={poParentStreams})
-        if p.waitForExit() == 0:
+        if runTest(runner, it.path.relativePath(currDir)):
           inc success
-        p.close()
 
   if success == total:
     echo "Success! Ran ", success, " tests"
@@ -293,11 +300,20 @@ if file.len == 0:
     echo "Failure"
     quit(1)
 else:
+  # legacy mode:
+  var desc = RunnerDesc(exe: runner)
+  if not runTest(desc, file):
+    programResult = 1
+
+proc runTest(desc: RunnerDesc, file: string): bool =
+  ## Uses the provided test runner (`desc`) to run the given test file
+  ## (`file`). If running the test was successful and its output matches the
+  ## expectations, 'true' is returned, 'false' otherwise.
   echo "[Testing] " + fgCyan, file
   let s = newFileStream(file, fmRead)
   if s.isNil:
     echo "cannot open test file"
-    quit(1)
+    return false
 
   var spec: TestSpec
 
@@ -338,12 +354,12 @@ else:
           spec.reject = parseBool(evt.value)
         else:
           echo "unknown key: ", evt.key
-          quit(1)
+          return false
       of cfgSectionStart, cfgOption:
         discard "ignore"
       of cfgError:
         echo "Parsing error: ", evt.msg
-        quit(1)
+        return false
       of cfgEof:
         break
 
@@ -351,11 +367,24 @@ else:
   else:
     s.close()
 
-  var args = spec.arguments
-  args.add file
+  # fill in the arguments and substitute the placeholders:
+  var args = newSeq[string]()
+  for it in desc.args.items:
+    case it
+    of "${file}":
+      args.add file
+    of "${args}":
+      if spec.arguments.len != 0:
+        args.add spec.arguments
+      elif phArgs in desc.defaults:
+        args.add desc.defaults[phArgs]
+      else:
+        discard "don't add anything"
+    else:
+      args.add it
 
   # execute the runner and check the output:
-  var res = compare(exec(runner, args), spec)
+  var res = compare(exec(desc.exe, args), spec)
 
   # handle the "known issue" specification:
   if spec.knownIssue.isSome:
@@ -368,9 +397,10 @@ else:
   # output the test result:
   if res.kind == rkSuccess:
     echo "[Success] " + fgGreen, file
+    result = true
   else:
     echo "[Failure] " + fgRed, file
-    programResult = 1
+    result = false
 
   case res.kind:
   of rkSuccess: discard
