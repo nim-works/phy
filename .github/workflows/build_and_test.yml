@@ -38,7 +38,7 @@ jobs:
           - name: MacOS (M1)
             runner: macos-14
           - name: MacOS
-            runner: macos-12
+            runner: macos-13
           - name: Windows
             runner: windows-2022
 
