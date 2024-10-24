@@ -220,6 +220,56 @@ proc compare(res: tuple[output: string, code: int], spec: TestSpec): TestResult 
     # the runer crashed, or there was some unexpected error
     result = TestResult(kind: rkFailure, output: res.output)
 
+proc parseDesc(line: string): Option[RunnerDesc] =
+  ## Parses a runner description from `line`.
+  var args = parseCmdLine(line)
+  if args.len == 0:
+    stderr.writeLine("no command is specified")
+    return
+
+  var
+    desc = RunnerDesc(exe: args[0])
+    used: set[Placeholder]
+
+  desc.args = args[1..^1]
+
+  # pre-process and validate the substitutions:
+  for arg in desc.args.mitems:
+    if arg.startsWith("${"):
+      if not arg.endsWith("}"):
+        stderr.writeLine("missing trailing '}'")
+        return
+
+      let
+        mid = find(arg, '=')
+        name =
+          if mid != -1: arg.substr(2, mid - 1)
+          else:         arg.substr(2, arg.len - 2)
+
+      let s =
+        try:
+          parseEnum[Placeholder](name)
+        except ValueError:
+          stderr.writeLine("unknown placeholder: " & name)
+          return
+
+      if s in used:
+        stderr.writeLine("placeholder used more than once: " & $s)
+        return
+
+      used.incl s
+
+      if mid != -1:
+        desc.defaults[s] = arg.substr(mid + 1, arg.len - 2)
+        arg = "${" & name & "}"
+
+  if phFile notin used:
+    stderr.writeLine("command must have a '${file}' somewhere")
+    return
+
+  # success!
+  result = some desc
+
 proc runTest(desc: RunnerDesc, file: string): bool
 
 var
@@ -279,6 +329,23 @@ if file.len == 0:
           quit(1)
 
         dirs.add (it.path, RunnerDesc(exe: exe, args: @["${args}", "${file}"]))
+      elif fileExists(it.path / "runner.txt"):
+        # an external runner is used for the directory
+        let cmdFile = it.path / "runner.txt"
+        stdout.write("[Parsing] ")
+        stdout.writeLine(cmdFile)
+
+        let
+          f = open(cmdFile, fmRead)
+          line = f.readLine()
+        f.close()
+
+        let desc = parseDesc(line)
+        if desc.isSome:
+          dirs.add (it.path, desc.unsafeGet)
+        else:
+          stdout.writeLine("Failure" + fgRed)
+          quit(1)
 
   stdout.flushFile()
 
