@@ -4,47 +4,34 @@
 .extends lang1
 ```
 
-There's no more unstructured `Blob` type:
-
-```grammar
-type -= (Blob <int>)
-```
-
-It's replaced with structured types:
-
 ```grammar
 field ::= (Field offset:<int> <type_id>)
 
-type += (Record size:<Int> <field>+)
-     |  (Array size:<Int> count:<int> <type_id>)
+type += (Record size:<int> align:<int> <field>+)
+     |  (Union  size:<int> align:<int> <type_id>+)
+     |  (Array  size:<int> count:<int> <type_id>)
 ```
 
-As long as fields stay within the bounds of the record, they can use any
-offset they want.
-
-Both types can only be used as the type of:
-* locals
-* array elements
-* record fields
-
-The content of locations of such types is accessed with *path expressions*:
+The `Record`, `Union`, and `Array` types are only allowed for:
+* array elements,
+* record/union fields
+* pointer dereference types
 
 ```grammar
 path ::= (At    <path_elem> elem:<value>)
       |  (Field <path_elem> field:<int>)
 
-path_elem ::= (Deref <type_id> <value>)
-           |  <local>
+path_elem ::= (Deref <type_id> <simple>)
            |  <path>
 ```
 
-Path expressions are only allowed in a restricted set of contexts:
+The content of locations of such types is accessed with *path expressions*.
 
 ```grammar
 rvalue += (Addr <path>)
-value += (Copy <path>)
-stmt += (Asgn <path> <value>)
+        | (Load <type_id> <path>)
+
+stmt += (Store <type_id> <path> <value>)
 ```
 
-Discarding an aggregate value (e.g., via `(Drop (Copy (Local 0)))`) is not
-supported at this level.
+The `Addr` operation computes the address of the location named by the path.

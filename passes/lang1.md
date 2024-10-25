@@ -4,35 +4,38 @@
 .extends lang0
 ```
 
-Blob types describe arbitrarily-sized untyped binary data:
-
 ```grammar
-type += (Blob size:<int>)
+procdef -= (ProcDef <type_id> stack:<int> (Locals <type_id>*) (List <bblock>+))
+procdef += (ProcDef <type_id> stack:<int> (List <bblock>+))
 ```
 
-The `Addr` operation only applies to locals instead of address offsets. Only
-blob locals are allowed as `Addr` operands.
-
 ```grammar
-rvalue -= (Addr (IntVal <int>))
-rvalue += (Addr <local>)
+bblock -= (Block (Params) <stmt>* <exit>)
+        | (Except <local> <stmt>* <exit>)
+bblock += (Block (Params <type_id>*) (Locals <type_id>*) <stmt>* <exit>)
+        | (Except (Params <type_id>*) (Locals <type_id>*) <stmt>* <exit>)
 ```
 
-Locals of `Blob` type cannot be anywhere except for `Addr` operands. The `Blob`
-type is also disallowed for parameters or the return type of procedures.
+Locals use the SSA form (they have one static assignment, which dominates all
+usages) and they're passed between blocks via block parameters. There are no
+critical edges.
 
-*Rationale:* keeps the pass simpler.
-
-Each continuation names the locals alive for the duration of it:
+All basic-block locals *must* be assigned to once, but they're not required to
+be used.
 
 ```grammar
-continuation -= (Continuation (Params) stack:<int> <stmt>* <exit>)
-              | (Except <local> stack:<int> <stmt>* <exit>)
-
-continuation += (Continuation (Params) (Locals <local>*) <stmt>* <exit>)
-              | (Except <local> (Locals <local>*) <stmt>* <exit>)
+local += (Param <int>)
 ```
 
-*Rationale:* the lowering pass can focus stack allocation, without having to a
-perform control-flow analysis for computing the set of alive locals for each
-continuation.
+`Param` is used to refer to basic-block parameters.
+
+```grammar
+exit -= (Loop <block_name>)
+exit += (Loop <block_name> (List <local>*))
+
+goto -= (Goto <block_name>)
+goto += (Goto <block_name> (List <local>*))
+```
+
+The locals specified as block arguments are *moved*, meaning that there must
+be no duplicates in an argument list.

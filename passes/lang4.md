@@ -4,56 +4,50 @@
 .extends lang3
 ```
 
-There are no more procedure-wide locals:
-
 ```grammar
-procdef -= (ProcDef <type_id> (Locals <type_id>*) (Continuations <continuation>+))
-procdef += (ProcDef <type_id> (Continuations <continuation>+))
+procdef -= (ProcDef <type_id> <int> (List <bblock>+))
+procdef += (ProcDef <type_id> (List <type_id>*) (List <bblock>+))
+
+loc_id ::= (Loc <int>)
 ```
 
-Instead, locals are per-continuation state. A continuation has parameters, and
-a list of new locals it spawns:
+Stack locations are listed with their type in the procedure header and are
+addressed via have static names (`Loc`).
 
 ```grammar
-continuation -= (Continuation (Params) (Locals <local>*) <stmt>* <exit>)
-              | (Except       <local>  (Locals <local>*) <stmt>* <exit>)
-continuation += (Continuation (Params <type_id>*) (Locals <type_id>*) <stmt>* <exit>)
-              | (Except       (Params <type_id>*) (Locals <type_id>*) <stmt>* <exit>)
+stmt += (StorageLive <loc_id>+)
+      | (StorageEnd <loc_id>+)
 ```
 
-A `Local` with an ID < *number of parameters* refers to a parameter --
-all others refer to a spawned local.
-
-Values are passed explicitly to continuations:
+The start and end of their static livetimes is explicit. A `StorageLive` for a
+stack location must dominate all `StorageEnd` operations for it. All stack
+locations must one static livetime.
 
 ```grammar
-cont_arg ::= (Move <local>)   # move the value
-          |  (Rename <local>) # the identity (read, address) must stay the same
+bblock -= (Block  (Params <type_id>*) (Locals <type_id>*) <stmt>* <exit>)
+        | (Except (Params <type_id>*) (Locals <type_id>*) <stmt>* <exit>)
+bblock += (Block  (Params <type_id>*) (Locals <type_id>*) (List <loc_id>*) <stmt>* <exit>)
+        | (Except (Params <type_id>*) (Locals <type_id>*) (List <loc_id>*) <stmt>* <exit>)
 ```
 
-Every jump to another `Continuation` must specify which locals are moved
-across; arity and types need to match those of the target continuation:
+For convenience of the lowering pass, and because this information is
+generally available already, every basic-block specifies which stack locations
+are live at its entry, so that no inter-block data-flow analysis is necessary.
 
 ```grammar
-exit -= (Continue <cont_name> <value>)
-      | (Loop <cont_name>)
+rvalue += (Move <path>)
+        | (Copy <path>)
+        | (Move <loc_id>)
+        | (Copy <loc_id>)
+        | (Addr <loc_id>)
 
-exit += (Continue <cont_name> <value> (List <cont_arg>*))
-      | (Loop <cont_name> (List <cont_arg>*))
+stmt += (Asgn <path> <value>)
+      | (Asgn <loc_id> <value>)
 
-goto -= (Continue <cont_name>)
-goto += (Continue <cont_name> (List <cont_arg>*))
+path_elem += <loc_id>
 ```
 
-There are no `CheckedCallAsgn`. Checked calls that return something use
-`CheckedCall`s, with the result implicitly passed to the follow-up
-continuation's first parameter. The target continuation must not be the
-procedure exit continuation.
-
-```grammar
-exit -= (CheckedCallAsgn <local> <proc> <value>* <goto> <err_goto>)
-      | (CheckedCallAsgn <local> <type_id> <value>+ <goto> <err_goto>)
-```
-
-Exits via exceptional control-flow always implicitly pass the exception to the
-first `Continuation` parameter.
+Stack locations can be used as path roots, as well as the source for copy,
+move, and address-of operations. Moving from a stack location does not affect
+the live state of the location. Taking the address of a stack location yields
+the dynamic memory address.

@@ -5,10 +5,6 @@ abstractions over control-flow, stack allocation, reinterpretation and
 conversions, and arithmetic operations, but generally stays close to VM
 bytecode.
 
-Procedures are split into continuations. They need to be ordered such
-that all continuation exits (except for `Loop`) describe forward
-jumps. One (and only one) continuation must be the "return" continuation.
-
 ```grammar
 type_id ::= (Type <int>)
 type ::= (Int size:<int>)
@@ -21,7 +17,6 @@ local ::= (Local <int>)
 proc ::= (Proc <int>)
 
 rvalue ::= (Load <type_id> <value>)
-        |  (Addr (IntVal <int>))
         |  (Neg <type_id> <value>)
         |  (Add <type_id> <value> <value>)
         |  (Sub <type_id> <value> <value>)
@@ -52,12 +47,13 @@ simple ::= <intVal>
         |  <floatVal>
         |  (ProcVal <int>)
         |  (Copy <local>)
+        |  (Move <local>)
         |  (Copy (Global <int>))
 value ::= <simple> | <rvalue>
 
-cont_name ::= <int>
+block_name ::= <int>
 
-goto ::= (Continue <cont_name>)
+goto ::= (Goto <block_name>)
 err_goto ::= (Unwind)
           |  <goto>
 
@@ -67,11 +63,11 @@ choice ::= (Choice <intVal> <goto>)
         |  (Choice <floatVal> <floatVal> <goto>)
 
 exit ::= <goto>
-      |  (Continue <cont_name> <value>)
-      |  (Loop <cont_name>)
+      |  (Return <value>?)
+      |  (Loop <block_name>)
       |  (Unreachable)
       |  (Raise <value> <err_goto>)
-      |  (SelectBool <value> false:<goto> true:<goto>)
+      |  (Branch <value> false:<goto> true:<goto>)
       |  (Select <type_id> <simple> <choice>+)
       |  (CheckedCall <proc> <value>* <goto> <err_goto>)
       |  (CheckedCall <type_id> <value>+ <goto> <err_goto>)
@@ -86,13 +82,23 @@ stmt ::= (Asgn <local> <value>)
       |  (Call <type_id> <value>+)
       |  (Drop <value>)
 
-continuation ::= (Continuation (Params) stack:<int> <stmt>* <exit>)
-              |  (Continuation (Params <type_id>?)) # return continuation
-              |  (Except <local> stack:<int> <stmt>* <exit>)
+bblock ::= (Block (Params) <stmt>* <exit>)
+        |  (Except <local> <stmt>* <exit>)
 
-procdef ::= (ProcDef <type_id> (Locals <type_id>*) (Continuations <continuation>+))
 globaldef ::= <intVal> | <floatVal>
 ```
+
+```grammar
+procdef ::= (ProcDef <type_id> stack:<int> (Locals <type_id>*) (List <bblock>+))
+```
+
+Procedures are split into basic blocks. They need to be ordered such that
+blocks come before the block they jump to (except for via `Loop` exits).
+The first block is the entry block.
+
+If `stack` is greater than 0, `stack` bytes are allocated from the stack, and
+the frame pointer is stored in the `n`-th local, where `n` is the number of
+parameters + 1 (the local must exist).
 
 ### Module
 

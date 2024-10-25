@@ -10,11 +10,12 @@ import
 
 type
   NodeKind* = enum
-    Immediate, IntVal, FloatVal, ProcVal, Proc, Type, Local, Global
+    Immediate, IntVal, FloatVal, ProcVal, Proc, Type, Local, Param, Loc, Global
 
     List
 
-    Void, Int, UInt, Float, ProcTy, Blob, Record, Array
+    Void, Int, UInt, Float, ProcTy, Union, Record, Array
+    Blob # TODO: remove
 
     Copy, Asgn, Drop, Clear
 
@@ -31,13 +32,20 @@ type
 
     Conv, Reinterp
 
-    Continue, Loop, Raise, Unreachable, Select, SelectBool
+    StorageLive, StorageEnd
+
+    Goto, Loop, Raise, Unreachable, Select, Branch
     CheckedCall, CheckedCallAsgn, Unwind, Choice
 
     Module, TypeDefs, ProcDefs, ProcDef, Locals, Continuations, Continuation,
     Except, Params, GlobalDefs, GlobalDef
 
     Break, Return, Case, If, Block, Stmts
+
+# XXX: legacy aliases. Remove them
+const
+  Continue* = Goto
+  SelectBool* = Branch
 
 template isAtom*(x: NodeKind): bool =
   ord(x) <= ord(Global)
@@ -49,7 +57,7 @@ proc fromSexp*(tree: var PackedTree[NodeKind], kind: NodeKind,
     TreeNode[NodeKind](kind: kind, val: tree.pack(n[1].num))
   of FloatVal:
     TreeNode[NodeKind](kind: FloatVal, val: tree.pack(n[1].fnum))
-  of ProcVal, Proc, Type, Local, Global:
+  of ProcVal, Proc, Type, Local, Param, Loc, Global:
     TreeNode[NodeKind](kind: kind, val: n[1].num.uint32)
   else:
     unreachable()
@@ -64,6 +72,8 @@ proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
   of Proc:      sexp([newSSymbol("Proc"), sexp n.val.int])
   of Type:      sexp([newSSymbol("Type"), sexp n.val.int])
   of Local:     sexp([newSSymbol("Local"), sexp n.val.int])
+  of Param:     sexp([newSSymbol("Param"), sexp n.val.int])
+  of Loc:       sexp([newSSymbol("Loc"), sexp n.val.int])
   of Global:    sexp([newSSymbol("Global"), sexp n.val.int])
   else:         unreachable()
 
