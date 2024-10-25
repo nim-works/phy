@@ -9,10 +9,7 @@ discard """
   (IntVal 1)
 )
 (ProcDefs
-  (ProcDef (Type 1) (Locals) (Continuations
-    (Continuation (Params) 0
-      (Continue 1 (Copy (Global 0)))
-    )
-    (Continuation (Params (Type 0)))
-  ))
-)
+  (ProcDef (Type 1) 0 (Locals)
+    (List
+      (Block (Params)
+        (Return (Copy (Global 0)))))))

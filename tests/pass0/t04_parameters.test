@@ -9,22 +9,20 @@ discard """
 )
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1)
+  (ProcDef (Type 1) 0
     (Locals
       (Type 0)
       (Type 0)
     )
-    (Continuations
-      (Continuation (Params) 0
-        (Continue 1 (Copy (Local 1)))
+    (List
+      (Block (Params)
+        (Return (Copy (Local 1)))
       )
-      (Continuation (Params (Type 0)))
     )
   )
-  (ProcDef (Type 2) (Locals) (Continuations
-    (Continuation (Params) 0
-      (Continue 1 (Call (Proc 0) (IntVal 1) (IntVal 2)))
+  (ProcDef (Type 2) 0 (Locals) (List
+    (Block (Params)
+      (Return (Call (Proc 0) (IntVal 1) (IntVal 2)))
     )
-    (Continuation (Params (Type 0)))
   ))
 )

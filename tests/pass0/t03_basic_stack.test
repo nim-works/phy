@@ -1,5 +1,5 @@
 discard """
-  output: "(Done 4100)"
+  output: "(Done 4096)"
 """
 (TypeDefs
   (Int 8)
@@ -7,12 +7,8 @@ discard """
 )
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1) (Locals)
-    (Continuations
-      (Continuation (Params) 8
-        (Continue 1 (Addr (IntVal 4)))
-      )
-      (Continuation (Params (Type 0)))
-    )
-  )
-)
+  (ProcDef (Type 1) 8
+    (Locals (Type 0))
+    (List
+      (Block (Params)
+        (Return (Copy (Local 0)))))))

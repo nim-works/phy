@@ -7,24 +7,22 @@ discard """
 )
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1) (Locals)
-    (Continuations
-      (Continuation (Params) 0
-        (Continue 1 (IntVal 100))
+  (ProcDef (Type 1) 0 (Locals)
+    (List
+      (Block (Params)
+        (Return (IntVal 100))
       )
-      (Continuation (Params (Type 0)))
     )
   )
-  (ProcDef (Type 1)
+  (ProcDef (Type 1) 0
     (Locals (Type 0))
-    (Continuations
-      (Continuation (Params) 0
-        (CheckedCallAsgn (Local 0) (Proc 0) (Continue 1) (Unwind))
+    (List
+      (Block (Params)
+        (CheckedCallAsgn (Local 0) (Proc 0) (Goto 1) (Unwind))
       )
-      (Continuation (Params) 0
-        (Continue 2 (Copy (Local 0)))
+      (Block (Params)
+        (Return (Copy (Local 0)))
       )
-      (Continuation (Params (Type 0)))
     )
   )
 )

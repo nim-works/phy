@@ -5,18 +5,20 @@ discard """
   output: "(Done (18446744073709551614 or -2))"
 """
 (TypeDefs
+  (UInt 8)
   (Int 1)
-  (ProcTy (Type 0))
+  (ProcTy (Type 1))
 )
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1) (Locals)
-    (Continuations
-      (Continuation (Params) 8
-        (Store (Type 0) (Addr (IntVal 0)) (IntVal -2))
-        (Continue 1 (Load (Type 0) (Addr (IntVal 0))))
+  (ProcDef (Type 2) 8
+    (Locals (Type 0))
+    (List
+      (Block (Params)
+        (Store (Type 1) (Copy (Local 0)) (IntVal -2))
+        (Return
+          (Load (Type 1) (Copy (Local 0))))
       )
-      (Continuation (Params (Type 0)))
     )
   )
 )

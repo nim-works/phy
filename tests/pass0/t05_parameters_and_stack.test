@@ -1,0 +1,28 @@
+discard """
+  description: "
+    Ensure that a procedure with both parameters and a stack base-pointer
+    works
+  "
+  output: "(Done 2)"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Type 0) (Type 0) (Type 0))
+  (ProcTy (Type 0)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) 8
+    (Locals (Type 0) (Type 0) (Type 0))
+    (List
+      (Block (Params)
+        (Store (Type 0)
+          (Copy (Local 2))
+          (Copy (Local 0)))
+        (Return
+          (Copy (Local 1))))))
+
+  (ProcDef (Type 2) 0 (Locals)
+    (List
+      (Block (Params)
+        (Return
+          (Call (Proc 0) (IntVal 1) (IntVal 2)))))))

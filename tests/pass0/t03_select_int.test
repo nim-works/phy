@@ -7,18 +7,17 @@ discard """
 )
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1) (Locals) (Continuations
-    (Continuation (Params) 0
+  (ProcDef (Type 1) 0 (Locals) (List
+    (Block (Params)
       (Select (Type 0) (IntVal 20)
-        (Choice (IntVal 19) (Continue 1))
-        (Choice (IntVal 20) (Continue 2)))
+        (Choice (IntVal 19) (Goto 1))
+        (Choice (IntVal 20) (Goto 2)))
     )
-    (Continuation (Params) 0
-      (Continue 3 (IntVal 1))
+    (Block (Params)
+      (Return (IntVal 1))
     )
-    (Continuation (Params) 0
-      (Continue 3 (IntVal 2))
+    (Block (Params)
+      (Return (IntVal 2))
     )
-    (Continuation (Params (Type 0)))
   ))
 )

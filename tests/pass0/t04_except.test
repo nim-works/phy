@@ -7,16 +7,15 @@ discard """
 )
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1)
+  (ProcDef (Type 1) 0
     (Locals (Type 0))
-    (Continuations
-      (Continuation (Params) 0
-        (Raise (IntVal 10) (Continue 1))
+    (List
+      (Block (Params)
+        (Raise (IntVal 10) (Goto 1))
       )
-      (Except (Local 0) 0
-        (Continue 2 (Copy (Local 0)))
+      (Except (Local 0)
+        (Return (Copy (Local 0)))
       )
-      (Continuation (Params (Type 0)))
     )
   )
 )

@@ -5,7 +5,5 @@
   StackAlloc 8
   PopLocal lo0
   GetLocal lo0
-  LdImmInt 4
-  AddInt
   Ret
 .end
