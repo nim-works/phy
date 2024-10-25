@@ -26,8 +26,6 @@ type
     # per-procedure temporary state:
     current: int
       ## index of the current continuation
-    sp: int32
-      ## the local variable storing the stack pointer
     patch: seq[tuple[cont: int, instr: int]]
     ehPatch: seq[tuple[cont: int, instr: int]]
     starts: seq[int]
@@ -224,7 +222,7 @@ proc genExpr(c; tree; val: NodeIndex) =
   of ProcVal:
     # turn into a procedure address by adding 1
     c.loadInt(tree[val].id + 1)
-  of Copy:
+  of Move, Copy:
     case tree[val, 0].kind
     of Local:
       c.loadLocal(tree[val, 0].id)
@@ -253,13 +251,6 @@ proc genExpr(c; tree; val: NodeIndex) =
       of 4: c.instr(opcLdFlt32)
       of 8: c.instr(opcLdFlt64)
       else: unreachable()
-  of Addr:
-    c.loadLocal(c.sp)
-    let offset = tree.getInt(tree.child(val, 0))
-    if offset > 0:
-      # TODO: use ``opcAddImm`` for small values
-      c.loadInt(offset)
-      c.instr(opcAddInt)
   of Neg:
     let (typ, operand) = pair(tree, val)
     c.genExpr(tree, operand)
@@ -440,7 +431,7 @@ proc genEh(c; tree; exit: NodeIndex) =
   case tree[exit].kind
   of Unwind:
     discard "attach nothing"
-  of Continue:
+  of Goto:
     # register an EH mapping:
     c.ehTable.add (c.code.high.uint32, 0'u32) # patched later
     c.ehPatch.add (tree[exit, 0].imm.int, c.ehTable.high)
@@ -450,23 +441,19 @@ proc genEh(c; tree; exit: NodeIndex) =
 proc genExit(c; tree; exit: NodeIndex) =
   ## Generates the code for a continuation exit.
   case tree[exit].kind
-  of Continue:
-    case tree.len(exit)
-    of 1:
-      c.exit(tree[exit, 0].imm)
-    of 2:
-      # continue with argument can only mean return
-      c.genExpr(tree, tree.child(exit, 1))
-      c.instr(opcRet)
-    else:
-      unreachable()
+  of Goto:
+    c.exit(tree[exit, 0].imm)
+  of Return:
+    if tree.len(exit) == 1:
+      c.genExpr(tree, tree.child(exit, 0))
+    c.instr(opcRet)
   of Loop:
     c.jump(opcJmp, tree[exit, 0].imm)
   of Raise:
     c.genExpr(tree, tree.child(exit, 0))
     c.instr(opcRaise)
     c.genEh(tree, tree.child(exit, 1))
-  of SelectBool:
+  of Branch:
     let (sel, a, b) = triplet(tree, exit)
     c.genExpr(tree, sel)
     c.jump(opcBranch, tree[a, 0].imm)
@@ -568,12 +555,12 @@ proc gen(c; tree; n: NodeIndex) =
     c.instr(opcExcept)
     # assign the passed-along value to the provided local
     c.instr(opcPopLocal, tree[n, 0].id)
-  of Continuation:
+  of Block:
     discard "no special instruction needed"
   else:
     unreachable()
 
-  for it in tree.items(n, 2, ^2):
+  for it in tree.items(n, 1, ^2):
     genStmt(c, tree, it)
 
   c.genExit(tree, tree.last(n))
@@ -581,7 +568,9 @@ proc gen(c; tree; n: NodeIndex) =
 proc translate(tree; types, def: NodeIndex): ProcResult =
   ## Translates the single procedure body `body` to VM bytecode. `types`
   ## provides the type environment.
-  let (typ, locals, conts) = tree.triplet(def)
+  let
+    (typ, stack, locals) = tree.triplet(def)
+    blocks = tree.next(locals)
 
   var c = PassCtx(types: types)
   # allocate and setup the local variables:
@@ -595,36 +584,18 @@ proc translate(tree; types, def: NodeIndex): ProcResult =
   for i in countdown(tree.len(typedef) - 1, 1):
     c.instr(opcPopLocal, int32(i - 1))
 
-  # compute the maximum amount of required stack space:
-  var maxStack = 0
-  for it in tree.items(conts):
-    if tree.len(it) > 1: # ignore the return continuation
-      maxStack = max(tree[it, 1].imm, maxStack)
-
-  # setup the stack pointer, if one is required:
-  if maxStack > 0:
-    # XXX: instead of allocating the maximum amount of stack space up-front,
-    #      the stack could also be grown/shrunken on a per-continuation base,
-    #      which would reduce stack-space requirements in case of nested
-    #      calls
-    # XXX: maybe move stack-management to a higher-level IL?
-    c.locals.add(vtInt)
-    c.sp = c.locals.high.int32
-    c.instr(opcStackAlloc, int32 maxStack)
-    c.instr(opcPopLocal, c.sp)
+  # reserve the stack space:
+  if tree[stack].imm > 0:
+    c.instr(opcStackAlloc, int32 tree[stack].imm)
+    # the frame pointer is stored in the local following the parameters:
+    c.instr(opcPopLocal, int32(tree.len(typedef) - 1))
 
   # generate the code for the continuations. They're expected to be in correct
   # order:
-  c.starts.newSeq(tree.len(conts))
-  for i, it in tree.pairs(conts):
-    if tree.len(it) > 1:
-      c.start(i)
-      c.gen(tree, it)
-    else:
-      # a continuation with only a parameter list is the "return" continuation
-      if tree.len(tree.child(it, 0)) == 0:
-        c.start(i)
-        c.instr(opcRet)
+  c.starts.newSeq(tree.len(blocks))
+  for i, it in tree.pairs(blocks):
+    c.start(i)
+    c.gen(tree, it)
 
   result = ProcResult(code: c.code, locals: c.locals, ehTable: c.ehTable,
                       constants: c.constants)
