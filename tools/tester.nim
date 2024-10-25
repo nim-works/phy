@@ -270,6 +270,10 @@ proc parseDesc(line: string): Option[RunnerDesc] =
   # success!
   result = some desc
 
+proc initDesc(exe: sink string): RunnerDesc =
+  ## Constructs a default runner description.
+  RunnerDesc(exe: exe, args: @["${args}", "${file}"])
+
 proc runTest(desc: RunnerDesc, file: string): bool
 
 var
@@ -328,7 +332,7 @@ if file.len == 0:
           stdout.write(p.output)
           quit(1)
 
-        dirs.add (it.path, RunnerDesc(exe: exe, args: @["${args}", "${file}"]))
+        dirs.add (it.path, initDesc(exe))
       elif fileExists(it.path / "runner.txt"):
         # an external runner is used for the directory
         let cmdFile = it.path / "runner.txt"
@@ -368,8 +372,7 @@ if file.len == 0:
     quit(1)
 else:
   # legacy mode:
-  var desc = RunnerDesc(exe: runner)
-  if not runTest(desc, file):
+  if not runTest(initDesc(runner), file):
     programResult = 1
 
 proc runTest(desc: RunnerDesc, file: string): bool =
