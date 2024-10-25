@@ -1,5 +1,6 @@
 discard """
-  output: "(Error)" # load from 0 address triggers an access violation
+  output: "(Error ecIllegalAccess)"
+  # load from 0 address triggers an access violation
 """
 (TypeDefs
   (Int 4)

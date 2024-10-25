@@ -1,5 +1,5 @@
 discard """
-  arguments: "--compileOnly"
+  arguments: "c"
 """
 (TypeDefs
   (ProcTy (Void)))

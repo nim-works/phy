@@ -1,0 +1,1 @@
+bin/phy --source:L0 --show:vm --runner ${args=e} ${file}
