@@ -1,4 +1,4 @@
-## Lowers |L10| into the |L4| language. The pass needs to split the statements
+## Lowers |L30| into the |L4| language. The pass needs to split the statements
 ## into basic-blocks (i.e., `Continuation`s). A basic-block is a sequence of
 ## statements with purely linear control-flow (i.e., no jumps, but non-raising
 ## calls are allowed).
