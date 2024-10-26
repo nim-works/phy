@@ -20,7 +20,7 @@ import
     lang1_checks,
     lang3_checks,
     lang4_checks,
-    lang10_checks,
+    lang30_checks,
     source_checks
   ],
   passes/[
@@ -31,7 +31,7 @@ import
     pass1,
     pass3,
     pass4,
-    pass10,
+    pass30,
     trees
   ],
   phy/[
@@ -57,7 +57,7 @@ type
     lang1 = "L1"
     lang3 = "L3"
     lang4 = "L4"
-    lang10 = "L10"
+    lang30 = "L30"
     langSource = "source"
 
   Command = enum
@@ -113,7 +113,7 @@ proc syntaxCheck(code: PackedTree[spec.NodeKind], lang: Language) =
   of lang1:  syntaxCheck(code, lang1_checks, module)
   of lang3:  syntaxCheck(code, lang3_checks, module)
   of lang4:  syntaxCheck(code, lang4_checks, module)
-  of lang10: syntaxCheck(code, lang10_checks, module)
+  of lang30: syntaxCheck(code, lang30_checks, module)
   else:      unreachable()
 
 template genericPrint(lang: Language, body: untyped) =
@@ -206,9 +206,9 @@ proc compile(tree: var PackedTree[spec.NodeKind], source, target: Language) =
       syntaxCheck(tree, lang4_checks, module)
       tree = tree.apply(pass4.lower(tree))
       current = lang3
-    of lang10:
-      syntaxCheck(tree, lang10_checks, module)
-      tree = tree.apply(pass10.lower(tree))
+    of lang30:
+      syntaxCheck(tree, lang30_checks, module)
+      tree = tree.apply(pass30.lower(tree))
       current = lang4
 
     print(tree, current)
@@ -300,7 +300,7 @@ proc main(args: openArray[string]) =
     if source == langSource:
       # translate to the highest-level IL first
       (code, typ) = sourceToIL(text)
-      newSource = lang10
+      newSource = lang30
       print(code, newSource)
     elif gRunner:
       # in order to reduce visual noise in tests, the ``(Module ...)`` top
