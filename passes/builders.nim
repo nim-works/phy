@@ -8,18 +8,6 @@ type
     buf: seq[TreeNode[T]]
     parent {.requiresInit.}: int
       ## the index of the current subtree node to which to add new nodes to
-    numPlaceholders: int
-      ## number of active placeholders nodes
-
-  Placeholder* = object
-    ## Represents a placeholder node created earlier with a
-    ## `Builder <#Builder>`_. It's not possible to duplicate a placeholder.
-
-    # an object is used instead of a distinct type in order to hide the
-    # implementation from external code
-    pos {.requiresInit.}: int
-
-proc `=copy`*(a: var Placeholder, b: Placeholder) {.error.}
 
 func initBuilder*[T](buf: sink seq[TreeNode[T]]): Builder[T] =
   ## Sets up a builder with an initial buffer (`buf`).
@@ -72,23 +60,6 @@ func copyFrom*[T](bu: var Builder[T], tree: PackedTree[T], n: NodeIndex) =
   for it in tree.flat(n):
     bu.buf.add tree[it]
 
-proc placeholder*[T](bu: var Builder[T]): Placeholder =
-  ## Inserts a placeholder node into the current tree. Using the returned
-  ## `Placeholder <#Placeholder>_` value, the placeholder node must later be
-  ## replaced with the correct node.
-  inc bu.numPlaceholders
-  if bu.parent != -1:
-    inc bu.buf[bu.parent].val
-  bu.buf.add TreeNode[T]() # add a placeholder node
-  Placeholder(pos: bu.buf.high)
-
-proc replace*[T](bu: var Builder[T], p: sink Placeholder, n: TreeNode[T]) =
-  ## Replaces the placeholder created earlier with `n`.
-  assert bu.numPlaceholders > 0
-  dec bu.numPlaceholders
-  bu.buf[p.pos] = n
-
 func finish*[T](bu: sink Builder[T]): seq[TreeNode[T]] =
   ## Finishes building the tree and returns the node buffer.
-  assert bu.numPlaceholders == 0, "not all placeholders were replaced"
   result = bu.buf
