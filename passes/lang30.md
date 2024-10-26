@@ -1,7 +1,7 @@
 ## L30 Language
 
 ```grammar
-.extends lang7
+.extends lang25
 ```
 
 Instead of one flat list of statements, statements in a procedure can now be

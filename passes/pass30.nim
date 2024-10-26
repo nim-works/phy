@@ -1,5 +1,5 @@
-## Lowers |L30| into the |L7| language. The pass flattens the input statements
-## by replacing the |L30| control-flow constructs with the goto-esque |L7|
+## Lowers |L30| into the |L25| language. The pass flattens the input statements
+## by replacing the |L30| control-flow constructs with the goto-esque |L25|
 ## control-flow statements.
 
 import

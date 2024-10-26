@@ -1,1 +1,0 @@
-bin/phy --source:L7 --show:L4 --runner ${args=e} ${file}
