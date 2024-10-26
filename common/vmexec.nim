@@ -12,6 +12,8 @@ import
     utils
   ]
 
+import vm/vmtypes except tkVoid, tkInt, tkFloat
+
 proc readInt(p: HostPointer, size: range[1..8]): int64 =
   copyMem(addr result, p, size)
 
@@ -138,3 +140,42 @@ proc run*(env: var VmEnv, prc: ProcIndex, typ: SemType): string =
     result = "unhandled exception: " & $res.exc.intVal
   of yrkStubCalled, yrkUser:
     unreachable() # shouldn't happen
+
+proc run*(env: var VmEnv, prc: ProcIndex): string =
+  ## Runs the nullary procedure with index `prc` and returns the VM's result
+  ## formatted as an S-expression.
+  var thread = vm.initThread(env, prc, 1024, @[])
+
+  let res = run(env, thread, nil)
+  env.dispose(thread)
+
+  # render the result:
+  result = "(" & substr($res.kind, 3)
+  case res.kind
+  of yrkDone:
+    case env.types[res.typ].kind
+    of vmtypes.TypeKind.tkVoid, tkProc, tkForeign:
+      discard
+    of vmtypes.TypeKind.tkInt:
+      result.add " "
+      if res.result.uintVal <= high(int64).uint64:
+        # the signed and unsigned interpretation yield the same value
+        result.addInt res.result.uintVal
+      else:
+        # output both interpretations
+        result.add "(" & $res.result.uintVal & " or " & $res.result.intVal & ")"
+    of vmtypes.TypeKind.tkFloat:
+      result.add " " & $res.result.floatVal
+  of yrkError:
+    result.add " "
+    result.add $res.error
+  of yrkStubCalled:
+    result.add " "
+    result.addInt res.stub.int
+  of yrkUnhandledException:
+    result.add " "
+    result.add $res.exc.uintVal
+  of yrkUser:
+    unreachable() # shouldn't happen
+
+  result.add ")"

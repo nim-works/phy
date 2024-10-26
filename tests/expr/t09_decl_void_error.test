@@ -1,0 +1,7 @@
+discard """
+  description: "A local cannot be of type void"
+  reject: true
+"""
+(Exprs
+  (Decl (Ident "x") (Unreachable))
+  (Ident "x"))

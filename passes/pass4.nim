@@ -18,7 +18,7 @@
 ##
 ## **How we get there:**
 ## 1. assign virtual registers to nodes, using a simple, linear time graph
-##    coloring scheme
+##    coloring scheme. Conflicts for constrained edges are resolved separately
 ## 2. all virtual registers only have a single live range
 ## 3. use a live-range based allocation scheme for mapping virtual to physical
 ##    registers
@@ -37,7 +37,7 @@
 #      time efficient
 
 import
-  std/[intsets, tables],
+  std/[algorithm, intsets, tables],
   passes/[builders, changesets, trees, spec]
 
 type
@@ -104,6 +104,12 @@ using
   changes: var ChangeSet[NodeKind]
 
 proc `==`(a, b: TypeId): bool {.borrow.}
+
+func ascendingPair[T](a, b: T): (T, T) {.inline.} =
+  ## Constructs a tuple from `a` and `b` where the first element is always the
+  ## smaller one.
+  if a < b: (a, b)
+  else:     (b, a)
 
 func id(n: Node): uint32 {.inline.} =
   assert n.kind == Local, $n.kind
@@ -187,15 +193,20 @@ proc buildGraph(tree; n): Graph =
 proc colorGraph(gr: var Graph) =
   ## Assigns a color to every node in the graph. The goal is to use as few
   ## colors as possible (in the least amount of time).
+  type Color = uint32 # for readability
+
   var
     next    = 1'u32
-    markers = newSeq[PackedSet[uint32]](gr.conts.len)
+    markers = newSeq[PackedSet[Color]](gr.conts.len)
       ## for each node group (i.e., continuation) the already seen colors.
       ## Used to prevent invalid color propagation
 
-  # iterate over all edges in pre-order and propagate colors forward. A color
+  # iterate over all edges in preorder and propagate colors forward. A color
   # can only be propagated along an edge if no other node in the target node's
-  # group has said color yet
+  # group has said color yet. Conflicts on ``Rename`` edges are recorded and
+  # then resolved separately
+  var conflicts: seq[tuple[a, b: Color]]
+
   for i, c in gr.conts.pairs:
     for g in gr.groups.toOpenArray(c.groups.a, c.groups.b).items:
       for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
@@ -213,11 +224,15 @@ proc colorGraph(gr: var Graph) =
             doAssert not e.noCopy, "cannot satisfy constraints"
           else:
             gr.nodes[e.dst].color = color
+        elif e.noCopy and gr.nodes[e.dst].color != color:
+          # problem: the source and destination should have the same color,
+          # they but don't. Register an ordered conflict pair
+          conflicts.add ascendingPair(color, gr.nodes[e.dst].color)
 
         # don't propagate colors between pinned and not-pinned nodes, so
         # that the color used in a pinned subgraph isn't used anywhere else.
-        # Propagating colors to eagerly can lead to necessary backward
-        # propagation failing where it otherwise wouldn't
+        # Propagating colors to eagerly can lead to conflict resolution failing
+        # where it otherwise wouldn't
 
   # nodes without any outgoing edges might not have a color yet. Give them one
   # too:
@@ -226,21 +241,48 @@ proc colorGraph(gr: var Graph) =
       n.color = next
       inc next
 
+  if conflicts.len > 0:
+    # conflict resolution is needed. First, sort the conflict pairs in
+    # ascending order
+    sort(conflicts, proc (a, b: auto): int = a.a.int - b.a.int)
+    var map: Table[Color, Color]
+
+    # all colors part of a pair must share the same color. Thanks to the
+    # list being sorted by the pairs' first element, only a single iteration
+    # is needed
+    for it in conflicts.items:
+      let
+        a = addr map.mgetOrPut(it.a, it.a)
+        # note: `next` is a known impossible value here. Also, we cannot use
+        # ``mgetOrPut`` for the second color, as that would invalidate `a`
+        b = map.getOrDefault(it.b, next)
+        m = min(a[], b)
+      if m < a[]:
+        a[] = m
+      if m < b:
+        map[it.b] = m
+
+    # now do the actual recoloring:
+    for i, c in gr.conts.pairs:
+      for n in gr.nodes.toOpenArray(c.nodes.a, c.nodes.b).mitems:
+        if n.keep and n.color in map:
+          let newColor = map[n.color]
+          if n.color == newColor and not containsOrIncl(markers[i], newColor):
+            # TODO: replace the assertion with proper error reporting
+            doAssert false, "cannot satisfy constraints"
+          n.color = newColor
+
   # now do a backward propagation pass (reverse pre-order):
   for i in countdown(gr.conts.high, 0):
     let c = addr gr.conts[i]
     for g in gr.groups.toOpenArray(c.groups.a, c.groups.b):
       for e in gr.edges.toOpenArray(g.edges.a, g.edges.b).items:
         let color = gr.nodes[e.dst].color
-        if e.noCopy:
-          # the color *must* be propagated backwards (otherwise it's an error)
-          if color != gr.nodes[e.src].color:
-            doAssert not containsOrIncl(markers[i], color),
-                     "cannot satisfy constraints"
-            gr.nodes[e.src].color = color
-
-        elif color < gr.nodes[e.src].color and not gr.nodes[e.src].keep and
-             not markers[i].containsOrIncl(color):
+        # ignore ``Rename`` edges; the conflict resolution above alrady made
+        # sure the connected nodes are colored correctly
+        if not e.noCopy and color < gr.nodes[e.src].color and 
+           not gr.nodes[e.src].keep and
+           not markers[i].containsOrIncl(color):
           # only propagate colors that were introduced *earlier*. This prevents
           # undoing the progress of the forward propagation pass
           gr.nodes[e.src].color = color

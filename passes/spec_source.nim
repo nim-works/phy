@@ -17,16 +17,18 @@ type
     TupleCons
     FieldAccess
     Exprs
+    Asgn
     Return
     Unreachable
     Params
     ProcDecl
+    Decl
     TypeDecl
     Module
 
 const
   ExprNodes* = {IntVal, FloatVal, Ident, If, Call, TupleCons, FieldAccess,
-                Return, Unreachable, Exprs}
+                Asgn, Return, Unreachable, Exprs, Decl}
   DeclNodes* = {ProcDecl, TypeDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 
@@ -54,5 +56,5 @@ proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
   of Ident:     sexp([newSSymbol("Ident"), sexp tree.getString(idx)])
   else:         unreachable()
 
-proc fromSexp*(i: BiggestInt): TreeNode[NodeKind] =
+proc fromSexp*(i: BiggestInt, _: typedesc[NodeKind]): TreeNode[NodeKind] =
   TreeNode[NodeKind](kind: Immediate, val: i.uint32)

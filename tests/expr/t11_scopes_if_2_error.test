@@ -1,0 +1,12 @@
+discard """
+  description: "
+    Entities declared within an `If` branch are not visible outside it
+  "
+  reject: true
+"""
+(Exprs
+  (If (Ident "true")
+    (Exprs
+      (Decl (Ident "x") (IntVal 100))
+      (TupleCons)))
+  (Ident "x"))

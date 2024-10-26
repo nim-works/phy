@@ -290,12 +290,14 @@ proc genExpr(c; tree; val: NodeIndex) =
     c.instr(opcBitNot)
     c.mask(typ) # discard the unused higher bits
   of BitAnd:
-    c.genExpr(tree, tree.child(val, 0))
-    c.genExpr(tree, tree.child(val, 1))
+    let (_, a, b) = tree.triplet(val)
+    c.genExpr(tree, a)
+    c.genExpr(tree, b)
     c.instr(opcBitAnd)
   of BitOr:
-    c.genExpr(tree, tree.child(val, 0))
-    c.genExpr(tree, tree.child(val, 1))
+    let (_, a, b) = tree.triplet(val)
+    c.genExpr(tree, a)
+    c.genExpr(tree, b)
     c.instr(opcBitOr)
   of BitXor:
     c.genBinaryArithOp(tree, val, opcBitXor, opcBitXor, opcNop)
