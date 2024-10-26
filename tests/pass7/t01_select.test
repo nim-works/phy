@@ -1,0 +1,24 @@
+discard """
+  description: "Make sure basic `Select` translation works"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) (Locals)
+    (Stmts
+      (Select (Type 0) (IntVal 1)
+        (Choice (IntVal 1)
+          (Continue 0))
+        (Choice (IntVal 2)
+          (Continue 1))
+        (Choice (IntVal 3)
+          (Continue 2)))
+      (Join 0)
+      (Drop (IntVal 100))
+      (Join 1)
+      (Drop (IntVal 200))
+      (Join 2)
+      (Drop (IntVal 300))
+      (Return))))

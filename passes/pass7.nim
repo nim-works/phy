@@ -326,13 +326,15 @@ proc genBlock(c; tree; bb: BBlock, bu) =
         c.genContinue(locals, bb, 0, bu)
         c.genContinue(locals, bb, 1, bu)
     of Select:
+      var edge = 0
       bu.subTree Select:
         bu.copyFrom(tree, tree.child(n, 0))
         copyAndPatch(tree, tree.child(n, 1), locals, bu)
         for it in tree.items(n, 2):
           bu.subTree Choice:
             bu.copyFrom(tree, tree.child(it, 0))
-            c.genContinue(locals, bb, 0, bu)
+            c.genContinue(locals, bb, edge, bu)
+          inc edge
     of Asgn:
       bu.subTree Continue:
         bu.add Node(kind: Immediate, val: bb.outgoing[0].uint32)
