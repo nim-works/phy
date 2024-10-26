@@ -169,6 +169,7 @@ proc scanStmt(c; tree; n) =
     c.close(n)
     c.returns.add c.bblocks.high # needs to be patched later
   of Raise:
+    scanUsages(tree, tree.child(n, 0), c.current)
     c.current.addExcEdge(tree, tree.child(n, 1))
     # a raise exit also passes along a value
     c.close(n, termPass)
