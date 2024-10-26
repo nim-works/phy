@@ -20,6 +20,7 @@ import
     lang1_checks,
     lang3_checks,
     lang4_checks,
+    lang7_checks,
     lang30_checks,
     source_checks
   ],
@@ -31,6 +32,7 @@ import
     pass1,
     pass3,
     pass4,
+    pass7,
     pass30,
     trees
   ],
@@ -57,6 +59,7 @@ type
     lang1 = "L1"
     lang3 = "L3"
     lang4 = "L4"
+    lang7 = "L7"
     lang30 = "L30"
     langSource = "source"
 
@@ -113,6 +116,7 @@ proc syntaxCheck(code: PackedTree[spec.NodeKind], lang: Language) =
   of lang1:  syntaxCheck(code, lang1_checks, module)
   of lang3:  syntaxCheck(code, lang3_checks, module)
   of lang4:  syntaxCheck(code, lang4_checks, module)
+  of lang7:  syntaxCheck(code, lang7_checks, module)
   of lang30: syntaxCheck(code, lang30_checks, module)
   else:      unreachable()
 
@@ -206,10 +210,14 @@ proc compile(tree: var PackedTree[spec.NodeKind], source, target: Language) =
       syntaxCheck(tree, lang4_checks, module)
       tree = tree.apply(pass4.lower(tree))
       current = lang3
+    of lang7:
+      syntaxCheck(tree, lang7_checks, module)
+      tree = tree.apply(pass7.lower(tree))
+      current = lang4
     of lang30:
       syntaxCheck(tree, lang30_checks, module)
       tree = tree.apply(pass30.lower(tree))
-      current = lang4
+      current = lang7
 
     print(tree, current)
 
