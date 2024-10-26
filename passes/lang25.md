@@ -4,7 +4,8 @@
 .extends lang4
 ```
 
-Procedures are no subdivided into continuations, but instead consist of a list of statements:
+Procedures are no subdivided into continuations, but instead consist of a list
+of statements:
 
 ```grammar
 procdef -= (ProcDef <type_id> (Continuations <continuation>+))
