@@ -1,0 +1,15 @@
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) (Locals)
+    (Stmts
+      (Return)))
+  (ProcDef (Type 1)
+    (Locals (Type 0))
+    (Stmts
+      (CheckedCall (Proc 0) (Continue 0))
+      (Return)
+      (Except 0 (Local 0))
+      (Return))))
