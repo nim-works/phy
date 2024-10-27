@@ -1,0 +1,22 @@
+discard """
+  description: "Different types require different registers"
+"""
+(TypeDefs
+  (Int 8)
+  (Float 8)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 2) 0
+    (List
+      (Block (Params)
+        (Locals (Type 0) (Type 1))
+        (Asgn (Local 0) (IntVal 100))
+        (Drop (Move (Local 0)))
+        (Asgn (Local 1) (FloatVal 1.0))
+        (Return)
+      )
+    )
+  )
+)

@@ -1,5 +1,5 @@
 discard """
-  description: "Test a single block with more one local live at the same time"
+  description: "Test a single continuation with more than one blob local"
 """
 (TypeDefs
   (Int 8)
@@ -12,7 +12,7 @@ discard """
       (Block (Params)
         (Locals (Type 0) (Type 0))
         (Asgn (Local 0) (IntVal 100))
-        (Asgn (Local 1) (IntVal 200))
+        (Asgn (Local 1) (Move (Local 0)))
         (Return)
       )
     )

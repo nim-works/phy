@@ -5,9 +5,10 @@
 (GlobalDefs)
 (ProcDefs
   (ProcDef (Type 1) 0
-    (Locals (Type 0) (Type 0))
+    (Locals (Type 0))
     (List
       (Block (Params)
         (Asgn (Local 0) (IntVal 100))
-        (Asgn (Local 1) (IntVal 200))
+        (Asgn (Local 0)
+          (Move (Local 0)))
         (Return)))))

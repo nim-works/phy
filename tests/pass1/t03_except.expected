@@ -9,5 +9,11 @@
     (List
       (Block (Params)
         (Asgn (Local 0) (IntVal 100))
-        (Asgn (Local 1) (IntVal 200))
+        (Raise (IntVal 200)
+          (Goto 1)))
+      (Except (Local 1)
+        (Drop
+          (Move (Local 1)))
+        (Drop
+          (Move (Local 0)))
         (Return)))))

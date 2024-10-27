@@ -1,0 +1,27 @@
+discard """
+  description: "Make sure the 'swap problem' is resolved properly"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Type 0))
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) 0
+    (List
+      (Block (Params) (Locals)
+        (Return (IntVal 100)))))
+
+  (ProcDef (Type 2) 0
+    (List
+      (Block (Params)
+        (Locals (Type 0))
+        (CheckedCallAsgn (Local 0) (Proc 0)
+          (Goto 1
+            (List (Local 0)))
+          (Unwind)))
+
+      (Block (Params (Type 0))
+        (Locals)
+        (Return)))))

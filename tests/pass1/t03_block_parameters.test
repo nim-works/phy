@@ -1,0 +1,20 @@
+discard """
+  description: "Make sure a non-entry basic block with parameters works"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) 0
+    (List
+      (Block (Params)
+        (Locals (Type 0))
+        (Asgn (Local 0) (IntVal 100))
+        (Goto 1
+          (List (Local 0))))
+      (Block (Params (Type 0))
+        (Locals)
+        (Drop
+          (Move (Param 0)))
+        (Return)))))

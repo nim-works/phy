@@ -1,0 +1,33 @@
+discard """
+  description: "
+    Make sure register allocation takes the evaluation in checked calls into
+    account
+  "
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Type 0) (Type 0))
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) 0
+    (List
+      (Block (Params (Type 0))
+        (Locals)
+        (Return (IntVal 100)))))
+
+  (ProcDef (Type 2) 0
+    (List
+      (Block (Params)
+        (Locals (Type 0) (Type 0))
+        (Asgn (Local 0) (IntVal 100))
+        (CheckedCallAsgn (Local 1) (Proc 0)
+          (Move (Local 0))
+          (Goto 1
+            (List (Local 0)))
+          (Unwind)))
+
+      (Block (Params (Type 0))
+        (Locals)
+        (Return)))))

@@ -1,0 +1,18 @@
+discard """
+  description: "Test a procedure with parameters"
+  arguments: "c"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void) (Type 0) (Type 0)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) 0
+    (List
+      (Block (Params (Type 0) (Type 0))
+        (Locals)
+        (Drop
+          (Move (Param 0)))
+        (Drop
+          (Move (Param 1)))
+        (Return)))))

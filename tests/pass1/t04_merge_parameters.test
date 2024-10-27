@@ -1,0 +1,32 @@
+discard """
+  description: "Test with split control-flow paths"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) 0
+    (List
+      (Block (Params) (Locals)
+        (Branch (IntVal 1)
+          (Goto 1 (List))
+          (Goto 2 (List))))
+
+      (Block (Params)
+        (Locals (Type 0))
+        (Asgn (Local 0) (IntVal 100))
+        (Goto 3
+          (List (Local 0))))
+      (Block (Params)
+        (Locals (Type 0))
+        (Asgn (Local 0) (IntVal 200))
+        (Goto 3
+          (List (Local 0))))
+
+      (Block (Params (Type 0))
+        (Locals)
+        (Drop
+          (Move (Param 0)))
+        (Return)))))

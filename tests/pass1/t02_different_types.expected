@@ -1,13 +1,16 @@
 ;$sexp
 (TypeDefs
   (Int 8)
+  (Float 8)
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1) 0
-    (Locals (Type 0) (Type 0))
+  (ProcDef (Type 2) 0
+    (Locals (Type 0) (Type 1))
     (List
       (Block (Params)
         (Asgn (Local 0) (IntVal 100))
-        (Asgn (Local 1) (IntVal 200))
+        (Drop
+          (Move (Local 0)))
+        (Asgn (Local 1) (FloatVal 1.0))
         (Return)))))
