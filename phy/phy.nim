@@ -194,8 +194,7 @@ proc compile(tree: var PackedTree[spec.NodeKind], source, target: Language) =
       assert false, "cannot be handled here: " & $current
     of lang1:
       syntaxCheck(tree, lang1_checks, module)
-      # TODO: don't hardcode the pointer size
-      tree = tree.apply(pass1.lower(tree, 8))
+      tree = tree.apply(pass1.lower(tree))
       current = lang0
     of lang3:
       syntaxCheck(tree, lang3_checks, module)
