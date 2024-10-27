@@ -1,0 +1,4 @@
+discard """
+  reject: true
+"""
+(If (IntVal 1) (IntVal 1) (IntVal -1))

@@ -1,0 +1,6 @@
+discard """
+  description: "error if a non-trailing expression is not `unit` or `void`"
+  reject: "true"
+"""
+
+(Exprs (IntVal 10) (FloatVal 1.0))

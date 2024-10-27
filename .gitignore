@@ -9,6 +9,7 @@
 # build artifact directories
 /build/
 /bin/
+/generated/
 
 # user-specific VSCode directories
 *.code-workspace

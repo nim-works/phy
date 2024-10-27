@@ -12,11 +12,15 @@ type
   NodeKind* = enum
     Immediate, IntVal, FloatVal, ProcVal, Proc, Type, Local, Global
 
-    Void, Int, UInt, Float, ProcTy, Blob
+    List
+
+    Void, Int, UInt, Float, ProcTy, Blob, Record, Array
 
     Copy, Asgn, Drop, Clear
 
     Load, Store, Addr, Call
+    Deref, Field, At
+    Move, Rename
 
     Neg, Add, Sub, Mul, Div, Mod
     AddChck, SubChck
@@ -27,11 +31,13 @@ type
 
     Conv, Reinterp
 
-    Continue, Loop, Enter, Leave, Raise, Unreachable, Select, SelectBool
-    CheckedCall, CheckedCallAsgn, Unwind, Choice, List
+    Continue, Loop, Raise, Unreachable, Select, SelectBool
+    CheckedCall, CheckedCallAsgn, Unwind, Choice
 
     Module, TypeDefs, ProcDefs, ProcDef, Locals, Continuations, Continuation,
-    Subroutine, Except, Params, GlobalDefs, GlobalDef
+    Except, Params, GlobalDefs, GlobalDef
+
+    Break, Return, Case, If, Block, Stmts
 
 template isAtom*(x: NodeKind): bool =
   ord(x) <= ord(Global)
@@ -48,11 +54,12 @@ proc fromSexp*(tree: var PackedTree[NodeKind], kind: NodeKind,
   else:
     unreachable()
 
-proc toSexp*(n: TreeNode[NodeKind]): SexpNode =
+proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
+             n: TreeNode[NodeKind]): SexpNode =
   case n.kind
   of Immediate: sexp(n.val.int)
-  of IntVal:    sexp([newSSymbol("IntVal"), sexp n.val.int])
-  of FloatVal:  sexp([newSSymbol("FloatVal"), sexp n.val.int])
+  of IntVal:    sexp([newSSymbol("IntVal"), sexp tree.getInt(idx)])
+  of FloatVal:  sexp([newSSymbol("FloatVal"), sexp tree.getFloat(idx)])
   of ProcVal:   sexp([newSSymbol("ProcVal"), sexp n.val.int])
   of Proc:      sexp([newSSymbol("Proc"), sexp n.val.int])
   of Type:      sexp([newSSymbol("Type"), sexp n.val.int])
@@ -60,5 +67,5 @@ proc toSexp*(n: TreeNode[NodeKind]): SexpNode =
   of Global:    sexp([newSSymbol("Global"), sexp n.val.int])
   else:         unreachable()
 
-proc fromSexp*(i: BiggestInt): TreeNode[NodeKind] =
+proc fromSexp*(i: BiggestInt, _: typedesc[NodeKind]): TreeNode[NodeKind] =
   TreeNode[NodeKind](kind: Immediate, val: i.uint32)

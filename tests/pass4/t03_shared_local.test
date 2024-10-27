@@ -1,0 +1,24 @@
+discard """
+  description: "
+    Local variables that are not moved from may share their register with
+    local variables from other continuations.
+  "
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) (Continuations
+    (Continuation (Params)
+      (Locals (Type 0) (Type 0))
+      (Continue 1 (List (Move (Local 0))))
+    )
+    (Continuation (Params (Type 0))
+      (Locals (Type 0))
+      (Continue 2 (List))
+    )
+    (Continuation (Params)))
+  )
+)

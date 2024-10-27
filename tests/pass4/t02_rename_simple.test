@@ -1,0 +1,20 @@
+discard """
+  description: "Rename prohibits copies being performed, unlike Move"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) (Continuations
+    (Continuation (Params)
+      (Locals (Type 0))
+      (Continue 1 (List (Rename (Local 0))))
+    )
+    (Continuation (Params (Type 0)) (Locals)
+      (Continue 2 (List))
+    )
+    (Continuation (Params)))
+  )
+)

@@ -1,0 +1,19 @@
+discard """
+  description: "
+    A local that has its address taken is passed to everywhere a pointer might
+    be read/written through. No alias analysis is performed.
+  "
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Locals (Type 0))
+    (Stmts
+      (Asgn (Local 0) (IntVal 0))
+      (Drop (Addr (Local 0)))
+      (If (IntVal 0) (Drop (IntVal 200)))
+      (Store (Type 0) (IntVal 0) (IntVal 0))
+      (Return))))

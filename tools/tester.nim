@@ -14,13 +14,31 @@ import
     os,
     osproc,
     strutils,
-    streams
+    streams,
+    tables
   ],
   experimental/[
-    colortext
+    colortext,
+    sexp,
+    sexp_parse
   ]
 
 type
+  Placeholder = enum
+    phFile = "file"
+    phArgs = "args"
+
+  RunnerDesc = object
+    ## Describes the how the command for invoking a runner is built.
+    exe: string
+    args: seq[string]
+    defaults: Table[Placeholder, string]
+
+  Content = object
+    case isSexp: bool
+    of true:  sexp: SexpNode
+    of false: text: string
+
   OutputSpec = object
     fromFile: bool
       ## whether the expected output is provided by a file
@@ -32,26 +50,41 @@ type
     ## expect from it.
     arguments: seq[string]
       ## extra arguments to pass to the runner
+    reject: bool
+      ## whether the test runner is expected to report a non-crash failure
     expected: seq[OutputSpec]
       ## the output(s) expected from the runner (if any)
     knownIssue: Option[string]
       ## whether the test is currently expected to fail due to a known issue
 
   ResultKind = enum
-    rkSuccess
-    rkError
+    rkSuccess    ## all good
+    rkError      ## the test is valid and failed (but shouldn't)
+    rkNoError    ## the test is valid and succeeded (but shouldn't)
+    rkFailure    ## the test is invalid or the runner failed
+                 ## unexpectedly (e.g., due to a crash)
     rkMismatch
     rkUnexpectedSuccess
 
   TestResult = object
     ## The result of a single test run.
     case kind: ResultKind
-    of rkSuccess, rkUnexpectedSuccess:
+    of rkSuccess, rkNoError, rkUnexpectedSuccess:
       discard
-    of rkError:
+    of rkError, rkFailure:
       output: string
     of rkMismatch:
       got, expected: string
+
+proc `$`(x: sink Content): string =
+  case x.isSexp
+  of true:  $x.sexp
+  of false: x.text
+
+proc `==`(a, b: Content): bool =
+  case a.isSexp
+  of true:  a.sexp == b.sexp
+  of false: a.text == b.text
 
 proc exec(cmd: string, args: openArray[string]): tuple[output: string,
                                                        code: int] =
@@ -74,24 +107,104 @@ proc exec(cmd: string, args: openArray[string]): tuple[output: string,
   result.code = p.peekExitCode()
   p.close()
 
-proc content(s: OutputSpec): string =
-  ## Returns the string to compare the actual runner output against.
+proc parseSexp(p: var SexpParser): SexpNode =
+  ## Parses an S-expression node from the input stream.
+  template next() =
+    discard p.getTok() # fetch the next token
+
+  p.space()
+  case p.currToken
+  of tkString:
+    result = sexp(captureCurrString(p))
+    next()
+  of tkInt:
+    result = sexp(parseBiggestInt(p.currString))
+    next()
+  of tkFloat:
+    result = sexp(parseFloat(p.currString))
+    next()
+  of tkSymbol:
+    result = newSSymbol(p.currString)
+    next()
+  of tkParensLe:
+    result = newSList()
+    next()
+    p.space()
+
+    while p.currToken != tkParensRi:
+      result.add parseSexp(p)
+      p.space()
+
+    next() # skip the closing parenthesis
+  of tkError:
+    raiseParseErr(p, $p.error)
+  of tkSpace, tkDot, tkNil, tkKeyword, tkParensRi, tkEof:
+    raiseParseErr(p, "unexpected token: " & $p.currToken)
+
+proc parseSexprs(s: Stream): SexpNode =
+  ## Parses all S-expressions from `s`. If there are more than one, they're
+  ## wrapped in a list.
+  var p: SexpParser
+  p.open(s)
+  discard p.getTok() # fetch the first token
+
+  while p.currToken != tkEof:
+    let r = parseSexp(p)
+    if result.isNil:
+      result = newSList(r)
+    else:
+      result.add r
+    p.space()
+
+  # unwrap single nodes:
+  if result.len == 1:
+    result = result[0]
+
+  # don't close the parser; doing so would also close `s`
+
+proc parseSexprs(s: sink string): SexpNode =
+  var s = newStringStream(s)
+  result = parseSexprs(s)
+  s.close()
+
+proc content(s: OutputSpec): Content =
+  ## Returns the content to compare the actual runner output against.
   if s.fromFile:
-    let f = open(s.output, fmRead)
+    let f = openFileStream(s.output, fmRead)
     defer: f.close()
-    readAll(f)
+
+    let first = f.readLine()
+    if first.startsWith(";$sexp"):
+      # interpret the rest as an S-expression
+      Content(isSexp: true, sexp: parseSexprs(f))
+    else:
+      # interpret as just text
+      f.setPosition(0)
+      Content(isSexp: false, text: readAll(f))
   else:
-    s.output
+    Content(isSexp: false, text: s.output)
 
 proc compare(res: tuple[output: string, code: int], spec: TestSpec): TestResult =
   ## Compares the runner output `res` against the `spec`.
-  if res.code == 0:
+  if res.code in {0, 2}:
+    if (res.code == 2) != spec.reject:
+      result =
+        if spec.reject: TestResult(kind: rkNoError)
+        else:           TestResult(kind: rkError, output: res.output)
+      return
+
     var i = 0
     for got in split(res.output, "!BREAK!"):
       if i < spec.expected.len:
-        let expect = content(spec.expected[i])
+        let
+          expect = content(spec.expected[i])
+          # interpret the actual output in the same way as the expected output:
+          got =
+            if expect.isSexp: Content(isSexp: true, sexp: parseSexprs(got))
+            else:             Content(isSexp: false, text: got)
+
         if got != expect:
-          return TestResult(kind: rkMismatch, got: got, expected: expect)
+          return TestResult(kind: rkMismatch, got: $got, expected: $expect)
 
       inc i
 
@@ -102,9 +215,66 @@ proc compare(res: tuple[output: string, code: int], spec: TestSpec): TestResult 
     else:
       # not enough output fragments
       result = TestResult(kind: rkMismatch, got: "",
-                          expected: content(spec.expected[i]))
+                          expected: $content(spec.expected[i]))
   else:
-    result = TestResult(kind: rkError, output: res.output)
+    # the runer crashed, or there was some unexpected error
+    result = TestResult(kind: rkFailure, output: res.output)
+
+proc parseDesc(line: string): Option[RunnerDesc] =
+  ## Parses a runner description from `line`.
+  var args = parseCmdLine(line)
+  if args.len == 0:
+    stderr.writeLine("no command is specified")
+    return
+
+  var
+    desc = RunnerDesc(exe: args[0])
+    used: set[Placeholder]
+
+  desc.args = args[1..^1]
+
+  # pre-process and validate the substitutions:
+  for arg in desc.args.mitems:
+    if arg.startsWith("${"):
+      if not arg.endsWith("}"):
+        stderr.writeLine("missing trailing '}'")
+        return
+
+      let
+        mid = find(arg, '=')
+        name =
+          if mid != -1: arg.substr(2, mid - 1)
+          else:         arg.substr(2, arg.len - 2)
+
+      let s =
+        try:
+          parseEnum[Placeholder](name)
+        except ValueError:
+          stderr.writeLine("unknown placeholder: " & name)
+          return
+
+      if s in used:
+        stderr.writeLine("placeholder used more than once: " & $s)
+        return
+
+      used.incl s
+
+      if mid != -1:
+        desc.defaults[s] = arg.substr(mid + 1, arg.len - 2)
+        arg = "${" & name & "}"
+
+  if phFile notin used:
+    stderr.writeLine("command must have a '${file}' somewhere")
+    return
+
+  # success!
+  result = some desc
+
+proc initDesc(exe: sink string): RunnerDesc =
+  ## Constructs a default runner description.
+  RunnerDesc(exe: exe, args: @["${args}", "${file}"])
+
+proc runTest(desc: RunnerDesc, file: string): bool
 
 var
   nimExe = findExe("nim")
@@ -138,7 +308,7 @@ let currDir = getCurrentDir()
 if file.len == 0:
   # the process is the test driver
   let testDir = currDir / "tests"
-  var dirs: seq[tuple[path: string, runnerExe: string]]
+  var dirs: seq[tuple[path: string, runner: RunnerDesc]]
 
   # discover all test directories and build the associated runner
   # executables:
@@ -162,7 +332,24 @@ if file.len == 0:
           stdout.write(p.output)
           quit(1)
 
-        dirs.add (it.path, exe)
+        dirs.add (it.path, initDesc(exe))
+      elif fileExists(it.path / "runner.txt"):
+        # an external runner is used for the directory
+        let cmdFile = it.path / "runner.txt"
+        stdout.write("[Parsing] ")
+        stdout.writeLine(cmdFile)
+
+        let
+          f = open(cmdFile, fmRead)
+          line = f.readLine()
+        f.close()
+
+        let desc = parseDesc(line)
+        if desc.isSome:
+          dirs.add (it.path, desc.unsafeGet)
+        else:
+          stdout.writeLine("Failure" + fgRed)
+          quit(1)
 
   stdout.flushFile()
 
@@ -170,19 +357,13 @@ if file.len == 0:
     total = 0
     success = 0
   # now run the tests:
-  # XXX: concurrent execution of the processes is currently not possible,
-  #      as they'd clobber each others' output
-  for (dir, exe) in dirs.items:
+  # XXX: parallel execution of tests is still missing
+  for (dir, runner) in dirs.items:
     for it in walkDir(dir, relative=false):
       if it.path.endsWith(".test"):
         inc total
-        let p =
-          startProcess(getAppFilename(),
-                       args=["--runner:" & exe, it.path.relativePath(currDir)],
-                       options={poParentStreams})
-        if p.waitForExit() == 0:
+        if runTest(runner, it.path.relativePath(currDir)):
           inc success
-        p.close()
 
   if success == total:
     echo "Success! Ran ", success, " tests"
@@ -190,11 +371,19 @@ if file.len == 0:
     echo "Failure"
     quit(1)
 else:
+  # legacy mode:
+  if not runTest(initDesc(runner), file):
+    programResult = 1
+
+proc runTest(desc: RunnerDesc, file: string): bool =
+  ## Uses the provided test runner (`desc`) to run the given test file
+  ## (`file`). If running the test was successful and its output matches the
+  ## expectations, 'true' is returned, 'false' otherwise.
   echo "[Testing] " + fgCyan, file
   let s = newFileStream(file, fmRead)
   if s.isNil:
     echo "cannot open test file"
-    quit(1)
+    return false
 
   var spec: TestSpec
 
@@ -231,14 +420,16 @@ else:
                        output: strip(evt.value, leading=true, trailing=false))
         of "arguments":
           spec.arguments = split(evt.value, ' ')
+        of "reject":
+          spec.reject = parseBool(evt.value)
         else:
           echo "unknown key: ", evt.key
-          quit(1)
+          return false
       of cfgSectionStart, cfgOption:
         discard "ignore"
       of cfgError:
         echo "Parsing error: ", evt.msg
-        quit(1)
+        return false
       of cfgEof:
         break
 
@@ -246,11 +437,24 @@ else:
   else:
     s.close()
 
-  var args = spec.arguments
-  args.add file
+  # fill in the arguments and substitute the placeholders:
+  var args = newSeq[string]()
+  for it in desc.args.items:
+    case it
+    of "${file}":
+      args.add file
+    of "${args}":
+      if spec.arguments.len != 0:
+        args.add spec.arguments
+      elif phArgs in desc.defaults:
+        args.add desc.defaults[phArgs]
+      else:
+        discard "don't add anything"
+    else:
+      args.add it
 
   # execute the runner and check the output:
-  var res = compare(exec(runner, args), spec)
+  var res = compare(exec(desc.exe, args), spec)
 
   # handle the "known issue" specification:
   if spec.knownIssue.isSome:
@@ -263,14 +467,20 @@ else:
   # output the test result:
   if res.kind == rkSuccess:
     echo "[Success] " + fgGreen, file
+    result = true
   else:
     echo "[Failure] " + fgRed, file
-    programResult = 1
+    result = false
 
   case res.kind:
   of rkSuccess: discard
   of rkError:
     echo "The runner reported an error:" + fgYellow
+    echo res.output
+  of rkNoError:
+    echo "The runner didn't report an error" + fgYellow
+  of rkFailure:
+    echo "The runner failed:" + fgYellow
     echo res.output
   of rkMismatch:
     echo "Got:" + fgYellow

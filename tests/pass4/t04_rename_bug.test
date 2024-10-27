@@ -1,0 +1,36 @@
+discard """
+  description: "
+    Regression test for a virtual-to-physical local mapping bug. The two
+    virtual locals reaching the last continuation were both mapped to the
+    same physical local.
+  "
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) (Continuations
+    (Continuation (Params)
+      (Locals (Type 0) (Type 0))
+      (Continue 1
+        (List (Move (Local 0)) (Move (Local 1))))
+    )
+    (Continuation (Params (Type 0) (Type 0))
+      (Locals)
+      (SelectBool (IntVal 0)
+        (Continue 3 (List (Move (Local 0)) (Move (Local 1))))
+        (Continue 2 (List (Move (Local 0))))
+      )
+    )
+    (Continuation (Params (Type 0))
+      (Locals (Type 0))
+      (Continue 3 (List (Rename (Local 1)) (Move (Local 0))))
+    )
+    (Continuation (Params (Type 0) (Type 0)) (Locals)
+      (Continue 4 (List))
+    )
+    (Continuation (Params)))
+  )
+)

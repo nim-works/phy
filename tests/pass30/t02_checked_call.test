@@ -1,0 +1,10 @@
+(TypeDefs
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0) (Locals)
+    (Return))
+  (ProcDef (Type 0) (Locals)
+    (Stmts
+      (CheckedCall (Proc 0))
+      (Return))))

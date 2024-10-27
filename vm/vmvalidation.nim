@@ -21,10 +21,6 @@ import
   ]
 
 type
-  Subroutine = object
-    covers: Slice[PrgCtr]
-    parent: int ## parent subroutine index, or -1
-
   ValidationState = object
     prc: ProcIndex  ## checked procedure
     length: int     ## number of instruction in the body
@@ -33,15 +29,12 @@ type
 
     stack: seq[ValueType]        ## abstract operand stack
     targets: PackedSet[PrgCtr]   ## all positions that are jumped to
-    subroutines: seq[Subroutine]
-      ## acceleration structure for fast subroutine checks
 
   CheckResult = Result[void, string]
 
 # error messages should answer the question: "what is wrong?"
 
 const
-  errSubroutineJump = "jump across subroutine boundaries"
   errNotForwardJump = "not a forward jump"
   errNotAProcType   = "type is not a proc type"
 
@@ -75,81 +68,6 @@ template check(res: CheckResult) =
   if tmp.isErr:
     return tmp
 
-proc firstPass(ctx: var ValidationState, code: openArray[Instr]): CheckResult =
-  ## * gathers and validates the existing subroutines
-  ## * makes sure jump targets are valid
-  ## * fills the `targets` set
-  template checkTarget(src: int, rel: int32) =
-    check src + rel in 0..(ctx.length-1), "jump target is not valid"
-
-  template jump(src: int, rel: int32) =
-    checkTarget(src, rel)
-    ctx.targets.incl PrgCtr(src + rel)
-
-  var stack: seq[int]
-
-  for pc, instr in code.pairs:
-    case instr.opcode
-    of opcJmp, opcBranch:
-      jump(pc, imm32(instr))
-    of opcEnter:
-      checkTarget(pc, imm32(instr))
-      # not a jump like the other instructions
-      check code[pc + imm32(instr)].opcode == opcBegin,
-            "target is not an 'opcBegin' instruction"
-    of opcLeave:
-      jump(pc.int32, imm32(instr))
-    of opcBegin:
-      stack.add ctx.subroutines.len
-      # the Begin instruction is not included in the covered range
-      ctx.subroutines.add Subroutine(covers: PrgCtr(pc + 1)..PrgCtr(0))
-    of opcEnd:
-      check stack.len > 0, "not in subroutine"
-      let pos = stack.pop()
-      ctx.subroutines[pos].covers.b = PrgCtr(pc)
-      ctx.subroutines[pos].parent =
-        if stack.len > 0: stack[^1]
-        else:             -1
-    else:
-      discard
-
-  check stack.len == 0, "unclosed subroutines exist"
-  result.initSuccess()
-
-proc find(ctx: ValidationState, pc: PrgCtr): int =
-  for i in countdown(ctx.subroutines.high, 0):
-    if pc in ctx.subroutines[i].covers:
-      return i
-  result = -1
-
-proc computeDepth(ctx: ValidationState, start: PrgCtr, target: PrgCtr): int =
-  ## Computes and returns the amount of subroutines a forward jump from `start`
-  ## to `target` exits. If a nested subroutine is entered - which is illegal -,
-  ## -1 is returned.
-  if ctx.subroutines.len == 0:
-    return 0
-
-  let
-    a = find(ctx, start)
-    b = find(ctx, target)
-
-  if a == b:
-    return 0 # intra-subroutine jump
-  elif a == -1:
-    return -1 # a jump *into* a subroutine -> always illegal
-  else:
-    # note: if `b` is -1, it means that `target` is not part of a subroutine
-    var i = a
-    # go upwards in hierarchy until there are no more parents
-    while i != -1 and i != b:
-      i = ctx.subroutines[i].parent
-      inc result
-
-    # if the subroutine `target` is part of is neither `a` nor a parent
-    # thereof, it's some unrelated subroutine
-    if i != b:
-      result = -1
-
 proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
         ): CheckResult =
   ## * applies the operand-stack effects of instruction `instr` at `pos`
@@ -179,7 +97,6 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
     check ctx.stack.len == 0, "stack is not empty"
 
   template jump(rel: int32) =
-    check find(ctx, pos) == find(ctx, pos + rel.uint32), errSubroutineJump
     ctx.active = false
 
   # handle jump targets:
@@ -232,7 +149,7 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
     pop(vtInt)
     push(vtInt)
     check imm8(instr) in 0..63, "width not in range 0..63"
-  of opcNegInt, opcNot:
+  of opcNegInt, opcNot, opcBitNot:
     pop(vtInt)
     push(vtInt)
   of opcAddFloat, opcSubFloat, opcMulFloat, opcDivFloat:
@@ -241,7 +158,7 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
   of opcNegFloat:
     pop(vtFloat)
     push(vtFloat)
-  of opcBitNot, opcOffset:
+  of opcOffset:
     pop(vtInt)
     pop(vtInt)
     push(vtInt)
@@ -264,8 +181,8 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
     pop(vtInt)
     pop(vtInt)
   of opcWrFlt32, opcWrFlt64:
-    pop(vtInt)
     pop(vtFloat)
+    pop(vtInt)
   of opcWrRef:
     pop(vtInt)
     pop(vtRef)
@@ -286,7 +203,6 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
     expectEmpty()
     jump(rel)
   of opcRet:
-    check find(ctx, pos) == -1, "return from within subroutine"
     let expect = env.types[env.types.returnType(env[ctx.prc].typ)]
     if expect.kind != tkVoid:
       pop(toValueType expect)
@@ -324,26 +240,7 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
     check not ctx.active, "control-flow reaches 'opcExcept'"
     push(vtInt)
     ctx.active = true
-  of opcBegin:
-    check not ctx.active, "control-flow reaches 'opcBegin'"
-    ctx.active = true
-  of opcEnd:
-    expectEmpty()
-    ctx.active = false
-  of opcEnter:
-    expectEmpty()
-    let rel = imm32(instr)
-    check rel > 0, errNotForwardJump
-    let depth = computeDepth(ctx, pos, pos + uint32(rel))
-    check depth == 0, "Enter invokes out-of-context subroutine"
-  of opcLeave:
-    expectEmpty()
-    let (rel, depth) = imm32_16(instr)
-    check rel > 0, errNotForwardJump
-    let actual = computeDepth(ctx, pos, pos + uint32(rel))
-    check actual >= 0, "Leave jumps inside unrelated subroutine"
-    check actual > 0, "Leave doesn't leave subroutine"
-    check actual == depth, "specified depth doesn't match actual one"
+  of opcUnreachable:
     ctx.active = false
   of opcStackAlloc:
     push(vtInt)
@@ -352,36 +249,6 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
   of opcYield:
     expect(imm32(instr))
     ctx.stack.setLen ctx.stack.len-imm32(instr)
-
-  result.initSuccess()
-
-proc verify(ctx: ValidationState, env: VmEnv, code: openArray[Instr],
-            pc, start: uint32): CheckResult =
-  check test(env.ehCode, start), "EH table entry is illformed"
-
-  var pos = start
-  while true:
-    let (opcode, arg) = env.ehCode[pos]
-    case opcode
-    of ehoExcept:
-      check arg > pos, errNotForwardJump
-      check computeDepth(ctx, pc, arg) >= 0, errSubroutineJump
-      check test(code, arg), "EH instruction is illformed"
-      check code[arg].opcode == opcExcept,
-            "target is not 'opcExcept' instruction"
-      break
-    of ehoSubroutine:
-      check arg > pos, errNotForwardJump
-      check computeDepth(ctx, pc, arg) >= 0, errSubroutineJump
-      check(not checkedAdd(pos, 1, pos) and test(env.ehCode, pos),
-            "subroutine call has no follow-up")
-      check test(code, arg), "EH instruction is illformed"
-      check code[arg].opcode == opcBegin,
-            "target is not 'opcBegin' instruction"
-    of ehoNext:
-      check(not checkedAdd(pos, arg, pos) and test(env.ehCode, pos),
-            "EH instruction is illformed")
-    of ehoEnd: break
 
   result.initSuccess()
 
@@ -396,9 +263,11 @@ proc verify(ctx: ValidationState, env: VmEnv, tbl: HOslice[uint32],
         "EH table is illformed"
 
   for i in tbl.items:
-    let (offset, instr) = env.ehTable[i]
-    check test(code, offset), "EH table is illformed"
-    check verify(ctx, env, code, offset, instr)
+    let (src, dst) = env.ehTable[i]
+    check test(code, src), "EH table is illformed"
+    check test(code, dst), "EH table is illformed"
+    check dst > src, errNotForwardJump
+    check code[dst].opcode == opcExcept, "target is not 'opcExcept' instruction"
 
   result.initSuccess()
 
@@ -427,8 +296,6 @@ proc verify*(env: VmEnv, prc: ProcIndex, code: openArray[Instr]): CheckResult =
   ## Verifies that the `code` belonging to procedure `prc` is valid. The
   ## associated EH table and instructions are also verified.
   var ctx = ValidationState(prc: prc, length: code.len, active: true)
-
-  check firstPass(ctx, code)
 
   # push all parameters to the operand stack:
   for _, it in parameters(env.types, env[prc].typ):

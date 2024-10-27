@@ -1,0 +1,5 @@
+discard """
+  reject: true
+"""
+(ProcDecl (Ident "a") (UnionTy (IntTy) (IntTy)) (Params)
+  (Return (IntVal 100)))

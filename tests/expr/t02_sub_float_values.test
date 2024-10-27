@@ -1,0 +1,4 @@
+discard """
+  output: "-1.0: float"
+"""
+(Call (Ident "-") (FloatVal 1.5) (FloatVal 2.5))

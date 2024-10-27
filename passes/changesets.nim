@@ -8,10 +8,12 @@ import
 
 type
   ActionKind = enum
+    # **important**: the enum order informs precedence. If enum field A is
+    # defined before B, A is applied first
+    Insert     ## insert a new tree; source cursor doesn't change
     ChangeKind ## change the kind of a node
     ChangeLen  ## change the length of a subtree
     Skip       ## skip over the subtree at the source cursor
-    Insert     ## insert a new tree; source cursor doesn't change
     Replace    ## Insert + Skip
 
   Action[T] = object
@@ -34,21 +36,29 @@ func changeKind*[T](c: var ChangeSet[T], n: NodeIndex, kind: T) =
   ## Records changing the kind of node `n` to `kind`.
   c.actions.add Action[T](at: n, kind: ChangeKind, newKind: kind)
 
+template replace*[T](c: var ChangeSet[T], n: NodeIndex, body: untyped) =
+  ## Records replacing the node/sub-tree at `n` with a node/sub-tree created
+  ## by `body`. For this, a builder instance named ``bu`` is available to the
+  ## body.
+  if true:
+    let
+      at = n # uphold the expected evaluation order
+      start = c.nodes.len
+
+    var bu {.inject.} = initBuilder(c.nodes)
+    body
+    c.nodes = finish(bu)
+
+    c.actions.add Action[T](at: at, kind: Replace,
+                            slice: start .. c.nodes.high)
+
 template replace*[T](c: var ChangeSet[T], n: NodeIndex, k: T,
                      body: untyped) =
   ## Records replacing the node/subtree at `n` with a new tree of kind `k`. The
   ## new tree is built by `body`, with a builder named ``bu`` injected into the
   ## scope.
-  if true:
-    let
-      at = n # uphold the expected evaluation order
-      start = c.nodes.len
-    var bu {.inject.} = initBuilder(c.nodes)
+  replace(c, n):
     bu.subTree(k): body
-    c.nodes = finish(bu)
-
-    c.actions.add Action[T](at: at, kind: Replace,
-                            slice: start .. c.nodes.high)
 
 func replace*[T](c: var ChangeSet[T], n: NodeIndex, with: TreeNode[T]) =
   ## Records replacing the node/subtree at `n` with `with`.
@@ -60,6 +70,14 @@ func remove*[T](c: var ChangeSet[T], tree: PackedTree[T], n: NodeIndex, i: int) 
   ## Records the removal of the `i`-th node from `n`.
   c.actions.add Action[T](at: n, kind: ChangeLen, by: 0xFFFF_FFFF'u32) # -1
   c.actions.add Action[T](at: tree.child(n, i), kind: Skip)
+
+func insert*[T](c: var ChangeSet[T], tree: PackedTree[T], n: NodeIndex,
+                i: int, node: TreeNode[T]) =
+  ## Records the insertion of `node` at the `i`-th child node of `n`.
+  c.actions.add Action[T](at: n, kind: ChangeLen, by: 1)
+  c.actions.add Action[T](at: tree.child(n, i), kind: Insert,
+                          slice: c.nodes.len .. c.nodes.len)
+  c.nodes.add node
 
 template insert*[T](c: var ChangeSet[T], tree: PackedTree[T], n: NodeIndex,
                     i: int, k: T, body: untyped) =
@@ -81,9 +99,11 @@ template insert*[T](c: var ChangeSet[T], tree: PackedTree[T], n: NodeIndex,
 
 func apply*[T](tree: PackedTree[T], c: sink ChangeSet[T]): PackedTree[T] =
   ## Applies the changeset `c` to `tree`.
-  # sort the actions by source position:
+  # sort the actions by source position and action:
   sort(c.actions, proc(a, b: auto): int =
-    a.at.int - b.at.int
+    result = a.at.int - b.at.int
+    if result == 0:
+      result = ord(a.kind) - ord(b.kind)
   )
 
   var
@@ -121,4 +141,4 @@ func apply*[T](tree: PackedTree[T], c: sink ChangeSet[T]): PackedTree[T] =
   if source < tree.nodes.len:
     nodes.add toOpenArray(tree.nodes, source, tree.nodes.high)
 
-  result = initTree(nodes, tree.numbers)
+  result = initTree(nodes, tree.literals)

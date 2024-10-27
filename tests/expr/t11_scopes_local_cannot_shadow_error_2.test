@@ -1,0 +1,9 @@
+discard """
+  description: "Both If branches are part of their own scope"
+  reject: true
+"""
+(Exprs
+  (Decl (Ident "x") (IntVal 100))
+  (If (Ident "true")
+    (Exprs
+      (Decl (Ident "x") (IntVal 200)))))

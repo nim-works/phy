@@ -1,0 +1,4 @@
+discard """
+  output: "true: bool"
+"""
+(Call (Ident "not") (Ident "false"))

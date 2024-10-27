@@ -59,21 +59,18 @@ cont_name ::= <int>
 
 goto ::= (Continue <cont_name>)
 err_goto ::= (Unwind)
-          |  (List (Continue <cont_name>)* (Unwind)?)
+          |  <goto>
 
 choice ::= (Choice <intVal> <goto>)
         |  (Choice <floatVal> <goto>)
         |  (Choice <intVal> <intVal> <goto>)
         |  (Choice <floatVal> <floatVal> <goto>)
 
-exit ::= (Continue)
-      |  (Continue <cont_name>)
+exit ::= <goto>
       |  (Continue <cont_name> <value>)
-      |  (Enter <cont_name> <cont_name>)
-      |  (Leave <cont_name>)
       |  (Loop <cont_name>)
       |  (Unreachable)
-      |  (Raise <value> <cont_name>)
+      |  (Raise <value> <err_goto>)
       |  (SelectBool <value> false:<goto> true:<goto>)
       |  (Select <type_id> <simple> <choice>+)
       |  (CheckedCall <proc> <value>* <goto> <err_goto>)
@@ -91,10 +88,10 @@ stmt ::= (Asgn <local> <value>)
 
 continuation ::= (Continuation (Params) stack:<int> <stmt>* <exit>)
               |  (Continuation (Params <type_id>?)) # return continuation
-              |  (Subroutine (Params) stack:<int> <stmt>* <exit>)
               |  (Except <local> stack:<int> <stmt>* <exit>)
 
 procdef ::= (ProcDef <type_id> (Locals <type_id>*) (Continuations <continuation>+))
+globaldef ::= <intVal> | <floatVal>
 ```
 
 ### Module
@@ -104,5 +101,6 @@ top-level node, in dedicated sections, to allow for easy and fast access to
 them.
 
 ```grammar
-module ::= (Module (TypeDefs <type>*) (GlobalDefs <type_id>*) (ProcDefs <procdef>*))
+module ::= (Module (TypeDefs <type>*) (GlobalDefs <globaldef>*) (ProcDefs <procdef>*))
+top ::= <module>
 ```

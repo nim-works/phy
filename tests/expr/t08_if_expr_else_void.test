@@ -1,0 +1,4 @@
+discard """
+  output: "1: int"
+"""
+(If (Ident "true") (IntVal 1) (Unreachable))

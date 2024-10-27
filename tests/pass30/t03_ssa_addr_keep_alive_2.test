@@ -1,0 +1,18 @@
+discard """
+  description: "
+    Ensure that uninitialized locals behave the same as initialized ones, in
+    regards to pinning.
+  "
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Locals (Type 0))
+    (Stmts
+      (Drop (Addr (Local 0)))
+      (If (IntVal 0) (Drop (IntVal 200)))
+      (Store (Type 0) (IntVal 0) (IntVal 0))
+      (Return))))

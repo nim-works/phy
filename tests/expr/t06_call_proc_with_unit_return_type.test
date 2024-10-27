@@ -1,0 +1,8 @@
+discard """
+  output: "(): unit"
+"""
+(Module
+  (ProcDecl (Ident "a") (UnitTy) (Params)
+    (Return))
+  (ProcDecl (Ident "main") (UnitTy) (Params)
+    (Return (Call (Ident "a")))))

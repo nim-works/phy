@@ -1,7 +1,7 @@
 ## Implements the semantic analysis for the parsed rules.
 
 import
-  std/[os, streams, tables],
+  std/[os, sets, streams, tables],
   grammar,
   parser
 
@@ -78,7 +78,7 @@ proc verify(lang: Grammar, e: Expr, errors: var Errors) =
   ## that don't.
   case e.isRef
   of true:
-    if e.name notin lang and e.name notin ["int", "float"]:
+    if e.name notin lang and e.name notin ["int", "float", "string"]:
       errors.emit(e.pos, "no rule with name " & e.name & " exists")
   of false:
     for it in e.rules.items:
@@ -150,7 +150,7 @@ proc sem(parsed: seq[Parsed], name, dir: string, langs: var Languages,
     of pkDef:
       if it.name in lang:
         errors.emit(it.line, it.col, "redefinition of " & it.name)
-      elif it.name in ["int", "float"]:
+      elif it.name in ["int", "float", "string"]:
         errors.emit(it.line, it.col):
           it.name & " is already the name of a built-in rule"
       else:
@@ -209,9 +209,55 @@ proc sem*(name, dir: string, langs: var Languages, errors: var Errors) =
   let
     file = changeFileExt(dir / name, ".md")
     parsed = parseAll(file)
+    prev = errors.currFile
 
   # register the file:
   errors.currFile = errors.files.len.uint16
   errors.files.add file
 
   sem(parsed, name, dir, langs, errors)
+
+  # restore previous context:
+  errors.currFile = prev
+
+proc mark(e: Expr, marker: var HashSet[string], next: var seq[string]) =
+  ## Registers all references in `e` with `marker`, adding them to `next` if
+  ## not seen prior.
+  if e.isRef:
+    if e.name notin ["int", "float", "string"]:
+      if not marker.containsOrIncl(e.name):
+        next.add e.name
+  else:
+    for it in e.rules.items:
+      mark(it.expr, marker, next)
+
+proc trim*(langs: var Languages, errors: var Errors) =
+  ## Removes unused production rules, producing errors for unused rules that
+  ## were introduced specifically for the grammar they're unused in.
+  var next: seq[string] # re-use across loops
+
+  for name, it in langs.mpairs:
+    var marker: HashSet[string]
+
+    if "top" in it:
+      marker.incl "top"
+      next.add "top"
+
+    # mark everything reachable from the top rule:
+    while next.len > 0:
+      let n = next.pop()
+      for rule in it[n].items:
+        mark(rule.expr, marker, next)
+
+    var remove: seq[string]
+    # register for removal everything that wasn't marked:
+    for pname, prods in it.pairs:
+      if pname notin marker:
+        remove.add pname
+
+        for prod in prods.items:
+          if prod.source == name:
+            errors.emit(prod.expr.pos, "unused production")
+
+    for r in remove.items:
+      it.del(r)

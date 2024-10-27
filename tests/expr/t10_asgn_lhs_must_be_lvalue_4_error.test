@@ -1,0 +1,5 @@
+discard """
+  description: "A literal integer is not an l-value expression"
+  reject: true
+"""
+(Asgn (IntVal 100) (IntVal 200))

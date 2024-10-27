@@ -1,0 +1,25 @@
+;$sexp
+(TypeDefs
+  (Int 8)
+  (ProcTy (Type 0)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Locals (Type 0) (Type 0))
+    (Continuations
+      (Continuation (Params)
+        (Locals (Local 0))
+        (Asgn (Local 0) (IntVal 100))
+        (Continue 1))
+      (Continuation (Params)
+        (Locals (Local 0) (Local 1))
+        (Asgn (Local 1) (IntVal 200))
+        (Continue 2))
+      (Continuation (Params)
+        (Locals (Local 1) (Local 0))
+        (Continue 3
+          (Add (Type 0)
+            (Copy (Local 1))
+            (Copy (Local 0)))))
+      (Continuation
+        (Params (Type 0))))))

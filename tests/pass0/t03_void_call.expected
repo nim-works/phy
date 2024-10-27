@@ -4,7 +4,5 @@
 .end
 .start t0 p1
   Call p0 0
-  Jmp L2
-.label L2
   Ret
 .end

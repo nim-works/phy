@@ -1,0 +1,8 @@
+discard """
+  description: "Ensure that a procedure name is visible to its body."
+"""
+(Module
+  (ProcDecl (Ident "a") (UnitTy) (Params)
+    (Return (Call (Ident "a"))))
+  (ProcDecl (Ident "main") (UnitTy) (Params)
+    (Return)))

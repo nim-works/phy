@@ -1,0 +1,22 @@
+discard """
+  description: "Ensure that moving/renaming at `Raise` exits works"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) (Continuations
+    (Continuation (Params)
+      (Locals (Type 0))
+      (Asgn (Local 0) (IntVal 200))
+      (Raise (IntVal 100)
+        (Continue 1 (List (Move (Local 0)))))
+    )
+    (Except (Params (Type 0) (Type 0)) (Locals)
+      (Continue 2 (List))
+    )
+    (Continuation (Params)))
+  )
+)

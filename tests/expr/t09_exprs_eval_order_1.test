@@ -1,0 +1,11 @@
+discard """
+  description: "
+    The first expression in a list has its effects computed first, then the
+    second, etc.
+  "
+  output: "104: int"
+"""
+(Exprs
+  (Decl (Ident "x") (IntVal 100))
+  (Asgn (Ident "x") (Call (Ident "+") (Ident "x") (IntVal 4)))
+  (Ident "x"))

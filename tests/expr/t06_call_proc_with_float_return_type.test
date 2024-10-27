@@ -1,0 +1,8 @@
+discard """
+  output: "1.0: float"
+"""
+(Module
+  (ProcDecl (Ident "a") (FloatTy) (Params)
+    (Return (FloatVal 1.0)))
+  (ProcDecl (Ident "main") (FloatTy) (Params)
+    (Return (Call (Ident "a")))))

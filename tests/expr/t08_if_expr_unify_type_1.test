@@ -1,0 +1,13 @@
+discard """
+  description: "Ensure types unify for an if-expression"
+"""
+(Module
+  (ProcDecl (Ident "p") (UnionTy (IntTy) (FloatTy)) (Params)
+    (Return (IntVal 100)))
+  
+  (ProcDecl (Ident "test") (UnionTy (IntTy) (FloatTy)) (Params)
+    (Return
+      (If (Ident "true")
+        (FloatVal 0.5)
+        (Call (Ident "p")))))
+)

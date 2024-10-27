@@ -1,0 +1,9 @@
+discard """
+  description: "A projection from an l-value is an l-value expression"
+  output: "(): unit"
+"""
+(Exprs
+  (Decl (Ident "x") (TupleCons (IntVal 1)))
+  (Asgn
+    (FieldAccess (Ident "x") (IntVal 0))
+    (IntVal 2)))
