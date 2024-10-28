@@ -21,7 +21,7 @@ type
       ## the ID to use for the next label. Incremented when "allocating" a
       ## label
     context: seq[Option[LabelId]]
-      ## stack of block context objects. For each block-like strucutre, a new
+      ## stack of block context objects. For each block-like structure, a new
       ## entry is pushed
 
 # shorten some common procedure signatures:
