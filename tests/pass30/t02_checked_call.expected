@@ -3,17 +3,9 @@
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 0)
-    (Continuations
-      (Continuation (Params) (Locals)
-        (Continue 1 (List)))
-      (Continuation (Params))))
-  (ProcDef (Type 0)
-    (Continuations
-      (Continuation (Params) (Locals)
-        (CheckedCall (Proc 0)
-          (Continue 1 (List))
-          (Unwind)))
-      (Continuation (Params) (Locals)
-        (Continue 2 (List)))
-      (Continuation (Params)))))
+  (ProcDef (Type 0) (Locals)
+    (Stmts (Return)))
+  (ProcDef (Type 0) (Locals)
+    (Stmts
+      (CheckedCall (Proc 0) (Unwind))
+      (Return))))

@@ -16,6 +16,8 @@ type
 
     Void, Int, UInt, Float, ProcTy, Blob, Record, Array
 
+    Join
+
     Copy, Asgn, Drop, Clear
 
     Load, Store, Addr, Call
