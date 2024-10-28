@@ -69,7 +69,7 @@ proc generateModules(dir: string) =
   createDir(dir)
 
   # generate the modules:
-  require run(passtool, "gen-checks", "passes", "lang10", "passes/spec",
+  require run(passtool, "gen-checks", "passes", "lang30", "passes/spec",
               dir / "*_checks.nim")
   require run(passtool, "gen-checks", "spec", "spec", "passes/spec_source",
               dir / "source_checks.nim")

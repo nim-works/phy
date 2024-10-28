@@ -1,0 +1,10 @@
+;$sexp
+(TypeDefs
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0) (Locals)
+    (Stmts
+      (Join 0)
+      (Drop (IntVal 100))
+      (Loop 0))))

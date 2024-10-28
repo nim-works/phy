@@ -1,0 +1,73 @@
+;$sexp
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Continuations
+      (Continuation (Params)
+        (Locals (Type 0) (Type 0))
+        (Continue 1
+          (List
+            (Move (Local 0))
+            (Move (Local 1)))))
+      (Continuation
+        (Params (Type 0) (Type 0))
+        (Locals)
+        (SelectBool (IntVal 1)
+          (Continue 2
+            (List
+              (Move (Local 0))
+              (Move (Local 1))))
+          (Continue 8 (List))))
+      (Continuation
+        (Params (Type 0) (Type 0))
+        (Locals)
+        (Continue 3
+          (List
+            (Move (Local 0))
+            (Move (Local 1)))))
+      (Continuation
+        (Params (Type 0) (Type 0))
+        (Locals)
+        (SelectBool (IntVal 1)
+          (Continue 4
+            (List
+              (Move (Local 0))))
+          (Continue 6
+            (List
+              (Move (Local 1))))))
+      (Continuation
+        (Params (Type 0))
+        (Locals)
+        (Drop
+          (Copy (Local 0)))
+        (Continue 5 (IntVal 100)
+          (List
+            (Move (Local 0)))))
+      (Continuation
+        (Params (Type 0) (Type 0))
+        (Locals)
+        (Loop 3
+          (List
+            (Move (Local 1))
+            (Move (Local 0)))))
+      (Continuation
+        (Params (Type 0))
+        (Locals)
+        (Continue 7 (IntVal 200)
+          (List
+            (Move (Local 0)))))
+      (Continuation
+        (Params (Type 0) (Type 0))
+        (Locals)
+        (Drop
+          (Copy (Local 1)))
+        (Loop 1
+          (List
+            (Move (Local 0))
+            (Move (Local 1)))))
+      (Continuation (Params) (Locals)
+        (Continue 9 (List)))
+      (Continuation (Params)))))

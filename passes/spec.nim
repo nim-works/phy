@@ -17,6 +17,8 @@ type
     Void, Int, UInt, Float, ProcTy, Union, Record, Array
     Blob # TODO: remove
 
+    Join
+
     Copy, Asgn, Drop, Clear
 
     Load, Store, Addr, Call
