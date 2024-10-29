@@ -26,8 +26,8 @@ choice -= (Choice <intVal> <goto>)
 choice += (Choice <intVal> <single_stmt>)
         | (Choice <floatVal> <single_stmt>)
 
-stmt -= (Join   <cont_name>)
-      | (Except <cont_name> <local>)
+stmt -= (Join   <block_name>)
+      | (Except <block_name> <local>)
       | <exit>
       | <goto>
 

@@ -8,7 +8,7 @@ Procedures are no subdivided into continuations, but instead consist of a list
 of statements:
 
 ```grammar
-procdef -= (ProcDef <type_id> (Continuations <continuation>+))
+procdef -= (ProcDef <type_id> (List <type_id>*) (List <bblock>+))
 procdef += (ProcDef <type_id> (Locals <type_id>*) (Stmts <stmt>+))
 ```
 
@@ -17,30 +17,28 @@ procdef += (ProcDef <type_id> (Locals <type_id>*) (Stmts <stmt>+))
 Control-flow statements can now appear in normal statement contexts:
 
 ```grammar
-exit -= (Continue <cont_name> <value> (List <cont_arg>*))
-      | (Loop <cont_name> (List <cont_arg>*))
+exit -= (Loop <block_name> (List <local>*))
       | (Raise <value> <err_goto>)
       | (CheckedCall <proc> <value>* <goto> <err_goto>)
       | (CheckedCall <type_id> <value>+ <goto> <err_goto>)
 
-exit += (Continue <cont_name> <value>)
-      | (Loop <cont_name>)
-      | (Return <value>?)
+exit += (Goto <block_name>)
+      | (Loop <block_name>)
       | (Raise <value> <err_goto>)
       | (CheckedCall <proc> <value>* <err_goto>)
       | (CheckedCall <type_id> <value>+ <err_goto>)
       | (CheckedCallAsgn <local> <proc> <value>* <err_goto>)
       | (CheckedCallAsgn <local> <type_id> <value>+ <err_goto>)
 
-goto -= (Continue <cont_name> (List <cont_arg>*))
-goto += (Continue <cont_name>)
+goto -= (Goto <block_name> (List <local>*))
+goto += (Goto <block_name>)
 
 stmt += <goto>
       | <exit>
 ```
 
 ```grammar
-stmt += (Join label:<cont_name>)
+stmt += (Join label:<block_name>)
 ```
 
 A `Join` statement represents the destination of a non-exceptional control-
@@ -48,7 +46,7 @@ flow statement. Control-flow is allowed to reach a `Join` statement without a
 jump. Labels can be arbitrary numbers.
 
 ```grammar
-stmt += (Except label:<cont_name> <local>)
+stmt += (Except label:<block_name> <local>)
 ```
 
 An `Except` statement represents the jump target for exceptional control-flow.
