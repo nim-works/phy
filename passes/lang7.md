@@ -1,7 +1,7 @@
-## L4 Language
+## L7 Language
 
 ```grammar
-.extends lang4
+.extends lang5
 ```
 
 Aggregate types can be used for locals, with locals being usable as path
