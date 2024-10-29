@@ -184,7 +184,7 @@ template append*[T](cr: var Cursor[T], tree: PackedTree[T], body: untyped) =
   let len = tree.len(cr.pos)
   cr.keepTree tree:
     # keep all nodes of the sub-tree:
-    for _ in len:
+    for _ in 0..<len:
       cr.pos = tree.next(cr.pos)
     cr.len = len
     body
