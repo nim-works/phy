@@ -19,6 +19,7 @@ import
     lang0_checks,
     lang1_checks,
     lang3_checks,
+    lang5_checks,
     lang25_checks,
     lang30_checks,
     source_checks
@@ -30,6 +31,7 @@ import
     pass0,
     pass1,
     pass3,
+    pass5,
     pass25,
     pass30,
     trees
@@ -56,6 +58,7 @@ type
     lang0 = "L0"
     lang1 = "L1"
     lang3 = "L3"
+    lang5 = "L5"
     lang25 = "L25"
     lang30 = "L30"
     langSource = "source"
@@ -112,6 +115,7 @@ proc syntaxCheck(code: PackedTree[spec.NodeKind], lang: Language) =
   of lang0:  syntaxCheck(code, lang0_checks, module)
   of lang1:  syntaxCheck(code, lang1_checks, module)
   of lang3:  syntaxCheck(code, lang3_checks, module)
+  of lang5:  syntaxCheck(code, lang5_checks, module)
   of lang25: syntaxCheck(code, lang25_checks, module)
   of lang30: syntaxCheck(code, lang30_checks, module)
   else:      unreachable()
@@ -201,10 +205,15 @@ proc compile(tree: var PackedTree[spec.NodeKind], source, target: Language) =
       # TODO: don't hardcode the pointer size
       tree = tree.apply(pass3.lower(tree, 8))
       current = lang1
+    of lang5:
+      syntaxCheck(tree, lang5_checks, module)
+      # TODO: don't hardcode the pointer size
+      tree = tree.apply(pass5.lower(tree, 8))
+      current = lang3
     of lang25:
       syntaxCheck(tree, lang25_checks, module)
       tree = tree.apply(pass25.lower(tree))
-      current = lang3
+      current = lang5
     of lang30:
       syntaxCheck(tree, lang30_checks, module)
       tree = tree.apply(pass30.lower(tree))
