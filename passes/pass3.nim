@@ -1,27 +1,12 @@
 ## Lowers |L3| code into |L1| code. This means:
 ## * turning path expressions into pointer (read, integer) arithmetic
-## * turning copies from within aggregate locations into loads
-## * turning assignments into aggregate locations into stores
-## * turning aggregate assignments/stores/loads into memory copies
-##
-## Future Considerations
-## ~~~~~~~~~~~~~~~~~~~~~
-##
-## Single field unions/records where the field:
-## * has an offset of zero
-## * is of primitive type
-##
-## could be unpacked. In addition, locals of record type that:
-## * are never passed to procedures
-## * never have their address taken
-##
-## could also be unpacked. However, both are optimizations that should happen
-## at a higher level, since spawning locals at this level would require them
-## to be physical, instead of logical, locals.
+## * collapsing address-of operations
+## * collapsing aggregate stores/loads
+## * removing all aggregate types
 
 import
-  std/[tables],
-  passes/[builders, changesets, trees, spec],
+  std/[options, tables],
+  passes/[changesets, trees, spec],
   vm/[utils]
 
 type
@@ -33,50 +18,18 @@ type
     addrType: TypeId
       ## the type of address values
 
-    locals: NodeIndex
-      ## index of the current procedure's list of locals
-
-  BuilderOrChangeset = Builder[NodeKind] or ChangeSet[NodeKind]
-
-const
-  AggregateTypes = {Record, Array}
+    typeMap: Table[TypeId, TypeId]
+      ## maps old type IDs to new ones. If there's no entry in table for a
+      ## type, it means that the type was removed
 
 # shorten some common procedure signatures:
 using
   c: PassCtx
   tree: PackedTree[NodeKind]
-  changes: var ChangeSet[NodeKind]
   n: NodeIndex
-  bu: var BuilderOrChangeset
+  bu: var Cursor[NodeKind]
 
-template replace(bu: var Builder[NodeKind], n; k: NodeKind, body: untyped) =
-  discard n
-  bu.subTree k:
-    body
-
-template keep(bu: var Builder[NodeKind], tree; n) =
-  bu.copyFrom(tree, n)
-
-template keep(bu: var Builder[NodeKind], tree; n; body: untyped) =
-  bu.subTree tree[n].kind:
-    body
-
-template skipTree(bu: var Builder[NodeKind], n; body: untyped) =
-  discard n
-  body # nothing to do, just eval body
-
-template keep(changes; tree; n) =
-  # a no-op; just evaluate `n`
-  discard n
-
-template keep(changes; tree; n; body: untyped) =
-  # a no-op; just evaluate `n`
-  discard n
-  body
-
-template skipTree(changes; n; body: untyped) =
-  changes.replace(n):
-    body
+proc `==`(x, y: TypeId): bool {.borrow.}
 
 func imm(n: Node): uint32 {.inline.} =
   assert n.kind == Immediate
@@ -90,230 +43,233 @@ func lookup(c; tree; typ: TypeId): NodeIndex =
   ## Returns the index of the type description for `typ`.
   tree.child(c.types, typ.int)
 
-proc typeof(c; tree; n): TypeId =
-  ## Computes the type ID for the ``path-elem``.
+func sizeof(c; tree; typ: TypeId): uint64 =
+  ## Returns the numbers of byte `typ` occupies in memory.
+  let n = c.lookup(tree, typ)
   case tree[n].kind
-  of Local:
-    tree[c.locals, tree[n].val.int].typ
-  of Deref:
-    tree[n, 0].typ
-  of At:
-    let arr = c.typeof(tree, tree.child(n, 0)) # type of the array
-    tree[c.lookup(tree, arr), 2].typ
-  of Field:
-    let
-      (a, b) = pair(tree, n)
-      rec = c.typeof(tree, a) # type of the record type
-    # +1 to skip the size node
-    tree[tree.child(c.lookup(tree, rec), tree[b].val.int + 1), 1].typ
+  of Record, Union, Array:
+    tree[n, 0].imm.uint64
+  of UInt, Int, Float:
+    tree[n, 0].imm.uint64
   else:
     unreachable()
 
-proc lowerExpr(c; tree; n; bu: var BuilderOrChangeset)
-
-proc lowerCall(c; tree; n; start: int, bu: var BuilderOrChangeset) =
-  for it in tree.items(n, start + 1):
-    c.lowerExpr(tree, it, bu)
-
-proc lowerPathElem(c; tree; n; bu: var Builder[NodeKind]) =
+func lookupField(c; tree; typ: TypeId, field: int): (uint64, TypeId) =
+  let n = c.lookup(tree, typ)
+  let field = tree.child(n, 2 + field)
   case tree[n].kind
-  of Local:
-    # locals appearing as a path element are turned into
-    # ``(Addr <local>)``
-    bu.subTree Addr:
-      bu.add tree[n]
-  of Deref:
-    # only relevant for type information -> drop it
-    c.lowerExpr(tree, tree.child(n, 1), bu)
-  of Field, At:
-    c.lowerExpr(tree, n, bu)
+  of Record:
+    result = (tree[field, 0].imm.uint64, tree[field, 1].typ)
+  of Union:
+    result = (0'u64, tree[field].typ)
   else:
     unreachable()
 
-proc lowerExpr(c; tree; n; bu: var BuilderOrChangeset) =
-  ## Lowers the expression at `n`, if necessary. Trees are only modified when
-  ## really needed, so ``lowerExpr`` is a generic procedure taking either a
-  ## ``MirBuilder`` (within a modifed tree) or ``ChangeSet`` (within an
-  ## unmodified tree) as the last parameter.
+proc lowerExpr(c; tree; bu)
+proc lowerPath(c; tree; bu): TypeId
+
+proc computeOffset(c; tree; n): (uint64, TypeId) =
+  ## Computes the static relative offset and type for path expression `n`.
   case tree[n].kind
-  of Local:
-    bu.keep(tree, n)
-  of At:
-    let
-      (a, b) = pair(tree, n)
-      typ = c.lookup(tree, c.typeof(tree, n)) # element type
-    # turn ``(At a b)`` into ``(Add a (Mul b elemSize))``
-    bu.replace(n, Add):
-      bu.add Node(kind: Type, val: c.addrType.uint32)
-      c.lowerPathElem(tree, a, bu)
-      # TODO: fold constant multiplications
-      bu.subTree Mul:
-        bu.add Node(kind: Type, val: c.addrType.uint32)
-        # higher-level ILs ensure that the index type already has the correct
-        # type
-        c.lowerExpr(tree, b, bu)
-        bu.add Node(kind: IntVal, val: tree[typ, 0].imm)
+  of Deref:
+    result = (0'u64, tree[n, 0].typ)
   of Field:
     let
-      (a, b) = pair(tree, n)
-      typ = c.lookup(tree, c.typeof(tree, a))
-    # turn into pointer arithmetic
-    # TODO: omit the Add if the offset is 0
-    bu.replace(n, Add):
-      bu.add Node(kind: Type, val: c.addrType.uint32)
-      c.lowerPathElem(tree, a, bu)
-      let offset = tree[tree.child(typ, 1 + tree[b].imm), 0].imm
-      bu.add Node(kind: IntVal, val: offset)
-  of Copy:
+      (a, b) = tree.pair(n)
+      (offset, typ) = c.computeOffset(tree, a)
+    result = c.lookupField(tree, typ, tree[b].imm.int)
+    result[0] += offset
+  of At:
     let
-      a = tree.child(n, 0)
-      typ = c.typeof(tree, a)
-    if tree[a].kind in {Field, At}:
-      # turn into a Load
-      bu.replace(n, Load):
-        bu.add Node(kind: Type, val: typ.uint32)
-        c.lowerExpr(tree, a, bu)
+      (a, b) = tree.pair(n)
+      (offset, typ) = c.computeOffset(tree, a)
+      elem = tree[c.lookup(tree, typ), 2].typ
+    if tree[b].kind == IntVal:
+      # static indexing
+      result = (offset + (tree.getUInt(b) * c.sizeof(tree, elem)), elem)
     else:
-      bu.keep(tree, n)
+      # dynamic indexing
+      result = (0'u64, elem)
+  else:
+    unreachable()
+
+proc lowerPathElem(c; tree; bu) =
+  ## Lowers the path expression at the current cursor position.
+  let n = bu.pos
+  case tree[n].kind
+  of Deref:
+    assert tree[n, 1].kind in {Move, Copy, IntVal}
+    # replace the Deref with its content:
+    bu.skipTree tree:
+      bu.skip(tree)
+      bu.keep(tree)
+  of Field:
+    bu.skipTree tree:
+      c.lowerPathElem(tree, bu)
+      bu.skip(tree)
+  of At:
+    # XXX: the branching logic here might be an indicator for a ``DynAt``
+    #      being a good idea...
+    if tree[n, 1].kind == IntVal:
+      # static indexing
+      bu.skipTree tree:
+        c.lowerPathElem(tree, bu)
+        bu.skip(tree)
+    else:
+      # dynamic indexing
+      bu.skipTree tree:
+        bu.subTree Add:
+          bu.add Node(kind: Type, val: c.addrType.uint32)
+          let typ = c.lowerPath(tree, bu)
+          bu.subTree Mul:
+            bu.add Node(kind: Type, val: c.addrType.uint32)
+            c.lowerExpr(tree, bu)
+            bu.add Node(kind: IntVal, val: uint32 c.sizeof(tree, tree[c.lookup(tree, typ), 2].typ))
+
+  else:
+    unreachable()
+
+proc lowerPath(c; tree; bu): TypeId =
+  let (offset, typ) = c.computeOffset(tree, bu.pos)
+  if offset == 0:
+    # no offset is needed
+    c.lowerPathElem(tree, bu)
+  else:
+    # add the static offset to the address value
+    bu.subTree Add:
+      bu.add Node(kind: Type, val: c.addrType.uint32)
+      c.lowerPathElem(tree, bu)
+      # TODO: this needs to use packed integers
+      bu.add Node(kind: IntVal, val: offset.uint32)
+
+  result = typ
+
+proc updateType(c; tree; bu) =
+  let typ  = tree[bu.pos].typ
+  assert typ in c.typeMap
+  let with = c.typeMap[typ]
+  # don't modify nodes if they don't change; it keeps the changeset
+  # smaller
+  if typ == with:
+    bu.keep(tree)
+  else:
+    bu.replace tree, Node(kind: Type, val: with.uint32)
+
+proc lowerExpr(c; tree; bu) =
+  ## Lowers expressions. If the sub-tree at `bu` is not an expression, it's
+  ## kept, but expressions within are lowered.
+  case tree[bu.pos].kind
+  of Load:
+    bu.keepTree tree:
+      c.lowerExpr(tree, bu)
+      c.lowerExpr(tree, bu)
+  of At, Field:
+    # handled here for the convenience of the callers
+    discard c.lowerPath(tree, bu)
   of Addr:
-    let a = tree.child(n, 0)
-    if tree[a].kind in {Field, At}:
-      # drop the ``Addr`` operation. The whole path expression will be turned
-      # into pointer arithmetic
-      bu.skipTree(n):
-        c.lowerExpr(tree, a, bu)
-    else:
-      # can only be ``(Addr <local>)``, which doesn't need any lowering
-      bu.keep(tree, n)
-
-  elif isAtom(tree[n].kind):
-    bu.keep(tree, n)
+    bu.skipTree tree:
+      discard c.lowerPath(tree, bu)
+  of Type:
+    c.updateType(tree, bu)
   else:
-    # XXX: for simplicity, just traverse everything else, even the parts that
-    #      aren't really expressions (such as the type references)
-    bu.keep(tree, n):
-      for it in tree.items(n):
-        c.lowerExpr(tree, it, bu)
+    bu.filterTree tree, {Addr, Type, Load}:
+      c.lowerExpr(tree, bu)
 
-proc genMemCopy(c; tree; n, dst, src, typ: NodeIndex, changes) =
-  ## Replaces the subtree at `n` with a ``Copy`` statement.
-  changes.replace(n, Copy):
-    # can be either an l- or rvalue, depending on who called ``genMemCopy``
-    if tree[dst].kind in {Field, At, Local}:
-      c.lowerPathElem(tree, dst, bu)
-    else:
-      c.lowerExpr(tree, dst, bu)
-
-    case tree[src].kind
-    of Copy:
-      c.lowerPathElem(tree, tree.last(src), bu)
-    of Load:
-      # don't load a temporary value, copy from the source into the
-      # destination directly
-      c.lowerExpr(tree, tree.last(src), bu)
-    else:
-      # no other expression can evaluate to an aggregate value
-      unreachable()
-
-    # the size-in-bytes to copy. Take it from the type
-    bu.add Node(kind: IntVal, val: tree[typ, 0].val)
-
-proc lowerStmt(c; tree; n; changes) =
-  case tree[n].kind
-  of Asgn:
-    let
-      (a, b) = pair(tree, n)
-      typ = c.typeof(tree, a)
-      typN = c.lookup(tree, typ)
-
-    if tree[typN].kind in AggregateTypes:
-      c.genMemCopy(tree, n, a, b, typN, changes)
-    elif tree[a].kind in {Field, At}:
-      # turn into a Store
-      changes.replace(n, Store):
-        bu.add Node(kind: Type, val: typ.uint32)
-        c.lowerExpr(tree, a, bu)
-        c.lowerExpr(tree, b, bu)
-    else:
-      c.lowerExpr(tree, a, changes)
-      c.lowerExpr(tree, b, changes)
+proc lowerStmt(c; tree; bu) =
+  case tree[bu.pos].kind
   of Store:
-    let
-      (t, a, b) = triplet(tree, n)
-      typN = c.lookup(tree, tree[t].typ)
-
-    if tree[typN].kind in AggregateTypes:
-      c.genMemCopy(tree, n, a, b, typN, changes)
+    let t = tree[bu.pos, 0].typ
+    if t in c.typeMap:
+      bu.keepTree tree:
+        c.lowerExpr(tree, bu)
+        c.lowerExpr(tree, bu)
+        c.lowerExpr(tree, bu)
     else:
-      c.lowerExpr(tree, a, changes)
-      c.lowerExpr(tree, b, changes)
-  of Copy:
-    let (a, b, size) = triplet(tree, n)
-    c.lowerExpr(tree, a, changes)
-    c.lowerExpr(tree, b, changes)
-    c.lowerExpr(tree, size, changes)
-  of Clear:
-    let (a, b) = pair(tree, n)
-    c.lowerExpr(tree, a, changes)
-    c.lowerExpr(tree, b, changes)
-  of Drop:
-    c.lowerExpr(tree, tree.child(n, 0), changes)
-  of Call:
-    c.lowerCall(tree, n, 0, changes)
+      # it's a store with an aggregate type.
+      # ``(Store ... x (Load ... y))`` -> ``(Copy x y size)``
+      bu.skipTree tree:
+        bu.skip(tree)
+        bu.subTree Copy:
+          c.lowerExpr(tree, bu)
+          assert tree[bu.pos].kind == Load,
+                 "aggregate Store source can only be a Load"
+          # drop the Load
+          bu.skipTree tree:
+            bu.skip(tree)
+            c.lowerExpr(tree, bu)
+          bu.add Node(kind: IntVal, val: uint32 c.sizeof(tree, t))
+  of Asgn, Copy, Clear, Drop, Call:
+    # no special handling, only lower the expressions within
+    c.lowerExpr(tree, bu)
   else:
     unreachable()
 
-proc lowerExit(c; tree; n; changes) =
-  case tree[n].kind
-  of Continue:
-    if tree.len(n) > 1:
-      c.lowerExpr(tree, tree.child(n, 1), changes)
-  of CheckedCallAsgn:
-    c.lowerCall(tree, n, 1, changes)
-  of CheckedCall:
-    c.lowerCall(tree, n, 0, changes)
-  of SelectBool, Raise:
-    c.lowerExpr(tree, tree.child(n, 0), changes)
-  else:
-    discard "nothing to do"
+proc lowerProc(c: var PassCtx, tree; bu) =
+  bu.keepTree tree:
+    c.lowerExpr(tree, bu) # update the type reference
+    bu.keep(tree)
 
-proc lowerType(tree; n; changes) =
-  case tree[n].kind
-  of AggregateTypes:
-    # turn into a blob type:
-    changes.replace(n, Blob):
-      bu.add tree[n, 0] # copy the size
-  of ProcTy, Int, UInt, Float:
-    discard "nothing to do"
-  else:
-    unreachable()
+    bu.forEach tree, n:
+      bu.keepTree tree:
+        # update the type references for the parameters and locals list
+        bu.forEach tree, n:
+          c.updateType(tree, bu)
+        bu.forEach tree, n:
+          c.updateType(tree, bu)
 
-proc lowerProc(c: var PassCtx, tree; n; changes) =
-  c.locals = tree.child(n, 1)
-  assert tree[c.locals].kind == Locals
-  # apply the lowering to all continuations:
-  for it in tree.items(tree.child(n, 2)):
-    if tree.len(it) > 1: # ignore the return continuation
-      for stmt in tree.items(it, 2, ^2):
-        c.lowerStmt(tree, stmt, changes)
+        for _ in 2..<tree.len(n)-1:
+          c.lowerStmt(tree, bu)
 
-      c.lowerExit(tree, tree.last(it), changes)
+        c.lowerExpr(tree, bu) # no special handling for exits
 
 proc lower*(tree; ptrSize: int): Changeset[NodeKind] =
   ## Computes the changeset representing the lowering for a whole module
   ## (`tree`). `ptrSize` is the size-in-bytes of address values.
-
-  # lower the types:
-  for it in tree.items(tree.child(0)):
-    lowerType(tree, it, result)
-
   var c = PassCtx(types: tree.child(0))
+  var bu = initCursor[NodeKind](tree)
 
-  c.addrType = tree.len(tree.child(0)).TypeId
-  # TODO: don't introduce duplicate types; re-use existing ones.
-  #       Also, only create/lookup the addrType when really needed
-  result.insert(tree, c.types, c.addrType.int, UInt):
-    bu.add Node(kind: Immediate, val: ptrSize.uint32)
+  var addrType = none(TypeId)
+  bu.keepTree tree:
+    var id = 0
+    # remove all aggregate types from the type section:
+    for i, it in tree.pairs(tree.child(0)):
+      case tree[it].kind
+      of Record, Union, Array:
+        bu.skip(tree)
+      of Int, UInt, Float:
+        # if a uint type fits, pick it as the address type:
+        if tree[it].kind == UInt and addrType.isNone and
+           tree[it, 0].imm.int == ptrSize:
+          addrType = some TypeId(id)
 
-  for it in tree.items(tree.child(2)):
-    c.lowerProc(tree, it, result)
+        bu.keep(tree)
+        c.typeMap[TypeId(i)] = TypeId(id)
+        inc id
+      of ProcTy:
+        # patch the types referenced by proc types
+        bu.forEach tree, n:
+          if tree[n].kind == Type:
+            c.updateType(tree, bu)
+          else:
+            bu.keep(tree) # must be ``Void``
+
+        c.typeMap[TypeId(i)] = TypeId(id)
+        inc id
+      else:
+        unreachable()
+
+    if addrType.isSome:
+      # reuse an existing type
+      c.addrType = addrType.unsafeGet
+    else:
+      # no type that can be re-used; add a new one
+      bu.subTree UInt:
+        bu.add Node(kind: Immediate, val: ptrSize.uint32)
+      c.addrType = TypeId(id)
+
+  bu.keep(tree) # keep the globals
+
+  bu.forEach tree, n:
+    c.lowerProc(tree, bu)
+
+  result = toChangeset(bu)
