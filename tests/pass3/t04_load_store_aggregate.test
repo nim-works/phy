@@ -1,0 +1,29 @@
+discard """
+  output: "(Error ecIllegalAccess)"
+"""
+(TypeDefs
+  (Int 8)
+  (Array 8 1 (Type 0))
+  (Record 8 8
+    (Field 0 (Type 0)))
+  (Union  8 8 (Type 0))
+  (Record 8 8
+    (Field  0 (Type 1))
+    (Field  8 (Type 2))
+    (Field 16 (Type 3)))
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 5) 0
+    (List
+      (Block (Params) (Locals)
+        (Store (Type 1)
+          (IntVal 0)
+          (Load (Type 1) (IntVal 0)))
+        (Store (Type 2)
+          (IntVal 0)
+          (Load (Type 2) (IntVal 0)))
+        (Store (Type 3)
+          (IntVal 0)
+          (Load (Type 3) (IntVal 0)))
+        (Return)))))

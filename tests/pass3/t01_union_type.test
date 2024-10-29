@@ -1,11 +1,12 @@
 (TypeDefs
   (Int 4)
-  (Record 16 8
-    (Field 0 (Type 0))
-    (Field 8 (Type 0)))
+  (Float 8)
+  (Union 8 8
+    (Type 0)
+    (Type 1))
   (ProcTy (Void)))
 
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 2) 0 (List
+  (ProcDef (Type 3) 0 (List
     (Block (Params) (Locals) (Return)))))

@@ -5,7 +5,5 @@
 )
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 2) (Locals) (Continuations
-    (Continuation (Params)))
-  )
-)
+  (ProcDef (Type 2) 0 (List
+    (Block (Params) (Locals) (Return)))))
