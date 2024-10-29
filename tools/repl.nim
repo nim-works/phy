@@ -131,7 +131,7 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
     m = m.apply(pass25.lower(m))
     m = m.apply(pass4.lower(m))
     m = m.apply(pass3.lower(m, 8))
-    m = m.apply(pass1.lower(m, 8))
+    m = m.apply(pass1.lower(m))
 
     # generate the bytecode:
     var env = initVm(1024, 1024 * 1024)
