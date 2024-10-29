@@ -29,9 +29,6 @@ The content of locations of such types is accessed with *path expressions*.
 
 ```grammar
 rvalue += (Addr <path>)
-        | (Load <type_id> <path>)
-
-stmt += (Store <type_id> <path> <value>)
 ```
 
 The `Addr` operation computes the address of the location named by the path.

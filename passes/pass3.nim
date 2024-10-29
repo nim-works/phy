@@ -159,20 +159,13 @@ proc lowerExpr(c; tree; bu) =
   ## Lowers expressions. If the sub-tree at `bu` is not an expression, it's
   ## kept, but expressions within are lowered.
   case tree[bu.pos].kind
-  of Load:
-    bu.keepTree tree:
-      c.lowerExpr(tree, bu)
-      c.lowerExpr(tree, bu)
-  of At, Field:
-    # handled here for the convenience of the callers
-    discard c.lowerPath(tree, bu)
   of Addr:
     bu.skipTree tree:
       discard c.lowerPath(tree, bu)
   of Type:
     c.updateType(tree, bu)
   else:
-    bu.filterTree tree, {Addr, Type, Load}:
+    bu.filterTree tree, {Addr, Type}:
       c.lowerExpr(tree, bu)
 
 proc lowerStmt(c; tree; bu) =
@@ -180,10 +173,7 @@ proc lowerStmt(c; tree; bu) =
   of Store:
     let t = tree[bu.pos, 0].typ
     if t in c.typeMap:
-      bu.keepTree tree:
-        c.lowerExpr(tree, bu)
-        c.lowerExpr(tree, bu)
-        c.lowerExpr(tree, bu)
+      c.lowerExpr(tree, bu)
     else:
       # it's a store with an aggregate type.
       # ``(Store ... x (Load ... y))`` -> ``(Copy x y size)``
