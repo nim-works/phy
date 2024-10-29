@@ -1,7 +1,7 @@
 ## L25 Language
 
 ```grammar
-.extends lang4
+.extends lang7
 ```
 
 Procedures are no subdivided into continuations, but instead consist of a list
