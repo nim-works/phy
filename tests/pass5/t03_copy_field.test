@@ -1,0 +1,19 @@
+(TypeDefs
+  (Int 8)
+  (Record 8 8
+    (Field 0 (Type 0)))
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 2)
+    (List (Type 1))
+    (List
+      (Block (Params) (Locals) (List)
+        (StorageLive (Loc 0))
+        (Drop
+          (Copy (Field (Loc 0) 0)))
+        (Drop
+          (Move (Field (Loc 0) 0)))
+        (StorageEnd (Loc 0))
+        (Return)))))

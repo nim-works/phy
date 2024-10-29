@@ -1,0 +1,19 @@
+discard """
+  description: "
+    Test locs where the lifetime starts in one block and ends in a different
+    one
+  "
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) (List (Type 0))
+    (List
+      (Block (Params) (Locals) (List)
+        (StorageLive (Loc 0))
+        (Goto 1 (List)))
+      (Block (Params) (Locals) (List (Loc 0))
+        (StorageEnd (Loc 0))
+        (Return)))))

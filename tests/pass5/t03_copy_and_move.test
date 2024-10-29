@@ -1,0 +1,21 @@
+discard """
+  description: "Make sure the non-aggregate assignment lowering works"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (List (Type 0))
+    (List
+      (Block (Params)
+        (Locals (Type 0) (Type 0))
+        (List)
+        (StorageLive (Loc 0))
+        (Asgn (Loc 0) (IntVal 100))
+        (Asgn (Local 0) (Copy (Loc 0)))
+        (Asgn (Local 1) (Move (Loc 0)))
+        (StorageEnd (Loc 0))
+        (Return)))))

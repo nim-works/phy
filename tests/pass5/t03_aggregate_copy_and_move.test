@@ -1,0 +1,19 @@
+discard """
+  description: "Make sure the lowering of aggregate assignments works"
+"""
+(TypeDefs
+  (Int 8)
+  (Record 8 8
+    (Field 0 (Type 0)))
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 2)
+    (List (Type 1) (Type 1))
+    (List
+      (Block (Params) (Locals) (List)
+        (StorageLive (Loc 0) (Loc 1))
+        (Asgn (Loc 0) (Copy (Loc 1)))
+        (Asgn (Loc 1) (Move (Loc 0)))
+        (StorageEnd (Loc 0) (Loc 1))
+        (Return)))))

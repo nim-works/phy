@@ -1,0 +1,16 @@
+(TypeDefs
+  (Int 8)
+  (Array 8 1 (Type 0))
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 2)
+    (List (Type 1))
+    (List
+      (Block (Params) (Locals) (List)
+        (StorageLive (Loc 0))
+        (Drop (Copy (At (Loc 0) (IntVal 0))))
+        (Drop (Move (At (Loc 0) (IntVal 0))))
+        (StorageEnd (Loc 0))
+        (Return)))))

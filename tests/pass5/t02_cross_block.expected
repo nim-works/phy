@@ -1,0 +1,18 @@
+;$sexp
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void))
+  (UInt 8))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) 8
+    (List
+      (Block
+        (Params (Type 2))
+        (Locals)
+        (Goto 1
+          (List (Param 0))))
+      (Block
+        (Params (Type 2))
+        (Locals)
+        (Return)))))

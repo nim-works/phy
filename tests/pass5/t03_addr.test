@@ -1,0 +1,18 @@
+discard """
+  description: "Make sure the `(Addr (Loc x)` lowering works"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (List (Type 0) (Type 0))
+    (List
+      (Block (Params) (Locals) (List)
+        (StorageLive (Loc 0) (Loc 1))
+        (Drop (Addr (Loc 0)))
+        (Drop (Addr (Loc 1)))
+        (StorageEnd (Loc 1) (Loc 0))
+        (Return)))))

@@ -1,0 +1,22 @@
+discard """
+  description: "
+    Stack locations with non-overlapping live ranges may occupy the same
+    memory location
+  "
+  knownIssue: "Not implemented at the moment"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (List (Type 0) (Type 0))
+    (List
+      (Block (Params) (Locals) (List)
+        (StorageLive (Loc 0))
+        (StorageEnd (Loc 0))
+        (StorageLive (Loc 1))
+        (StorageEnd (Loc 1))
+        (Return)))))

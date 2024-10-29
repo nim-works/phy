@@ -1,0 +1,13 @@
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (List (Type 0))
+    (List
+      (Block (Params) (Locals) (List)
+        (StorageLive (Loc 0))
+        (StorageEnd (Loc 0))
+        (Return)))))
