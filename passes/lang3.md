@@ -22,7 +22,7 @@ dpath ::= (At    <dpath_elem> elem:<value>)
        |  (Field <dpath_elem> field:<int>)
 
 dpath_elem ::= (Deref <type_id> <simple>)
-            |  <path>
+            |  <dpath>
 ```
 
 The content of locations of such types is accessed with *path expressions*.
