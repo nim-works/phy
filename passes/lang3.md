@@ -18,17 +18,17 @@ The `Record`, `Union`, and `Array` types are only allowed for:
 * pointer dereference types
 
 ```grammar
-path ::= (At    <path_elem> elem:<value>)
-      |  (Field <path_elem> field:<int>)
+dpath ::= (At    <dpath_elem> elem:<value>)
+       |  (Field <dpath_elem> field:<int>)
 
-path_elem ::= (Deref <type_id> <simple>)
-           |  <path>
+dpath_elem ::= (Deref <type_id> <simple>)
+            |  <path>
 ```
 
 The content of locations of such types is accessed with *path expressions*.
 
 ```grammar
-rvalue += (Addr <path>)
+rvalue += (Addr <dpath>)
 ```
 
 The `Addr` operation computes the address of the location named by the path.

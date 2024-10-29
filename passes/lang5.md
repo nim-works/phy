@@ -35,19 +35,18 @@ generally available already, every basic-block specifies which stack locations
 are live at its entry, so that no inter-block data-flow analysis is necessary.
 
 ```grammar
-rvalue += (Move <path>)
+path ::= (At    <path> elem:<value>)
+      |  (Field <path> field:<int>)
+      |  <loc_id>
+
+rvalue += (Addr <path>)
+        | (Move <path>)
         | (Copy <path>)
-        | (Move <loc_id>)
-        | (Copy <loc_id>)
-        | (Addr <loc_id>)
 
 stmt += (Asgn <path> <value>)
-      | (Asgn <loc_id> <value>)
-
-path_elem += <loc_id>
 ```
 
-Stack locations can be used as path roots, as well as the source for copy,
+Path expressions with a `Loc` as the root can be used as the operand for copy,
 move, and address-of operations. Moving from a stack location does not affect
-the live state of the location. Taking the address of a stack location yields
-the dynamic memory address.
+the liveness of the location. Taking the address of a stack location yields
+its dynamic memory address.
