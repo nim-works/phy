@@ -422,6 +422,18 @@ proc fitExpr(c; e: sink Expr, target: SemType): Expr =
     result = Expr(stmts: e.stmts, expr: @[Node(kind: IntVal)],
                   typ: errorType())
 
+proc fitExprStrict(c; e: sink Expr, typ: SemType): Expr =
+  ## Makes sure expression `e` fits `typ` exactly, reporting an error and
+  ## returning an error-expression if not.
+  if e.typ == typ:
+    result = e # all good
+  else:
+    c.error("expected expression of type $1 but got type $2" %
+            [$e.typ.kind, $typ.kind])
+    # turn into an error expression:
+    result = Expr(stmts: e.stmts, expr: @[Node(kind: IntVal)],
+                  typ: errorType())
+
 proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType
 
 proc exprToIL(c; t: InTree, n: NodeIndex): Expr =
@@ -644,6 +656,43 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
       c.error("'" & name & "' cannot be used in this context")
       bu.add Node(kind: IntVal)
       result = prim(tkError) + {}
+  of SourceKind.And, SourceKind.Or:
+    let
+      (a, b) = t.pair(n)
+      ea  = c.fitExprStrict(c.exprToIL(t, a), prim(tkBool))
+      # the second operand is evaluated conditionally, and it's thus placed
+      # within its own scope
+      eb  = c.fitExprStrict(c.scopedExprToIL(t, b), prim(tkBool))
+      tmp = c.newTemp(prim(tkBool))
+
+    if t[n].kind == SourceKind.And:
+      # (And a b) -> (If a b False)
+      stmts.addStmt If:
+        bu.inline(ea, stmts)
+        bu.subTree Stmts: # then branch
+          bu.add eb.stmts
+          bu.subTree Asgn:
+            bu.add Node(kind: Local, val: tmp)
+            bu.add eb.expr
+        bu.subTree Asgn: # else branch
+          bu.add Node(kind: Local, val: tmp)
+          bu.add Node(kind: IntVal, val: c.literals.pack(0))
+
+    else:
+      # (Or a b) -> (If a True b)
+      stmts.addStmt If:
+        bu.inline(ea, stmts)
+        bu.subTree Asgn: # then branch
+          bu.add Node(kind: Local, val: tmp)
+          bu.add Node(kind: IntVal, val: c.literals.pack(1))
+        bu.subTree Stmts: # else branch
+          bu.add eb.stmts
+          bu.subTree Asgn:
+            bu.add Node(kind: Local, val: tmp)
+            bu.add eb.expr
+
+    bu.add Node(kind: Local, val: tmp)
+    result = prim(tkBool) + {}
   of SourceKind.If:
     let
       (p, b) = t.pair(n) # predicate and body, always present
@@ -665,7 +714,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
         else:
           (c.fitExpr(body, typ), c.fitExpr(els, typ))
       tmp = c.newTemp(typ)
-    
+
     stmts.addStmt If:
       bu.inline(cond, stmts)
       bu.subTree Stmts:
