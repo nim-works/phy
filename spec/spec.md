@@ -314,6 +314,40 @@ expression is `void`, otherwise the type is that of the trailing expression.
 **Expression kind**: same as that of the trailing expression
 **Uses**: nothing
 
+#### Logical `And`
+
+```grammar
+expr += (And a:<expr> b:<expr>)
+```
+
+Evaluates to `true` when both `a` and `b` evaluate to `true`, `false`
+otherwise. `b` is only evaluated if `a` evaluates to `true`. The type of an
+`And` expression is `bool`.
+
+In terms of scoping, `(And a b)` is equivalent with `(If a b (Ident "false"))`.
+
+An error is reported if the type of either `a` or `b` is not `bool`.
+
+**Expression kind**: rvalue
+**Uses**: `a` and `b`
+
+#### Logical `Or`
+
+```grammar
+expr += (Or a:<expr> b:<expr>)
+```
+
+Evaluates to `true` when `a`, `b`, or both `a` and `b` evaluate to `true`,
+`false` otherwise. `b` is only evaluated if `a` evaluates to `false`. The type
+of an `Or` expression is `bool`.
+
+In terms of scoping, `(Or a b)` is equivalent with `(If a (Ident "true") b)`.
+
+An error is reported if the type of either `a` or `b` is not `bool`.
+
+**Expression kind**: rvalue
+**Uses**: `a` and `b`
+
 #### Assignment
 
 ```grammar
