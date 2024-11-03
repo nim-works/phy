@@ -429,7 +429,7 @@ proc fitExprStrict(c; e: sink Expr, typ: SemType): Expr =
     result = e # all good
   else:
     c.error("expected expression of type $1 but got type $2" %
-            [$e.typ.kind, $typ.kind])
+            [$typ.kind, $e.typ.kind])
     # turn into an error expression:
     result = Expr(stmts: e.stmts, expr: @[Node(kind: IntVal)],
                   typ: errorType())
