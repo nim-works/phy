@@ -12,7 +12,7 @@ import
     utils
   ]
 
-import vm/vmtypes except tkVoid, tkInt, tkFloat
+import vm/vmtypes except tkVoid, tkInt, tkFloat, tkProc
 
 proc readInt(p: HostPointer, size: range[1..8]): int64 =
   copyMem(addr result, p, size)
@@ -75,6 +75,8 @@ proc valueToString(env: var VmEnv, a: VirtualAddr, typ: SemType): string =
       result = valueToString(env, VirtualAddr(a.uint64 + 8), typ.elems[tag])
     else:
       result = "<invalid tag: " & $tag & ">"
+  of tkProc:
+    result.add "proc(" & $readInt(p, 8) & ")"
   of tkVoid, tkError:
     unreachable()
 
@@ -103,6 +105,15 @@ proc typeToString(typ: SemType): string =
         res.add ", "
       res.add typeToString(it)
     res.add ")"
+    res
+  of tkProc:
+    var res = "proc("
+    for i, it in typ.elems.toOpenArray(1, typ.elems.high).pairs:
+      if i > 0:
+        res.add ", "
+      res.add typeToString(it)
+    res.add ") -> "
+    res.add typeToString(typ.elems[0])
     res
   of tkError:
     unreachable()
@@ -154,7 +165,7 @@ proc run*(env: var VmEnv, prc: ProcIndex): string =
   case res.kind
   of yrkDone:
     case env.types[res.typ].kind
-    of vmtypes.TypeKind.tkVoid, tkProc, tkForeign:
+    of vmtypes.TypeKind.tkVoid, vmtypes.TypeKind.tkProc, tkForeign:
       discard
     of vmtypes.TypeKind.tkInt:
       result.add " "
