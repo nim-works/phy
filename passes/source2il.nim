@@ -36,8 +36,8 @@ type
       ## ID of the procedure or type. It's an index into the respective list
 
   ProcInfo* = object
-    result*: SemType
-      ## the return type
+    typ*: SemType
+      ## the procedure's type
 
   Scope = Table[string, Entity]
 
@@ -276,10 +276,17 @@ proc typeToIL(c; typ: SemType): uint32 =
       c.types.subTree Field:
         c.types.add Node(kind: Immediate, val: 8)
         c.types.add Node(kind: Type, val: inner)
+  of tkProc:
+    # a proc type is used to represent both procedure signatures and the type
+    # of procedural values. For values, the underlying storage type is a uint
+    c.addType UInt: c.types.add(Node(kind: Immediate, val: 8))
 
-proc genProcType(c; ret: SemType): uint32 =
-  ## Generates a proc type with `ret` as the return type and adds it to `c`.
-  case ret.kind
+proc genProcType(c; typ: SemType): uint32 =
+  ## Generates the IL representation for the procedure signature type `typ`
+  ## and adds it to `c`.
+  assert typ.kind == tkProc
+
+  case typ.elems[0].kind
   of tkVoid:
     c.addType ProcTy:
       c.types.subTree Void: discard
@@ -293,7 +300,7 @@ proc genProcType(c; ret: SemType): uint32 =
       c.types.add Node(kind: Type, val: ret)
       c.types.add Node(kind: Type, val: arg)
   else:
-    let typId = c.typeToIL(ret)
+    let typId = c.typeToIL(typ.elems[0])
     c.addType ProcTy:
       c.types.add Node(kind: Type, val: typId)
 
@@ -564,7 +571,7 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
     if t.len(n) == 1:
       # procedure arity is currently always 0
       let prc {.cursor.} = c.procList[ent.id]
-      case prc.result.kind
+      case prc.typ.elems[0].kind
       of tkVoid:
         stmts.addStmt Call:
           bu.add Node(kind: Proc, val: ent.id.uint32)
@@ -573,7 +580,7 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
           discard
       of AggregateTypes:
         # the value is not returned normally, but passed via an out parameter
-        let tmp = c.newTemp(prc.result)
+        let tmp = c.newTemp(prc.typ.elems[0])
         stmts.addStmt Drop:
           bu.subTree Call:
             bu.add Node(kind: Proc, val: ent.id.uint32)
@@ -586,7 +593,7 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
         bu.subTree Call:
           bu.add Node(kind: Proc, val: ent.id.uint32)
 
-      result = prc.result
+      result = prc.typ.elems[0]
     else:
       c.error("expected 0 arguments, but got " & $(t.len(n) - 1))
       bu.add Node(kind: IntVal)
@@ -913,12 +920,14 @@ proc exprToIL*(c; t): SemType =
   if result.kind == tkError:
     return # don't create any procedure
 
-  let procTy = c.genProcType(result)
+  let
+    procTy    = procType(result)
+    signature = c.genProcType(procTy)
 
   template bu: untyped = c.procs
 
   bu.subTree ProcDef:
-    bu.add Node(kind: Type, val: procTy)
+    bu.add Node(kind: Type, val: signature)
     bu.subTree Locals:
       for it in c.locals.items:
         bu.add Node(kind: Type, val: c.typeToIL(it))
@@ -932,7 +941,7 @@ proc exprToIL*(c; t): SemType =
         bu.subTree Return:
           genUse(e.expr, bu)
 
-  c.procList.add ProcInfo(result: result)
+  c.procList.add ProcInfo(typ: procType(result))
 
 proc declToIL*(c; t; n: NodeIndex) =
   ## Translates the given source language declaration to the target IL.
@@ -947,8 +956,6 @@ proc declToIL*(c; t; n: NodeIndex) =
 
     c.retType = evalType(c, t, t.child(n, 1))
 
-    let procTy = c.genProcType(c.retType)
-
     if c.retType.kind in AggregateTypes:
       # needs an extra pointer parameter
       c.locals.add prim(tkInt)
@@ -957,8 +964,12 @@ proc declToIL*(c; t; n: NodeIndex) =
     defer:
       c.resetProcContext() # clear the context again
 
+    let
+      procTy    = procType(c.retType)
+      signature = c.genProcType(procTy)
+
     # register the proc before analysing/translating the body
-    c.procList.add ProcInfo(result: c.retType)
+    c.procList.add ProcInfo(typ: procTy)
     c.addDecl(name, Entity(kind: ekProc, id: c.procList.high))
 
     let e = c.scopedExprToIL(t, t.child(n, 3))
@@ -970,7 +981,7 @@ proc declToIL*(c; t; n: NodeIndex) =
       return
 
     var bu = initBuilder[NodeKind](ProcDef)
-    bu.add Node(kind: Type, val: procTy)
+    bu.add Node(kind: Type, val: signature)
     bu.subTree Locals:
       for it in c.locals.items:
         bu.add Node(kind: Type, val: c.typeToIL(it))
