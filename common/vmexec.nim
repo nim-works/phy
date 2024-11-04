@@ -111,7 +111,7 @@ proc run*(env: var VmEnv, prc: ProcIndex, typ: SemType): string =
   ## Runs the nullary procedure with index `prc`, and returns the result
   ## rendered as a string. `typ` is the type of the resulting value.
   var thread: VmThread
-  if typ.kind in ComplexTypes:
+  if typ.kind in AggregateTypes:
     # reserve enough stack space:
     let start = uint size(typ)
     # pass the address of the destination as the first parameter

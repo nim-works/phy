@@ -36,9 +36,9 @@ type
       elems*: seq[SemType]
 
 const
-  ComplexTypes* = {tkTuple, tkUnion}
-    ## types that can currently not be used as procedure return or parameter
-    ## types in the target IL
+  AggregateTypes* = {tkTuple, tkUnion}
+  ComplexTypes*   = AggregateTypes
+    ## non-primitive types
 
 proc cmp*(a, b: SemType): int =
   ## Establishes a total order for types, intended mainly for sorting them.

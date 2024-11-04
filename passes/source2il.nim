@@ -283,8 +283,8 @@ proc genProcType(c; ret: SemType): uint32 =
   of tkVoid:
     c.addType ProcTy:
       c.types.subTree Void: discard
-  of ComplexTypes:
-    # non-primitive types are passed via an out parameter.
+  of AggregateTypes:
+    # aggregate types are passed via an out parameter.
     # ``() -> T`` becomes ``(int) -> unit``
     let
       ret = c.typeToIL(prim(tkUnit))
@@ -571,7 +571,7 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
         # mark the normal control-flow path as dead:
         stmts.addStmt Unreachable:
           discard
-      of ComplexTypes:
+      of AggregateTypes:
         # the value is not returned normally, but passed via an out parameter
         let tmp = c.newTemp(prc.result)
         stmts.addStmt Drop:
@@ -814,8 +814,8 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
       case e.typ.kind
       of tkError:
         discard "do nothing"
-      of ComplexTypes:
-        # special handling for complex types: store through the out parameter
+      of AggregateTypes:
+        # special handling for aggregate types: store through the out parameter
         stmts.addStmt Store:
           bu.add Node(kind: Type, val: c.typeToIL(e.typ))
           bu.subTree Copy:
@@ -893,7 +893,7 @@ proc exprToIL*(c; t): SemType =
   var e = c.scopedExprToIL(t, NodeIndex(0))
   result = e.typ
 
-  if e.typ.kind in ComplexTypes:
+  if e.typ.kind in AggregateTypes:
     # XXX: to properly handle non-primitive returns, the expression is
     #      currently analysed twice
     c.resetProcContext() # undo the effects
@@ -949,7 +949,7 @@ proc declToIL*(c; t; n: NodeIndex) =
 
     let procTy = c.genProcType(c.retType)
 
-    if c.retType.kind in ComplexTypes:
+    if c.retType.kind in AggregateTypes:
       # needs an extra pointer parameter
       c.locals.add prim(tkInt)
       c.returnParam = uint32(c.locals.len - 1)
