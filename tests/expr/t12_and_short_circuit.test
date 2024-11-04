@@ -1,0 +1,16 @@
+discard """
+  description: "
+    The second `And` operand expression is not evaluated when the first one
+    evaluates to false.
+  "
+  output: "100: int"
+"""
+(Exprs
+  (Decl (Ident "a") (IntVal 100))
+  (Decl (Ident "b")
+    (And
+      (Ident "false")
+      (Exprs
+        (Asgn (Ident "a") (IntVal 200))
+        (Ident "true"))))
+  (Ident "a"))

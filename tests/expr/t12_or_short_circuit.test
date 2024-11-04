@@ -1,0 +1,16 @@
+discard """
+  description: "
+    The second `Or` operand expression is not evaluated when the first one
+    evaluates to true.
+  "
+  output: "100: int"
+"""
+(Exprs
+  (Decl (Ident "a") (IntVal 100))
+  (Decl (Ident "b")
+    (Or
+      (Ident "true")
+      (Exprs
+        (Asgn (Ident "a") (IntVal 200))
+        (Ident "true"))))
+  (Ident "a"))
