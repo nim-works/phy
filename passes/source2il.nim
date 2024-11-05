@@ -581,10 +581,12 @@ proc userCallToIL(c; t; n: NodeIndex, bu; stmts): SemType =
           else:
             c.exprToIL(t, it)
 
-        # XXX: inlining the argument expression is wrong and doesn't adhere to
-        #      the specification. No procedures with more than zero parameters
-        #      exist at the moment, so this is not an immediate probme
-        bu.inline(arg, stmts)
+        stmts.add arg.stmts
+        # XXX: the expressions needs to be assigned to a temporary, otherwise
+        #      the observable evaluation order is wrong. No procedures with
+        #      more than zero parameters exist at the moment, so this is not an
+        #      immediate problem
+        genUse(arg.expr, bu)
         inc i
 
       if i != prc.elems.len:
