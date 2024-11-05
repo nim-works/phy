@@ -351,7 +351,7 @@ proc genLocal(val: uint32, typ: SemType, bu) =
 proc genUse(a: Node|NodeSeq, bu) =
   ## Emits `a` to `bu`, wrapping the expression in a ``Copy`` operation when
   ## it's an lvalue expression.
-  if a[0].kind in {Field, At, Local}:
+  if (when a is Node: a.kind else: a[0].kind) in {Field, At, Local}:
     bu.subTree Copy:
       bu.add a
   else:
@@ -581,12 +581,9 @@ proc userCallToIL(c; t; n: NodeIndex, bu; stmts): SemType =
           else:
             c.exprToIL(t, it)
 
-        stmts.add arg.stmts
-        # XXX: the expressions needs to be assigned to a temporary, otherwise
-        #      the observable evaluation order is wrong. No procedures with
-        #      more than zero parameters exist at the moment, so this is not an
-        #      immediate problem
-        genUse(arg.expr, bu)
+        # capture the value to ensure a correct evaluation order between the
+        # argument expressions
+        genUse(c.capture(arg, stmts), bu)
         inc i
 
       if i != prc.elems.len:
