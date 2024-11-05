@@ -221,6 +221,14 @@ proc evalType(c; t; n: NodeIndex): SemType =
         list.add typ
 
     SemType(kind: tkUnion, elems: list)
+  of SourceKind.ProcTy:
+    # anything goes as the return type
+    var list = @[c.evalType(t, t.child(n, 0))]
+
+    for it in t.items(n, 1):
+      list.add c.expectNot(c.evalType(t, it), tkVoid)
+
+    SemType(kind: tkProc, elems: list)
   of Ident:
     let
       name = t.getString(n)
