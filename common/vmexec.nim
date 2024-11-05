@@ -76,7 +76,9 @@ proc valueToString(env: var VmEnv, a: VirtualAddr, typ: SemType): string =
     else:
       result = "<invalid tag: " & $tag & ">"
   of tkProc:
-    result.add "proc(" & $readInt(p, 8) & ")"
+    # render as an ellipsis for now. Proper rendering requires access to
+    # the procedure names, which we don't have at the moment
+    result.add "..."
   of tkVoid, tkError:
     unreachable()
 
