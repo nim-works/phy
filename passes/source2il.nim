@@ -556,60 +556,104 @@ proc notToIL(c; t; n: NodeIndex, bu; stmts): SemType =
     bu.add Node(kind: IntVal)
     result = errorType()
 
-proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
-  let
-    name = t.getString(t.child(n, 0))
-    ent  = c.lookup(name)
+proc userCallToIL(c; t; n: NodeIndex, bu; stmts): SemType =
+  ## Analyzes a non-built-in call expression and translates it to its IL
+  ## representation.
+  let callee = c.exprToIL(t, t.child(n, 0))
 
-  case ent.kind
-  of ekBuiltinProc:
-    case name
-    of "+", "-":
-      result = binaryArithToIL(c, t, n, name, bu, stmts)
-    of "==", "<", "<=":
-      result = relToIL(c, t, n, name, bu, stmts)
-    of "not":
-      result = notToIL(c, t, n, bu, stmts)
-    else:
-      unreachable()
-  of ekProc:
-    # a user-defined procedure
-    # TODO: rework this logic so that the argument expressions are always
-    #       analyzed, even on arity mismatch or when the callee is not a proc
-    if t.len(n) == 1:
-      # procedure arity is currently always 0
-      let prc {.cursor.} = c.procList[ent.id]
-      case prc.typ.elems[0].kind
-      of tkVoid:
-        stmts.addStmt Call:
-          bu.add Node(kind: Proc, val: ent.id.uint32)
-        # mark the normal control-flow path as dead:
-        stmts.addStmt Unreachable:
-          discard
-      of AggregateTypes:
-        # the value is not returned normally, but passed via an out parameter
-        let tmp = c.newTemp(prc.typ.elems[0])
-        stmts.addStmt Drop:
-          bu.subTree Call:
-            bu.add Node(kind: Proc, val: ent.id.uint32)
-            bu.subTree Addr:
-              bu.add Node(kind: Local, val: tmp)
-
-        # return the temporary as the expression
-        bu.add Node(kind: Local, val: tmp)
+  if callee.typ.kind == tkProc:
+    proc useCallee(c; e: sink Expr, bu; stmts) =
+      stmts.add e.stmts
+      if e.expr[0].kind == ProcVal:
+        # the callee is a statically-known procedure; it's a static call
+        bu.add Node(kind: Proc, val: e.expr[0].val)
       else:
-        bu.subTree Call:
-          bu.add Node(kind: Proc, val: ent.id.uint32)
+        bu.add Node(kind: Type, val: c.genProcType(e.typ))
+        genUse(e.expr, bu)
 
-      result = prc.typ.elems[0]
+    proc argsToIL(c; t; n: NodeIndex; prc: SemType, bu; stmts) {.nimcall.} =
+      var i = 1 # 1 means argument 0
+      for it in t.items(n, 1):
+        # only try fitting the argument if there's a corresponding parameter
+        let arg =
+          if i < prc.elems.len:
+            c.fitExprStrict(c.exprToIL(t, it), prc.elems[i])
+          else:
+            c.exprToIL(t, it)
+
+        # XXX: inlining the argument expression is wrong and doesn't adhere to
+        #      the specification. No procedures with more than zero parameters
+        #      exist at the moment, so this is not an immediate probme
+        bu.inline(arg, stmts)
+        inc i
+
+      if i != prc.elems.len:
+        # arity mismatch
+        c.error("expected $1 arguments but got $2" %
+                [$(prc.elems.len - 1), $(i - 1)])
+
+    # some return types need special handling
+    case callee.typ.elems[0].kind
+    of tkVoid:
+      stmts.addStmt Call:
+        c.useCallee(callee, bu, stmts)
+        c.argsToIL(t, n, callee.typ, bu, stmts)
+      # mark the non-exceptional call exit as unreachable:
+      stmts.addStmt Unreachable:
+        discard
+    of AggregateTypes:
+      # the value is not returned normally, but passed via an out parameter
+      let tmp = c.newTemp(callee.typ.elems[0])
+      stmts.addStmt Drop:
+        bu.subTree Call:
+          c.useCallee(callee, bu, stmts)
+          c.argsToIL(t, n, callee.typ, bu, stmts)
+          bu.subTree Addr:
+            bu.add Node(kind: Local, val: tmp)
+
+      # return the temporary as the expression
+      bu.add Node(kind: Local, val: tmp)
     else:
-      c.error("expected 0 arguments, but got " & $(t.len(n) - 1))
-      bu.add Node(kind: IntVal)
-      result = errorType()
+      bu.subTree Call:
+        c.useCallee(callee, bu, stmts)
+        c.argsToIL(t, n, callee.typ, bu, stmts)
+
+    result = callee.typ.elems[0]
   else:
-    discard c.expect(name, ent, ekProc) # always reports an error
+    if callee.typ.kind != tkError: # don't cascade errors
+      c.error("callee expression must be of procedural type")
+
+    # analyze all arguments for errors and context side-effects
+    for it in t.items(n, 1):
+      discard c.exprToIL(t, it)
+
+    # return an error
     bu.add Node(kind: IntVal)
     result = errorType()
+
+proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
+  # first check whether its call to a built-in procedure (those take
+  # precedence)
+  let callee = t.child(n, 0)
+  if t[callee].kind == Ident:
+    let
+      name = t.getString(callee)
+      ent  = c.lookup(name)
+
+    if ent.kind == ekBuiltinProc:
+      case name
+      of "+", "-":
+        result = binaryArithToIL(c, t, n, name, bu, stmts)
+      of "==", "<", "<=":
+        result = relToIL(c, t, n, name, bu, stmts)
+      of "not":
+        result = notToIL(c, t, n, bu, stmts)
+      else:
+        unreachable()
+      return
+
+  # it must be a call to a user-defined procedure (or an error)
+  result = userCallToIL(c, t, n, bu, stmts)
 
 proc localDeclToIL(c; t; n: NodeIndex, bu, stmts) =
   ## Translates a procedure-local declaration to the target IL.
@@ -663,6 +707,11 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
     of ekLocal:
       bu.add Node(kind: Local, val: ent.id.uint32)
       result = c.locals[ent.id] + {Lvalue}
+    of ekProc:
+      # expand to a procedure address (`ProcVal`), which is always correct;
+      # the callsite can turn it into a static reference (`Proc`) as needed
+      bu.add Node(kind: ProcVal, val: ent.id.uint32)
+      result = c.procList[ent.id].typ + {}
     of ekNone:
       c.error("undeclared identifier: " & t.getString(n))
       bu.add Node(kind: IntVal)
