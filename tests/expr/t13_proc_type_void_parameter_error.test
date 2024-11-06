@@ -1,0 +1,5 @@
+discard """
+  reject: true
+"""
+(TypeDecl (Ident "a")
+  (ProcTy (UnitTy) (VoidTy)))
