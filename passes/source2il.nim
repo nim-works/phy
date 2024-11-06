@@ -57,6 +57,11 @@ type
       ## the in-progress procedure section
     procList*: seq[ProcInfo]
 
+    procTypeCache: Table[SemType, uint32]
+      ## caches the ID of IL signature types generated for procedure types.
+      ## They're structural types in the source language, but nominal types in
+      ## the target IL
+
     scopes: seq[Scope]
       ## the stack of scopes. The last item always represents the current scope
 
@@ -289,7 +294,7 @@ proc typeToIL(c; typ: SemType): uint32 =
     # of procedural values. For values, the underlying storage type is a uint
     c.addType UInt: c.types.add(Node(kind: Immediate, val: 8))
 
-proc genProcType(c; typ: SemType): uint32 =
+proc rawGenProcType(c; typ: SemType): uint32 =
   ## Generates the IL representation for the procedure signature type `typ`
   ## and adds it to `c`.
   assert typ.kind == tkProc
@@ -311,6 +316,15 @@ proc genProcType(c; typ: SemType): uint32 =
     let typId = c.typeToIL(typ.elems[0])
     c.addType ProcTy:
       c.types.add Node(kind: Type, val: typId)
+
+proc genProcType(c; typ: SemType): uint32 =
+  ## Generates and caches the IL representation for the procedure signature
+  ## type `typ`, or returns the cached ID if it already exists.
+  c.procTypeCache.withValue typ, val:
+    result = val[]
+  do:
+    result = rawGenProcType(c, typ)
+    c.procTypeCache[typ] = result
 
 template buildTree(kind: NodeKind, body: untyped): NodeSeq =
   ## Makes a builder available to `body`, evaluates `body`, and returns the
