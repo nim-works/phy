@@ -342,6 +342,11 @@ proc genUse(a: Node|NodeSeq, bu) =
   else:
     bu.add a
 
+proc genUse(e: Expr, bu; stmts) =
+  ## Emits a usage of expression `e` to `bu` and `stmts`.
+  stmts.add e.stmts
+  genUse(e.expr, bu)
+
 proc genAsgn(c; a: Node|NodeSeq, b: NodeSeq, typ: SemType, bu) =
   ## Emits an ``a = b`` assignment to `bu`. For convenience, if `typ` is a
   ## ``tkVoid``, no assignment is emitted.
@@ -534,7 +539,7 @@ proc notToIL(c; t; n: NodeIndex, bu; stmts): SemType =
   if arg.typ.kind == tkBool:
     # a single argument, so no capture is necessary
     bu.subTree Not:
-      bu.inline(arg, stmts)
+      genUse(arg, bu, stmts)
     result = prim(tkBool)
   else:
     c.error("expected 'bool' expression")
@@ -668,12 +673,12 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
     if t[n].kind == SourceKind.And:
       # (And a b) -> (If a b False)
       stmts.addStmt If:
-        bu.inline(ea, stmts)
+        genUse(ea, bu, stmts)
         bu.subTree Stmts: # then branch
           bu.add eb.stmts
           bu.subTree Asgn:
             bu.add Node(kind: Local, val: tmp)
-            bu.add eb.expr
+            genUse(eb.expr, bu)
         bu.subTree Asgn: # else branch
           bu.add Node(kind: Local, val: tmp)
           bu.add Node(kind: IntVal, val: c.literals.pack(0))
@@ -681,7 +686,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
     else:
       # (Or a b) -> (If a True b)
       stmts.addStmt If:
-        bu.inline(ea, stmts)
+        genUse(ea, bu, stmts)
         bu.subTree Asgn: # then branch
           bu.add Node(kind: Local, val: tmp)
           bu.add Node(kind: IntVal, val: c.literals.pack(1))
@@ -689,7 +694,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
           bu.add eb.stmts
           bu.subTree Asgn:
             bu.add Node(kind: Local, val: tmp)
-            bu.add eb.expr
+            genUse(eb.expr, bu)
 
     bu.add Node(kind: Local, val: tmp)
     result = prim(tkBool) + {}
@@ -716,7 +721,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
       tmp = c.newTemp(typ)
 
     stmts.addStmt If:
-      bu.inline(cond, stmts)
+      genUse(cond, bu, stmts)
       bu.subTree Stmts:
         bu.add fb.stmts
         c.genAsgn(Node(kind: Local, val: tmp), fb.expr, fb.typ, bu)
@@ -824,7 +829,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
 
         bu.add UnitNode # return the unitary value
       else:
-        bu.add e.expr
+        genUse(e.expr, bu)
 
     result = prim(tkVoid) + {}
   of SourceKind.Unreachable:
