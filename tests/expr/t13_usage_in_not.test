@@ -1,0 +1,7 @@
+discard """
+  description: "Make sure a local can be used as the `not` operand"
+  output: "true: bool"
+"""
+(Exprs
+  (Decl (Ident "a") (Ident "false"))
+  (Call (Ident "not") (Ident "a"))))
