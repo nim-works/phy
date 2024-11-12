@@ -1,5 +1,7 @@
 ## Provides the formal definition for Phy.
 
+import langdefs
+
 language "source":
   grammar:
     ident     = (Ident, $str)
