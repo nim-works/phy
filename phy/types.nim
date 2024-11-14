@@ -25,6 +25,7 @@ type
     tkFloat
     tkTuple ## an anonymous product type
     tkUnion ## an anonymous sum type
+    tkProc
 
   SemType* = object
     ## Represents a source-language type. The "Sem" prefix is there to prevent
@@ -32,13 +33,13 @@ type
     case kind*: TypeKind
     of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:
       discard
-    of tkTuple, tkUnion:
+    of tkTuple, tkUnion, tkProc:
       elems*: seq[SemType]
 
 const
-  ComplexTypes* = {tkTuple, tkUnion}
-    ## types that can currently not be used as procedure return or parameter
-    ## types in the target IL
+  AggregateTypes* = {tkTuple, tkUnion}
+  ComplexTypes*   = AggregateTypes + {tkProc}
+    ## non-primitive types
 
 proc cmp*(a, b: SemType): int =
   ## Establishes a total order for types, intended mainly for sorting them.
@@ -52,7 +53,7 @@ proc cmp*(a, b: SemType): int =
   case a.kind
   of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:
     result = 0 # equal
-  of tkTuple, tkUnion:
+  of tkTuple, tkUnion, tkProc:
     result = a.elems.len - b.elems.len
     if result != 0:
       return
@@ -71,6 +72,10 @@ proc prim*(kind: TypeKind): SemType {.inline.} =
   ## Returns the primitive type with the given kind.
   SemType(kind: kind)
 
+proc procType*(ret: sink SemType): SemType =
+  ## Constructs a procedure type with `ret` as the return type.
+  SemType(kind: tkProc, elems: @[ret])
+
 proc `==`*(a, b: SemType): bool =
   ## Compares two types for equality.
   if a.kind != b.kind:
@@ -79,7 +84,7 @@ proc `==`*(a, b: SemType): bool =
   case a.kind
   of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:
     result = true
-  of tkTuple, tkUnion:
+  of tkTuple, tkUnion, tkProc:
     result = a.elems == b.elems
 
 proc isSubtypeOf*(a, b: SemType): bool =
@@ -101,6 +106,7 @@ proc size*(t: SemType): int =
   of tkError: 8 # TODO: return a value indicating "unknown"
   of tkUnit, tkBool: 1
   of tkInt, tkFloat: 8
+  of tkProc: 8 # size of a pointer
   of tkTuple:
     var s = 0
     for it in t.elems.items:

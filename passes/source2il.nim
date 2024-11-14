@@ -36,8 +36,8 @@ type
       ## ID of the procedure or type. It's an index into the respective list
 
   ProcInfo* = object
-    result*: SemType
-      ## the return type
+    typ*: SemType
+      ## the procedure's type
 
   Scope = Table[string, Entity]
 
@@ -56,6 +56,11 @@ type
     procs: Builder[NodeKind]
       ## the in-progress procedure section
     procList*: seq[ProcInfo]
+
+    procTypeCache: Table[SemType, uint32]
+      ## caches the ID of IL signature types generated for procedure types.
+      ## They're structural types in the source language, but nominal types in
+      ## the target IL
 
     scopes: seq[Scope]
       ## the stack of scopes. The last item always represents the current scope
@@ -221,6 +226,14 @@ proc evalType(c; t; n: NodeIndex): SemType =
         list.add typ
 
     SemType(kind: tkUnion, elems: list)
+  of SourceKind.ProcTy:
+    # anything goes as the return type
+    var list = @[c.evalType(t, t.child(n, 0))]
+
+    for it in t.items(n, 1):
+      list.add c.expectNot(c.evalType(t, it), tkVoid)
+
+    SemType(kind: tkProc, elems: list)
   of Ident:
     let
       name = t.getString(n)
@@ -276,15 +289,22 @@ proc typeToIL(c; typ: SemType): uint32 =
       c.types.subTree Field:
         c.types.add Node(kind: Immediate, val: 8)
         c.types.add Node(kind: Type, val: inner)
+  of tkProc:
+    # a proc type is used to represent both procedure signatures and the type
+    # of procedural values. For values, the underlying storage type is a uint
+    c.addType UInt: c.types.add(Node(kind: Immediate, val: 8))
 
-proc genProcType(c; ret: SemType): uint32 =
-  ## Generates a proc type with `ret` as the return type and adds it to `c`.
-  case ret.kind
+proc rawGenProcType(c; typ: SemType): uint32 =
+  ## Generates the IL representation for the procedure signature type `typ`
+  ## and adds it to `c`.
+  assert typ.kind == tkProc
+
+  case typ.elems[0].kind
   of tkVoid:
     c.addType ProcTy:
       c.types.subTree Void: discard
-  of ComplexTypes:
-    # non-primitive types are passed via an out parameter.
+  of AggregateTypes:
+    # aggregate types are passed via an out parameter.
     # ``() -> T`` becomes ``(int) -> unit``
     let
       ret = c.typeToIL(prim(tkUnit))
@@ -293,9 +313,18 @@ proc genProcType(c; ret: SemType): uint32 =
       c.types.add Node(kind: Type, val: ret)
       c.types.add Node(kind: Type, val: arg)
   else:
-    let typId = c.typeToIL(ret)
+    let typId = c.typeToIL(typ.elems[0])
     c.addType ProcTy:
       c.types.add Node(kind: Type, val: typId)
+
+proc genProcType(c; typ: SemType): uint32 =
+  ## Generates and caches the IL representation for the procedure signature
+  ## type `typ`, or returns the cached ID if it already exists.
+  c.procTypeCache.withValue typ, val:
+    result = val[]
+  do:
+    result = rawGenProcType(c, typ)
+    c.procTypeCache[typ] = result
 
 template buildTree(kind: NodeKind, body: untyped): NodeSeq =
   ## Makes a builder available to `body`, evaluates `body`, and returns the
@@ -336,7 +365,7 @@ proc genLocal(val: uint32, typ: SemType, bu) =
 proc genUse(a: Node|NodeSeq, bu) =
   ## Emits `a` to `bu`, wrapping the expression in a ``Copy`` operation when
   ## it's an lvalue expression.
-  if a[0].kind in {Field, At, Local}:
+  if (when a is Node: a.kind else: a[0].kind) in {Field, At, Local}:
     bu.subTree Copy:
       bu.add a
   else:
@@ -546,60 +575,103 @@ proc notToIL(c; t; n: NodeIndex, bu; stmts): SemType =
     bu.add Node(kind: IntVal)
     result = errorType()
 
-proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
-  let
-    name = t.getString(t.child(n, 0))
-    ent  = c.lookup(name)
+proc userCallToIL(c; t; n: NodeIndex, bu; stmts): SemType =
+  ## Analyzes a non-built-in call expression and translates it to its IL
+  ## representation.
+  let callee = c.exprToIL(t, t.child(n, 0))
 
-  case ent.kind
-  of ekBuiltinProc:
-    case name
-    of "+", "-":
-      result = binaryArithToIL(c, t, n, name, bu, stmts)
-    of "==", "<", "<=":
-      result = relToIL(c, t, n, name, bu, stmts)
-    of "not":
-      result = notToIL(c, t, n, bu, stmts)
-    else:
-      unreachable()
-  of ekProc:
-    # a user-defined procedure
-    # TODO: rework this logic so that the argument expressions are always
-    #       analyzed, even on arity mismatch or when the callee is not a proc
-    if t.len(n) == 1:
-      # procedure arity is currently always 0
-      let prc {.cursor.} = c.procList[ent.id]
-      case prc.result.kind
-      of tkVoid:
-        stmts.addStmt Call:
-          bu.add Node(kind: Proc, val: ent.id.uint32)
-        # mark the normal control-flow path as dead:
-        stmts.addStmt Unreachable:
-          discard
-      of ComplexTypes:
-        # the value is not returned normally, but passed via an out parameter
-        let tmp = c.newTemp(prc.result)
-        stmts.addStmt Drop:
-          bu.subTree Call:
-            bu.add Node(kind: Proc, val: ent.id.uint32)
-            bu.subTree Addr:
-              bu.add Node(kind: Local, val: tmp)
-
-        # return the temporary as the expression
-        bu.add Node(kind: Local, val: tmp)
+  if callee.typ.kind == tkProc:
+    proc useCallee(c; e: sink Expr, bu; stmts) =
+      stmts.add e.stmts
+      if e.expr[0].kind == ProcVal:
+        # the callee is a statically-known procedure; it's a static call
+        bu.add Node(kind: Proc, val: e.expr[0].val)
       else:
-        bu.subTree Call:
-          bu.add Node(kind: Proc, val: ent.id.uint32)
+        bu.add Node(kind: Type, val: c.genProcType(e.typ))
+        genUse(e.expr, bu)
 
-      result = prc.result
+    proc argsToIL(c; t; n: NodeIndex; prc: SemType, bu; stmts) {.nimcall.} =
+      var i = 1 # 1 means argument 0
+      for it in t.items(n, 1):
+        # only try fitting the argument if there's a corresponding parameter
+        let arg =
+          if i < prc.elems.len:
+            c.fitExprStrict(c.exprToIL(t, it), prc.elems[i])
+          else:
+            c.exprToIL(t, it)
+
+        # capture the value to ensure a correct evaluation order between the
+        # argument expressions
+        genUse(c.capture(arg, stmts), bu)
+        inc i
+
+      if i != prc.elems.len:
+        # arity mismatch
+        c.error("expected $1 arguments but got $2" %
+                [$(prc.elems.len - 1), $(i - 1)])
+
+    # some return types need special handling
+    case callee.typ.elems[0].kind
+    of tkVoid:
+      stmts.addStmt Call:
+        c.useCallee(callee, bu, stmts)
+        c.argsToIL(t, n, callee.typ, bu, stmts)
+      # mark the non-exceptional call exit as unreachable:
+      stmts.addStmt Unreachable:
+        discard
+    of AggregateTypes:
+      # the value is not returned normally, but passed via an out parameter
+      let tmp = c.newTemp(callee.typ.elems[0])
+      stmts.addStmt Drop:
+        bu.subTree Call:
+          c.useCallee(callee, bu, stmts)
+          c.argsToIL(t, n, callee.typ, bu, stmts)
+          bu.subTree Addr:
+            bu.add Node(kind: Local, val: tmp)
+
+      # return the temporary as the expression
+      bu.add Node(kind: Local, val: tmp)
     else:
-      c.error("expected 0 arguments, but got " & $(t.len(n) - 1))
-      bu.add Node(kind: IntVal)
-      result = errorType()
+      bu.subTree Call:
+        c.useCallee(callee, bu, stmts)
+        c.argsToIL(t, n, callee.typ, bu, stmts)
+
+    result = callee.typ.elems[0]
   else:
-    discard c.expect(name, ent, ekProc) # always reports an error
+    if callee.typ.kind != tkError: # don't cascade errors
+      c.error("callee expression must be of procedural type")
+
+    # analyze all arguments for errors and context side-effects
+    for it in t.items(n, 1):
+      discard c.exprToIL(t, it)
+
+    # return an error
     bu.add Node(kind: IntVal)
     result = errorType()
+
+proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
+  # first check whether its call to a built-in procedure (those take
+  # precedence)
+  let callee = t.child(n, 0)
+  if t[callee].kind == Ident:
+    let
+      name = t.getString(callee)
+      ent  = c.lookup(name)
+
+    if ent.kind == ekBuiltinProc:
+      case name
+      of "+", "-":
+        result = binaryArithToIL(c, t, n, name, bu, stmts)
+      of "==", "<", "<=":
+        result = relToIL(c, t, n, name, bu, stmts)
+      of "not":
+        result = notToIL(c, t, n, bu, stmts)
+      else:
+        unreachable()
+      return
+
+  # it must be a call to a user-defined procedure (or an error)
+  result = userCallToIL(c, t, n, bu, stmts)
 
 proc localDeclToIL(c; t; n: NodeIndex, bu, stmts) =
   ## Translates a procedure-local declaration to the target IL.
@@ -653,6 +725,11 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
     of ekLocal:
       bu.add Node(kind: Local, val: ent.id.uint32)
       result = c.locals[ent.id] + {Lvalue}
+    of ekProc:
+      # expand to a procedure address (`ProcVal`), which is always correct;
+      # the callsite can turn it into a static reference (`Proc`) as needed
+      bu.add Node(kind: ProcVal, val: ent.id.uint32)
+      result = c.procList[ent.id].typ + {}
     of ekNone:
       c.error("undeclared identifier: " & t.getString(n))
       bu.add Node(kind: IntVal)
@@ -819,8 +896,8 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
       case e.typ.kind
       of tkError:
         discard "do nothing"
-      of ComplexTypes:
-        # special handling for complex types: store through the out parameter
+      of AggregateTypes:
+        # special handling for aggregate types: store through the out parameter
         stmts.addStmt Store:
           bu.add Node(kind: Type, val: c.typeToIL(e.typ))
           bu.subTree Copy:
@@ -898,7 +975,7 @@ proc exprToIL*(c; t): SemType =
   var e = c.scopedExprToIL(t, NodeIndex(0))
   result = e.typ
 
-  if e.typ.kind in ComplexTypes:
+  if e.typ.kind in AggregateTypes:
     # XXX: to properly handle non-primitive returns, the expression is
     #      currently analysed twice
     c.resetProcContext() # undo the effects
@@ -918,12 +995,14 @@ proc exprToIL*(c; t): SemType =
   if result.kind == tkError:
     return # don't create any procedure
 
-  let procTy = c.genProcType(result)
+  let
+    procTy    = procType(result)
+    signature = c.genProcType(procTy)
 
   template bu: untyped = c.procs
 
   bu.subTree ProcDef:
-    bu.add Node(kind: Type, val: procTy)
+    bu.add Node(kind: Type, val: signature)
     bu.subTree Locals:
       for it in c.locals.items:
         bu.add Node(kind: Type, val: c.typeToIL(it))
@@ -937,7 +1016,7 @@ proc exprToIL*(c; t): SemType =
         bu.subTree Return:
           genUse(e.expr, bu)
 
-  c.procList.add ProcInfo(result: result)
+  c.procList.add ProcInfo(typ: procType(result))
 
 proc declToIL*(c; t; n: NodeIndex) =
   ## Translates the given source language declaration to the target IL.
@@ -952,9 +1031,7 @@ proc declToIL*(c; t; n: NodeIndex) =
 
     c.retType = evalType(c, t, t.child(n, 1))
 
-    let procTy = c.genProcType(c.retType)
-
-    if c.retType.kind in ComplexTypes:
+    if c.retType.kind in AggregateTypes:
       # needs an extra pointer parameter
       c.locals.add prim(tkInt)
       c.returnParam = uint32(c.locals.len - 1)
@@ -962,8 +1039,12 @@ proc declToIL*(c; t; n: NodeIndex) =
     defer:
       c.resetProcContext() # clear the context again
 
+    let
+      procTy    = procType(c.retType)
+      signature = c.genProcType(procTy)
+
     # register the proc before analysing/translating the body
-    c.procList.add ProcInfo(result: c.retType)
+    c.procList.add ProcInfo(typ: procTy)
     c.addDecl(name, Entity(kind: ekProc, id: c.procList.high))
 
     let e = c.scopedExprToIL(t, t.child(n, 3))
@@ -975,7 +1056,7 @@ proc declToIL*(c; t; n: NodeIndex) =
       return
 
     var bu = initBuilder[NodeKind](ProcDef)
-    bu.add Node(kind: Type, val: procTy)
+    bu.add Node(kind: Type, val: signature)
     bu.subTree Locals:
       for it in c.locals.items:
         bu.add Node(kind: Type, val: c.typeToIL(it))

@@ -1,0 +1,11 @@
+discard """
+  output: "...: proc() -> void"
+"""
+(Module
+  (ProcDecl (Ident "p") (VoidTy) (Params)
+    (Unreachable))
+
+  (ProcDecl (Ident "main") (ProcTy (VoidTy)) (Params)
+    (Exprs
+      (Decl (Ident "x") (Ident "p"))
+      (Return (Ident "x")))))

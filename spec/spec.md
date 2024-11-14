@@ -66,6 +66,10 @@ the same type.
 
 `union(...)` is the supertype of all its operand types.
 
+The `proc(R, T0, ..., Tn)` type constructor constructs a type that is inhabited
+by all procedure who take `T0` through `Tn` as parameters and return a value of
+type `R`. The parameter type order is significant.
+
 ### Values, Objects, Locations, and Cells
 
 A *value* is something that inhabits a type. An *aggregate value* is a value
@@ -148,15 +152,17 @@ expr ::= <ident>
 Refers to a previously declared entity.
 
 Let `E` be the entity `lookup(S, name)` (where `S` is the current scope)
-succeeds with. An error is reported when:
-* the lookup fails, or
-* `E` is neither a local variable nor the built-in `true` or `false`
+succeeds with. An error is reported if the lookup fails.
 
-If `E` is a local variable, the type of the expression is that of the local
-variable. If `E` is the built-in `true` or `false` entity, the type is `bool`.
+The meaning of the identifier depends on `E`:
+* if `E` is a local variable, the expression is an l-value expression of the
+  variable's type, evaluating to the location the local variable names
+* if `E` is the built-in `true` or `false` value, the expression is an r-value
+  expression of type `bool`
+* if `E` is a procedure, the expression is an r-value expression of the
+  procedure's type, evaluating to a procedural value representing the procedure
 
-**Expression kind**: r-value for boolean literals, otherwise l-value
-**Uses**: nothing
+An error is reported if `E` is neither of the entities listed above.
 
 #### Literals
 
@@ -233,21 +239,20 @@ The type of the `Unreachable` expression is `void`.
 #### Calls
 
 ```grammar
-expr += (Call callee:<ident> args:<expr>*)
+expr += (Call callee:<expr> args:<expr>*)
 ```
 
-Let `S` be the current *scope*. If `lookup(S, callee)` fails, an error is
-reported.
+Applies the procedure `callee` evaluates to to the given arguments. An error is
+reported if `callee` is not of `proc` type.
 
-Let `C` be the result of `lookup(S, callee)`. If `C` is not a procedure, an
-error is reported.
+Let `proc(F0, ..., Fn) -> R` be the type of `callee`. Let `A0` through `Ax` be
+the argument expressions (`args`). An error is reported if `n` is not equal to
+`x`, or if the type of an argument expression is not equal to the corresponding
+parameter's type.
 
-Let `A0`..`Ax` be the types of the argument expressions. Let `F0`..`Fy` be
-the types of the parameters of `C`. If `x` is not equal to `y`, an error is
-reported. Each argument type must match (i.e., be equal to) that of the
-corresponding parameter. If that's not the case, an error is reported.
+> TODO: allow for argument subtype matches
 
-The type of the call is the *return type* of `C`.
+The type of the expression is `R`.
 
 When execution reaches the call expression, for each argument, the expression
 is evaluated (including the side-effects) and the resulting value is bound to
@@ -258,7 +263,7 @@ After evaluating the arguments (if any), control is passed to the callee.
 > TODO: specification for the built-in operations is missing
 
 **Expression kind**: r-value or `void`, depending on the return type
-**Uses**: each argument expression
+**Uses**: `callee` and each argument expression
 
 #### Tuple Constructors
 
@@ -435,6 +440,15 @@ An error is reported if:
 * any operand is the `void` type
 * a type is provided more than once
 
+#### Procedure Type Constructors
+
+```grammar
+type_expr += (ProcTy ret:<type_expr> params:<type_expr>*)
+```
+
+Constructs the type `proc(ret, params[0], ..., params[n])`. An error is
+reported if any of the provided *parameter* types is the `void` type.
+
 ### Declarations
 
 #### Procedure
@@ -445,7 +459,8 @@ decl ::= (ProcDecl name:<ident> ret:<type_expr> params:(Params) body:<expr>)
 
 Let `S` be the current scope. If `lookup(S, name)` succeeds, an error is
 reported. Otherwise, `name` is added to `S`, referring to the declared
-procedure.
+procedure. `name` is of type `proc(R)`, where `R` is the type `ret` evaluates
+to.
 
 A procedure declarations opens a new scope for the body and closes it
 afterwards.

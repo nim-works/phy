@@ -11,7 +11,7 @@ type
   NodeKind* {.pure.} = enum
     Immediate, IntVal, FloatVal
     Ident,
-    VoidTy, UnitTy, BoolTy, IntTy, FloatTy, TupleTy, UnionTy
+    VoidTy, UnitTy, BoolTy, IntTy, FloatTy, TupleTy, UnionTy, ProcTy
     And, Or
     If
     Call
