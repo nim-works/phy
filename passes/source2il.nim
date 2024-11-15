@@ -299,11 +299,17 @@ proc rawGenProcType(c; typ: SemType): uint32 =
   ## Generates the IL representation for the procedure signature type `typ`
   ## and adds it to `c`.
   assert typ.kind == tkProc
+  let params = mapIt(typ.elems.toOpenArray(1, typ.elems.high), c.typeToIL(it))
+
+  template addParams() =
+    for p in params.items:
+      c.types.add Node(kind: Type, val: p)
 
   case typ.elems[0].kind
   of tkVoid:
     c.addType ProcTy:
       c.types.subTree Void: discard
+      addParams()
   of AggregateTypes:
     # aggregate types are passed via an out parameter.
     # ``() -> T`` becomes ``(int) -> unit``
@@ -312,11 +318,13 @@ proc rawGenProcType(c; typ: SemType): uint32 =
       arg = c.typeToIL(prim(tkInt))
     c.addType ProcTy:
       c.types.add Node(kind: Type, val: ret)
+      addParams()
       c.types.add Node(kind: Type, val: arg)
   else:
     let typId = c.typeToIL(typ.elems[0])
     c.addType ProcTy:
       c.types.add Node(kind: Type, val: typId)
+      addParams()
 
 proc genProcType(c; typ: SemType): uint32 =
   ## Generates and caches the IL representation for the procedure signature
