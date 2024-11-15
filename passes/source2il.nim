@@ -384,9 +384,18 @@ proc genLocal(val: uint32, typ: SemType, bu) =
 proc genUse(a: Node|NodeSeq, bu) =
   ## Emits `a` to `bu`, wrapping the expression in a ``Copy`` operation when
   ## it's an lvalue expression.
-  if (when a is Node: a.kind else: a[0].kind) in {Field, At, Local}:
+  case (when a is Node: a.kind else: a[0].kind)
+  of Field, At, Local:
     bu.subTree Copy:
       bu.add a
+  of Deref:
+    when a is NodeSeq:
+      # ``(Deref typ x)`` -> ``(Load typ x)``
+      bu.subTree Load:
+        bu.add a[1]
+        bu.add a.toOpenArray(2, a.high)
+    else:
+      unreachable()
   else:
     bu.add a
 
