@@ -734,6 +734,9 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
     of ekLocal:
       bu.add Node(kind: Local, val: ent.id.uint32)
       result = c.locals[ent.id] + {Lvalue}
+    of ekParam:
+      bu.add Node(kind: Local, val: ent.id.uint32)
+      result = c.locals[ent.id] + {Lvalue}
     of ekProc:
       # expand to a procedure address (`ProcVal`), which is always correct;
       # the callsite can turn it into a static reference (`Proc`) as needed
