@@ -72,6 +72,8 @@ type
       ## the index of the out parameter, if one is required
     locals: seq[SemType]
       ## all locals part of the procedure
+    params: seq[tuple[typ: SemType, local: uint32]]
+      ## the parameters for the procedure
 
   ExprFlag {.pure.} = enum
     Lvalue ## the expression is an lvalue. The flags absence implies
@@ -301,7 +303,13 @@ proc rawGenProcType(c; typ: SemType): uint32 =
   ## Generates the IL representation for the procedure signature type `typ`
   ## and adds it to `c`.
   assert typ.kind == tkProc
-  let params = mapIt(typ.elems.toOpenArray(1, typ.elems.high), c.typeToIL(it))
+  let params = mapIt(typ.elems.toOpenArray(1, typ.elems.high)):
+    if it.kind in AggregateTypes:
+      # XXX: due to lack of support in the IL, aggregate values need to be
+      #      passed by address at the moment
+      c.typeToIL(prim(tkInt))
+    else:
+      c.typeToIL(it)
 
   template addParams() =
     for p in params.items:
@@ -613,7 +621,15 @@ proc userCallToIL(c; t; n: NodeIndex, bu; stmts): SemType =
 
         # capture the value to ensure a correct evaluation order between the
         # argument expressions
-        genUse(c.capture(arg, stmts), bu)
+        let tmp = c.capture(arg, stmts)
+        if arg.typ.kind in AggregateTypes:
+          # XXX: due to lack of support in the IL, aggregate values need to be
+          #      passed by address at the moment
+          bu.subTree Addr:
+            bu.add tmp
+        else:
+          genUse(tmp, bu)
+
         inc i
 
       if i != prc.elems.len:
@@ -737,8 +753,15 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
       bu.add Node(kind: Local, val: ent.id.uint32)
       result = c.locals[ent.id] + {Lvalue, Mutable}
     of ekParam:
-      bu.add Node(kind: Local, val: ent.id.uint32)
-      result = c.locals[ent.id] + {Lvalue}
+      if c.params[ent.id].typ.kind in AggregateTypes:
+        # aggregate parameters use pass-by-address
+        bu.subTree Deref:
+          bu.add Node(kind: Type, val: c.typeToIL(c.params[ent.id].typ))
+          bu.subTree Copy:
+            bu.add Node(kind: Local, val: c.params[ent.id].local)
+      else:
+        bu.add Node(kind: Local, val: c.params[ent.id].local)
+      result = c.params[ent.id].typ + {Lvalue}
     of ekProc:
       # expand to a procedure address (`ProcVal`), which is always correct;
       # the callsite can turn it into a static reference (`Proc`) as needed
@@ -1069,8 +1092,13 @@ proc declToIL*(c; t; n: NodeIndex) =
 
       # add the local and register the entity regadless of whether there was
       # an error
-      c.locals.add procTy.elems[i + 1]
-      c.addDecl(name, Entity(kind: ekParam, id: c.locals.high))
+      if procTy.elems[i + 1].kind in AggregateTypes:
+        c.locals.add prim(tkInt) # the parameter is of pointer type internally
+      else:
+        c.locals.add procTy.elems[i + 1]
+
+      c.params.add (procTy.elems[i + 1], c.locals.high.uint32)
+      c.addDecl(name, Entity(kind: ekParam, id: c.params.high))
 
     if c.retType.kind in AggregateTypes:
       # needs an extra pointer parameter
