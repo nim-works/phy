@@ -76,6 +76,8 @@ type
   ExprFlag {.pure.} = enum
     Lvalue ## the expression is an lvalue. The flags absence implies
            ## that the expression is an rvalue or void expression
+    Mutable## the expression refers to a mutable lvalue. Only makes sense
+           ## when the ``Lvalue`` flag is present
 
   ExprType = tuple
     ## Returned by expression analysis. Carries additional attributes about
@@ -733,7 +735,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
         result = prim(tkBool) + {}
     of ekLocal:
       bu.add Node(kind: Local, val: ent.id.uint32)
-      result = c.locals[ent.id] + {Lvalue}
+      result = c.locals[ent.id] + {Lvalue, Mutable}
     of ekParam:
       bu.add Node(kind: Local, val: ent.id.uint32)
       result = c.locals[ent.id] + {Lvalue}
@@ -868,7 +870,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
           bu.add Node(kind: Immediate, val: idx.uint32)
       else:
         c.error("tuple has no element with index " & $idx)
-        result = errorType() + {Lvalue}
+        result = errorType() + {Lvalue, Mutable}
     of tkError:
       result = tup.typ + {}
     else:
@@ -879,8 +881,8 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
     stmts.addStmt Asgn:
       # emit the destination expression in-place
       let dst = c.exprToIL(t, a, bu, stmts)
-      if Lvalue notin dst.attribs:
-        c.error("LHS expression must be an l-value expression")
+      if {Lvalue, Mutable} * dst.attribs < {Lvalue, Mutable}:
+        c.error("LHS expression must be a mutable l-value expression")
 
       let src = c.fitExpr(c.exprToIL(t, b), dst.typ)
       stmts.add src.stmts
