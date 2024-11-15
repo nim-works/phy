@@ -29,6 +29,7 @@ type
     ekProc
     ekType
     ekLocal
+    ekParam
 
   Entity = object
     kind: EntityKind
@@ -1031,23 +1032,42 @@ proc declToIL*(c; t; n: NodeIndex) =
 
     c.retType = evalType(c, t, t.child(n, 1))
 
-    if c.retType.kind in AggregateTypes:
-      # needs an extra pointer parameter
-      c.locals.add prim(tkInt)
-      c.returnParam = uint32(c.locals.len - 1)
-
     defer:
       c.resetProcContext() # clear the context again
 
-    let
-      procTy    = procType(c.retType)
-      signature = c.genProcType(procTy)
+    var procTy = procType(c.retType)
+
+    # add the parameter types to the proc type:
+    for it in t.items(t.child(n, 2)):
+      procTy.elems.add evalType(c, t, t.child(it, 1))
+
+    let signature = c.genProcType(procTy)
 
     # register the proc before analysing/translating the body
     c.procList.add ProcInfo(typ: procTy)
     c.addDecl(name, Entity(kind: ekProc, id: c.procList.high))
 
-    let e = c.scopedExprToIL(t, t.child(n, 3))
+    c.openScope()
+    # add the parameters to the scope:
+    for i, it in t.pairs(t.child(n, 2)):
+      let name = t.getString(t.child(it, 0))
+      if c.lookup(name).kind != ekNone:
+        c.error("redeclaration of '" & name & "'")
+
+      # add the local and register the entity regadless of whether there was
+      # an error
+      c.locals.add procTy.elems[i + 1]
+      c.addDecl(name, Entity(kind: ekParam, id: c.locals.high))
+
+    if c.retType.kind in AggregateTypes:
+      # needs an extra pointer parameter
+      c.locals.add prim(tkInt)
+      c.returnParam = uint32(c.locals.len - 1)
+
+    # analyse the body:
+    let e = c.exprToIL(t, t.child(n, 3))
+    c.closeScope()
+
     # the body expression must always be a void expression
     if e.typ.kind != tkVoid:
       c.error("a procedure body must be a 'void' expression")
