@@ -142,6 +142,8 @@ proc gen*(lang: Grammar, module: string): string =
           if not result:
             setError n, save, num, rule
             n = save # restore the start position
+        else:
+          result = false
 
   result.add "\n"
 

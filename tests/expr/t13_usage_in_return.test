@@ -1,0 +1,8 @@
+discard """
+  description: "Make sure a local can be used as the `Return` operand"
+  output: "100: int"
+"""
+(ProcDecl (Ident "man") (IntTy) (Params)
+  (Exprs
+    (Decl (Ident "a") (IntVal 100))
+    (Return (Ident "a"))))

@@ -1,0 +1,7 @@
+discard """
+  description: "Make sure a local can be used as both `Or` operands"
+  output: "false: bool"
+"""
+(Exprs
+  (Decl (Ident "a") (Ident "false"))
+  (Or (Ident "a") (Ident "a")))

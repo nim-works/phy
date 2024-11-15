@@ -1,0 +1,4 @@
+discard """
+  output: "true: bool"
+"""
+(Or (Ident "true") (Ident "false"))

@@ -247,7 +247,7 @@ proc fromSexp[T](n: SexpNode, to: var PackedTree[T]) =
       for i in 1..<n.len:
         fromSexp(n[i], to)
   of SInt:
-    to.nodes.add fromSexp(n.num)
+    to.nodes.add fromSexp(n.num, T)
   else:
     doAssert false
 

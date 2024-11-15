@@ -1,0 +1,1 @@
+bin/phy --source:L30 --show:L25 --runner ${args=e} ${file}

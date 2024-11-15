@@ -1,0 +1,15 @@
+discard """
+  description: "
+    Declarations in the second operand expression are *not* part of the
+    surrounding scope.
+  "
+  reject: true
+"""
+(Exprs
+  (Decl (Ident "a")
+    (And
+      (Ident "true")
+      (Exprs
+        (Decl (Ident "b") (IntVal 100))
+        (Ident "true"))))
+  (Ident "b"))

@@ -1,0 +1,15 @@
+discard """
+  description: "
+    Declarations in the first operand expression are part of the surrounding
+    scope.
+  "
+  output: "100: int"
+"""
+(Exprs
+  (Decl (Ident "a")
+    (Or
+      (Exprs
+        (Decl (Ident "b") (IntVal 100))
+        (Ident "true"))
+      (Ident "true")))
+  (Ident "b"))

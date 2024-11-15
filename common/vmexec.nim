@@ -12,6 +12,8 @@ import
     utils
   ]
 
+import vm/vmtypes except tkVoid, tkInt, tkFloat, tkProc
+
 proc readInt(p: HostPointer, size: range[1..8]): int64 =
   copyMem(addr result, p, size)
 
@@ -73,6 +75,10 @@ proc valueToString(env: var VmEnv, a: VirtualAddr, typ: SemType): string =
       result = valueToString(env, VirtualAddr(a.uint64 + 8), typ.elems[tag])
     else:
       result = "<invalid tag: " & $tag & ">"
+  of tkProc:
+    # render as an ellipsis for now. Proper rendering requires access to
+    # the procedure names, which we don't have at the moment
+    result.add "..."
   of tkVoid, tkError:
     unreachable()
 
@@ -102,6 +108,15 @@ proc typeToString(typ: SemType): string =
       res.add typeToString(it)
     res.add ")"
     res
+  of tkProc:
+    var res = "proc("
+    for i, it in typ.elems.toOpenArray(1, typ.elems.high).pairs:
+      if i > 0:
+        res.add ", "
+      res.add typeToString(it)
+    res.add ") -> "
+    res.add typeToString(typ.elems[0])
+    res
   of tkError:
     unreachable()
 
@@ -109,7 +124,7 @@ proc run*(env: var VmEnv, prc: ProcIndex, typ: SemType): string =
   ## Runs the nullary procedure with index `prc`, and returns the result
   ## rendered as a string. `typ` is the type of the resulting value.
   var thread: VmThread
-  if typ.kind in ComplexTypes:
+  if typ.kind in AggregateTypes:
     # reserve enough stack space:
     let start = uint size(typ)
     # pass the address of the destination as the first parameter
@@ -138,3 +153,42 @@ proc run*(env: var VmEnv, prc: ProcIndex, typ: SemType): string =
     result = "unhandled exception: " & $res.exc.intVal
   of yrkStubCalled, yrkUser:
     unreachable() # shouldn't happen
+
+proc run*(env: var VmEnv, prc: ProcIndex): string =
+  ## Runs the nullary procedure with index `prc` and returns the VM's result
+  ## formatted as an S-expression.
+  var thread = vm.initThread(env, prc, 1024, @[])
+
+  let res = run(env, thread, nil)
+  env.dispose(thread)
+
+  # render the result:
+  result = "(" & substr($res.kind, 3)
+  case res.kind
+  of yrkDone:
+    case env.types[res.typ].kind
+    of vmtypes.TypeKind.tkVoid, vmtypes.TypeKind.tkProc, tkForeign:
+      discard
+    of vmtypes.TypeKind.tkInt:
+      result.add " "
+      if res.result.uintVal <= high(int64).uint64:
+        # the signed and unsigned interpretation yield the same value
+        result.addInt res.result.uintVal
+      else:
+        # output both interpretations
+        result.add "(" & $res.result.uintVal & " or " & $res.result.intVal & ")"
+    of vmtypes.TypeKind.tkFloat:
+      result.add " " & $res.result.floatVal
+  of yrkError:
+    result.add " "
+    result.add $res.error
+  of yrkStubCalled:
+    result.add " "
+    result.addInt res.stub.int
+  of yrkUnhandledException:
+    result.add " "
+    result.add $res.exc.uintVal
+  of yrkUser:
+    unreachable() # shouldn't happen
+
+  result.add ")"
