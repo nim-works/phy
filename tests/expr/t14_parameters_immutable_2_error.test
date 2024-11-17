@@ -1,0 +1,10 @@
+discard """
+  description: "Parameters are immutable. Their fields cannot be assigned"
+  reject: true
+"""
+(ProcDecl (Ident "main") (UnitTy)
+  (Params (ParamDecl (Ident "a") (TupleTy (IntTy))))
+  (Exprs
+    (Asgn (FieldAccess (Ident "a") (IntVal 0))
+      (IntVal 100))
+    (Return)))

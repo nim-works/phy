@@ -1,0 +1,22 @@
+discard """
+  description: "
+    Make sure arguments are evaluated and bound to parameters in the correct
+    order (left to right)
+  "
+  output: "200: int"
+"""
+(Module
+  (ProcDecl (Ident "p") (IntTy)
+    (Params (ParamDecl (Ident "a") (IntTy))
+            (ParamDecl (Ident "b") (IntTy)))
+    (Return (Ident "b")))
+
+  (ProcDecl (Ident "main") (IntTy) (Params)
+    (Exprs
+      (Decl (Ident "x") (IntVal 100))
+      (Return
+        (Call (Ident "p")
+          (Exprs
+            (Asgn (Ident "x") (IntVal 200))
+            (IntVal 100))
+          (Ident "x"))))))
