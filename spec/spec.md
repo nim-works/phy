@@ -264,12 +264,17 @@ The type of the expression is `R`.
 Evaluation of the call happens as follows:
 1. for each argument, going from left to right:
   1. a temporary location is created
-  2. the argument expression is assigned to the local as if performed by `Asgn`
+  2. if the expression is an r-value expression, the resulting |object| is
+     *moved* into the temporary; otherwise, the |object| stored in the location
+     named by the l-value expression is *copied* into the temporary
   3. the location is bound to the parameter the argument is passed to
 2. control is passed to the `callee` procedure
-3. once control leaves the called procedure through any means, the |object|s in
-   the temporary locations are destroyed, in the reverse order the locations
-   were created in
+3. once control leaves the called procedure, the |object|s stored in the
+   temporary locations are destroyed, in the reverse order they were assigned
+   to
+
+> TODO: once borrow checking is implemented, l-value arguments should always
+>       be borrowed from when allowed by the borrow checker
 
 When execution reaches the call expression, for each argument, the expression
 is evaluated (including the side-effects) and the resulting value is bound to
