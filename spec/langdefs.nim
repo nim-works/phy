@@ -1,6 +1,44 @@
 ## Implements a macro DSL for writing formal language definitions, covering the
 ## grammar, static semantics, and operational semantics (though the latter is
 ## not yet implemented).
+##
+## Grammar
+## -------
+##
+## The `grammar` section defines the formal grammar of the language, and it
+## must come before any other section. At the moment, only tree grammars are
+## supported, that is, grammars describing the shape and placements of nodes
+## in a tree.
+##
+## A `grammar` section must contain a set of assignments (the order is not
+## significant), where the left-hand side denotes the name of the non-terminal
+## and the right-hand side specifies the nodes that the non-terminal expands
+## to. One non-terminal symbol must be named `top`.
+##
+## On the right-hand side:
+## * a tuple constructor (e.g., `(A, b, c)`) describes a tree node. The first
+##   element is the node kind, the remaning elements describe the child nodes
+## * a standalone identifier refers to a non-terminal symbol
+## * the `*` (zero or more), `+` (one or more), and `?` (zero or one) prefix
+##   operators override the number of occurrences of the operand
+## * `$i`, `$f`, and `$str` refer to meta variables (integers, floats, and
+##   string, respectively)
+## * the `or` operator constructs an unordered choice
+##
+## The above constructors, symbols, and operators can be arbitrarily nested,
+## except for the occurrence operators and meta variables -- those can only
+## appear immediately within tuple constructors.
+##
+## Example:
+##
+## .. code-block::
+##
+##   grammar:
+##     a   = (A, $str)
+##     b   = (B, a, *(C, $i))
+##     c   = a or b
+##     top = c
+##
 
 import std/[macros, tables]
 
