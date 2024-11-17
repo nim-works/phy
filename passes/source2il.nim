@@ -1084,7 +1084,7 @@ proc declToIL*(c; t; n: NodeIndex) =
 
     # add the parameter types to the proc type:
     for it in t.items(t.child(n, 2)):
-      procTy.elems.add evalType(c, t, t.child(it, 1))
+      procTy.elems.add c.expectNot(evalType(c, t, t.child(it, 1)), tkVoid)
 
     let signature = c.genProcType(procTy)
 
