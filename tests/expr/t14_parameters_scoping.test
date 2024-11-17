@@ -1,0 +1,13 @@
+discard """
+  description: "
+    Parameter declarations are not visible outside of the procedures they're
+    part of
+  "
+  output: "(): unit"
+"""
+(Module
+  (ProcDecl (Ident "p") (UnitTy)
+    (Params (ParamDecl (Ident "main") (IntTy)))
+    (Return))
+  (ProcDecl (Ident "main") (UnitTy) (Params)
+    (Return)))
