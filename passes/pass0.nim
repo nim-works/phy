@@ -388,15 +388,11 @@ proc genExpr(c; tree; val: NodeIndex) =
         c.instr(opcUIntToFloat, int8(dtyp.size * 8))
       of t0kFloat:
         if styp.size == 8 and dtyp.size == 4:
-          # narrowing conversion
-          c.instr(opcStackAlloc, int32 4)
-          c.instr(opcSwap)
-          c.instr(opcDup)
-          # write to memory location
-          c.instr(opcWrFlt32)
-          # read back
-          c.instr(opcLdFlt32)
-          c.instr(opcStackFree, int32 4)
+          # demote 64-bit float to 32-bit float value. Reinterpret the bits as
+          # a 32-bit integer (which internally converts to a 32-bit float
+          # first) and then reinterpret the result as a 32-bit float
+          c.instr(opcReinterpI32)
+          c.instr(opcReinterpF32)
   of Call:
     c.genCall(tree, val, 0, ^1)
   else:
