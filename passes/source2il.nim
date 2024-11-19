@@ -113,6 +113,10 @@ const
   unitExpr = Expr(expr: @[UnitNode], typ: prim(tkUnit))
     ## the expression evaluating to the unitary value
 
+  pointerType = prim(tkInt)
+    ## the type inhabited by pointer values. The constant is used as a
+    ## placeholder until a dedicated pointer type is introduced
+
 using
   c: var ModuleCtx
   t: InTree
@@ -307,7 +311,7 @@ proc rawGenProcType(c; typ: SemType): uint32 =
     if it.kind in AggregateTypes:
       # XXX: due to lack of support in the IL, aggregate values need to be
       #      passed by address at the moment
-      c.typeToIL(prim(tkInt))
+      c.typeToIL(pointerType)
     else:
       c.typeToIL(it)
 
@@ -1102,7 +1106,7 @@ proc declToIL*(c; t; n: NodeIndex) =
       # add the local and register the entity regadless of whether there was
       # an error
       if procTy.elems[i + 1].kind in AggregateTypes:
-        c.locals.add prim(tkInt) # the parameter is of pointer type internally
+        c.locals.add pointerType # the parameter is of pointer type internally
       else:
         c.locals.add procTy.elems[i + 1]
 
