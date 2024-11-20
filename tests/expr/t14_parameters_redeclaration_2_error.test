@@ -1,0 +1,7 @@
+discard """
+  reject: true
+"""
+(ProcDecl (Ident "main") (UnitTy)
+  (Params (ParamDecl (Ident "a") (IntTy))
+          (ParamDecl (Ident "a") (IntTy)))
+  (Return))

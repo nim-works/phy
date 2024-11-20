@@ -22,7 +22,7 @@ type
     Return
     Unreachable
     Params
-    ProcDecl
+    ProcDecl, ParamDecl
     Decl
     TypeDecl
     Module

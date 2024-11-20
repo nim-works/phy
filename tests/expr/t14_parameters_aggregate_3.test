@@ -1,0 +1,12 @@
+discard """
+  description: "Make sure a tuple parameter's field is accessible"
+  output: "30: int"
+"""
+(Module
+  (ProcDecl (Ident "p") (IntTy)
+    (Params (ParamDecl (Ident "a") (TupleTy (IntTy))))
+    (Return (FieldAccess (Ident "a") (IntVal 0))))
+
+  (ProcDecl (Ident "main") (IntTy) (Params)
+    (Return
+      (Call (Ident "p") (TupleCons (IntVal 30))))))

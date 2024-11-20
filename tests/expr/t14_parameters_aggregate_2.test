@@ -1,0 +1,15 @@
+discard """
+  description: "
+    Make sure a procedure with an aggregate return value and aggregate
+    parameter works
+  "
+  output: "(30,): (int,)"
+"""
+(Module
+  (ProcDecl (Ident "p") (TupleTy (IntTy))
+    (Params (ParamDecl (Ident "a") (TupleTy (IntTy))))
+    (Return (Ident "a")))
+
+  (ProcDecl (Ident "main") (TupleTy (IntTy)) (Params)
+    (Return
+      (Call (Ident "p") (TupleCons (IntVal 30))))))

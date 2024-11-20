@@ -70,7 +70,7 @@ The `proc(R, T0, ..., Tn)` type constructor constructs a type that is inhabited
 by all procedure who take `T0` through `Tn` as parameters and return a value of
 type `R`. The parameter type order is significant.
 
-### Values, Objects, Locations, and Cells
+### Values, Objects, Locations, Cells, and Handles
 
 A *value* is something that inhabits a type. An *aggregate value* is a value
 inhabiting a composite type.
@@ -93,6 +93,13 @@ parent location, but without changing its *identity*.
 
 > Note: "constructing a value" is sometimes used interchangeably with
 > "constructing an object"
+
+A *handle* is the unique name of a location or cell. A *static handle* is
+a name defined in the source code (e.g., the name of a variable), while a
+*dynamic handle* is a *value* representing the name.
+
+Handles can be *mutable* or *immutable*, which informs what operations are
+possible on the l-value expression the handle is the root of.
 
 ### Normal, Linear, and Affine Types
 
@@ -254,6 +261,21 @@ parameter's type.
 
 The type of the expression is `R`.
 
+Evaluation of the call happens as follows:
+1. for each argument, going from left to right:
+  1. a temporary location is created
+  2. if the expression is an r-value expression, the resulting |object| is
+     *moved* into the temporary; otherwise, the |object| stored in the location
+     named by the l-value expression is *copied* into the temporary
+  3. the location is bound to the parameter the argument is passed to
+2. control is passed to the `callee` procedure
+3. once control leaves the called procedure, the |object|s stored in the
+   temporary locations are destroyed, in the reverse order they were assigned
+   to
+
+> TODO: once borrow checking is implemented, l-value arguments should always
+>       be borrowed from when allowed by the borrow checker
+
 When execution reaches the call expression, for each argument, the expression
 is evaluated (including the side-effects) and the resulting value is bound to
 the callee's corresponding parameter. Evaluation happens from *left to right*.
@@ -383,7 +405,7 @@ Evaluation happens as follows:
 
 Let `A` be the type of `lhs` and `B` be the type of `rhs`. An error is reported
 when:
-* `lhs` is not an l-value expression, or
+* `lhs` is not a mutable l-value expression, or
 * `B` is `void`, or
 * `B` is not the same type as or a subtype of `A`
 
@@ -454,7 +476,7 @@ reported if any of the provided *parameter* types is the `void` type.
 #### Procedure
 
 ```grammar
-decl ::= (ProcDecl name:<ident> ret:<type_expr> params:(Params) body:<expr>)
+decl ::= (ProcDecl name:<ident> ret:<type_expr> params:(Params <param_decl>*) body:<expr>)
 ```
 
 Let `S` be the current scope. If `lookup(S, name)` succeeds, an error is
@@ -469,6 +491,19 @@ afterwards.
 procedure is called.
 
 `name` is added to `S` *before* any lookup takes place in the body.
+
+##### Parameters
+
+```grammar
+param_decl ::= (ParamDecl name:<ident> type:<type_expr>)
+```
+
+Let `S` be the current scope. An error is reported if:
+* `lookup(S, name)` succeeds
+* `type` is `void`
+
+`name` is added to the scope of the procedure body, referring to the handle of
+the location the argument |object| is stored in. The handle is immutable.
 
 #### Type Alias
 
