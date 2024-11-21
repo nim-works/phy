@@ -101,9 +101,8 @@ type
   ProcMap = SeqMap[ProcedureId, seq[Node]]
 
 const
-  MagicsToKeep = {mNewString, mNewSeq, mSetLengthSeq, mAppendSeqElem,
-                  mEnumToStr, mNewStringOfCap, mDotDot, mEqCString,
-                  mAbsI}
+  MagicsToKeep = {mNewSeq, mSetLengthSeq, mAppendSeqElem,
+                  mEnumToStr, mDotDot, mEqCString, mAbsI}
 
 using
   bu: var Builder[NodeKind]
@@ -571,11 +570,24 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     else:
       unreachable()
   of mEqStr:
-    wrapAsgn:
+    wrapAsgn Call:
+      bu.add compilerProc(c, env, "eqStrings")
+      value(tree.argument(n, 0))
+      value(tree.argument(n, 1))
+  of mLeStr:
+    wrapAsgn Le:
+      bu.add typeRef(c, env, env.types.sizeType)
       bu.subTree Call:
-        bu.add compilerProc(c, env, "eqStrings")
+        bu.add compilerProc(c, env, "cmpStrings")
         value(tree.argument(n, 0))
-        value(tree.argument(n, 1))
+        bu.add node(IntVal, 0)
+  of mLtStr:
+    wrapAsgn Lt:
+      bu.add typeRef(c, env, env.types.sizeType)
+      bu.subTree Call:
+        bu.add compilerProc(c, env, "cmpStrings")
+        value(tree.argument(n, 0))
+        bu.add node(IntVal, 0)
   of mFinished:
     wrapAsgn Eq:
       bu.add typeRef(c, env, env.types.sizeType)
@@ -618,6 +630,97 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       bu.add compilerProc(c, env, "setLengthStrV2")
       takeAddr NodePosition(tree.argument(n, 0))
       value(tree.argument(n, 1))
+  of mNewString:
+    wrapAsgn Call:
+      bu.add compilerProc(c, env, "mnewString")
+      value(tree.argument(n, 0))
+  of mNewStringOfCap:
+    wrapAsgn Call:
+      bu.add compilerProc(c, env, "rawNewString")
+      value(tree.argument(n, 0))
+  of mBoolToStr:
+    wrapAsgn Call:
+      bu.add compilerProc(c, env, "nimBoolToStr")
+      value(tree.argument(n, 0))
+  of mCharToStr:
+    wrapAsgn Call:
+      bu.add compilerProc(c, env, "nimCharToStr")
+      value(tree.argument(n, 0))
+  of mCStrToStr:
+    wrapAsgn Call:
+      bu.add compilerProc(c, env, "cstrToNimstr")
+      value(tree.argument(n, 0))
+  of mStrToCStr:
+    wrapAsgn Call:
+      bu.add compilerProc(c, env, "nimToCStringConv")
+      value(tree.argument(n, 0))
+  of mAppendStrStr:
+    # in theory, the appendStrStr magic supports being merged, but this never
+    # happens in practice in, meaning that the call expressions only ever have
+    # two parameters here
+    stmts.addStmt Call:
+      bu.add compilerProc(c, env, "prepareAdd")
+      takeAddr NodePosition(tree.argument(n, 0))
+      bu.subTree Add:
+        bu.add typeRef(c, env, env.types.sizeType)
+        bu.subTree Copy:
+          bu.subTree Field:
+            lvalue(tree.argument(n, 0))
+            bu.add node(Immediate, 0)
+        bu.subTree Copy:
+          bu.subTree Field:
+            lvalue(tree.argument(n, 1))
+            bu.add node(Immediate, 0)
+
+    stmts.addStmt Call:
+      bu.add compilerProc(c, env, "appendString")
+      takeAddr NodePosition(tree.argument(n, 0))
+      value(tree.argument(n, 1))
+  of mConStrStr:
+    var
+      temp  = c.newTemp(StringType)
+      nodes = newSeq[Node]()
+    # manually construct the node sequence; it's simpler
+
+    # compute the length expression:
+    var i = 0
+    for (_, _, it) in tree.arguments(n):
+      if i < tree.numArgs(n) - 1:
+        nodes.add node(Add, 3)
+        nodes.add typeRef(c, env, env.types.sizeType)
+
+      if tree[it].typ == CharType:
+        nodes.add node(IntVal, 1)
+      else:
+        nodes.add node(Copy, 1)
+        nodes.add node(Field, 2)
+        nodes.add c.gen(env, tree, NodePosition(it), false).nodes
+        nodes.add node(Immediate, 0)
+
+      inc i
+
+    stmts.addStmt Asgn:
+      bu.subTree Call:
+        bu.add compilerProc(c, env, "rawNewString")
+        bu.add nodes # the length expression
+
+    # emit the append calls:
+    for (_, _, it) in tree.arguments(n):
+      if tree[it].typ == CharType:
+        stmts.addStmt Call:
+          bu.add compilerProc(c, env, "appendChar")
+          bu.subTree Addr:
+            bu.add node(Local, temp)
+      else:
+        stmts.addStmt Call:
+          bu.add compilerProc(c, env, "appendString")
+          bu.subTree Addr:
+            bu.add node(Local, temp)
+          value(it)
+
+    # assign to the destination:
+    wrapAsgn Copy:
+      bu.add node(Local, temp)
   of mParseBiggestFloat:
     wrapAsgn Call:
       bu.add compilerProc(c, env, "nimParseBiggestFloat")
