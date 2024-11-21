@@ -1444,7 +1444,8 @@ proc compile(graph: ModuleGraph) =
 
   # --- run the MIR processing and translate the MIR code
   let config =
-    BackendConfig(tconfig: TranslationConfig(magicsToKeep: MagicsToKeep))
+    BackendConfig(noImported: true, # prefer not using FFI procedures
+                  tconfig: TranslationConfig(magicsToKeep: MagicsToKeep))
 
   var
     discovery: DiscoveryData
