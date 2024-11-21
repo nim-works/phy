@@ -1166,6 +1166,24 @@ proc reset(c: var ProcContext) =
   c.labelMap.clear()
   c.temps.shrink(0)
 
+proc complete(c; env: MirEnv, typ: Node, prc: ProcContext, body: MirBody,
+              content: seq[Node]): seq[Node] =
+  ## Assembles the complete IL definition for a procedure. `typ` is a
+  ## reference to the signature type, `prc` is the procedure's translation
+  ## context, and `content` is the statement list that makes up the body.
+  var bu = initBuilder[NodeKind](ProcDef)
+  bu.add typ
+  bu.subTree Locals:
+    for it in body.locals.items:
+      if env.types.canonical(it.typ) != VoidType:
+        bu.add typeRef(c, env, it.typ)
+
+    for it in c.prc.temps.items:
+      bu.add typeRef(c, env, it)
+
+  bu.add content
+  result = bu.finish()
+
 proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[ProcedureId, PartialProc], graph: ModuleGraph, c; evt: sink BackendEvent) =
   case evt.kind
   of bekDiscovered:
@@ -1180,8 +1198,12 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
     else:
       unreachable()
   of bekPartial:
-    # TODO: implement
-    echo "incremental procedures are not yet implemented"
+    if evt.id notin partial:
+      # XXX: an empty body is temporarily used in order to produced code that
+      #      passes ``pass25``
+      partial[evt.id] = PartialProc(nodes: @[node(Stmts, 1), node(Return, 0)])
+
+    # TODO: implement the rest
   of bekProcedure:
     var body = evt.body
     apply(body, env) # apply the additional MIR passes
@@ -1214,19 +1236,8 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
 
       bu.finish()
 
-    # assemble the complete definition:
-    var bu = initBuilder[NodeKind](ProcDef)
-    bu.add c.genProcType(env, env.types.add(evt.sym.typ))
-    bu.subTree Locals:
-      for it in body.locals.items:
-        if env.types.canonical(it.typ) != VoidType:
-          bu.add typeRef(c, env, it.typ)
-
-      for it in c.prc.temps.items:
-        bu.add typeRef(c, env, it)
-
-    bu.add content
-    bodies[evt.id] = bu.finish()
+    let typ = c.genProcType(env, env.types.add(evt.sym.typ))
+    bodies[evt.id] = c.complete(env, typ, c.prc, body, content)
   else:
     discard
 
@@ -1344,6 +1355,12 @@ proc compile(graph: ModuleGraph) =
   # discover and generate code for all alive procedures:
   for ac in process(graph, mlist, env, discovery, config):
     processEvent(env, procs, partial, graph, c, ac)
+
+  for id, it in partial.mpairs:
+    # all partial procedure have signature ``proc()``. The main procedure does
+    # too, therefore its type can be used here
+    let typ = c.genProcType(env, env.types.add(mlist.mainModule().init.typ))
+    procs[id] = c.complete(env, typ, it.ctx, it.body, it.nodes)
 
   # compute some statistics about the generated code:
   block:
