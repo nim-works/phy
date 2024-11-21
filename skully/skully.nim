@@ -23,7 +23,8 @@ import
     magicsys
   ],
   compiler/utils/[
-    containers
+    containers,
+    platform
   ],
   compiler/backend/[
     backends,
@@ -1524,12 +1525,21 @@ proc main(args: openArray[string]) =
   config.setFromProjectName(args[^1])
   wantMainModule(config)
 
+  # use the "any" OS in order to disable most platform-specific code
+  config.target.setTarget(osAny, cpuAmd64)
+
   config.setDefaultLibpath()
   config.searchPathsAdd config.libpath
   defineSymbol(config, "c")
   config.exc = excGoto
   config.backend = backendC
   initDefines(config.symbols)
+
+  # disable various C and platform specific code, in order to reduce the
+  # amount of patching that's needed
+  defineSymbol(config, "noSignalHandler") # disable default signal handlers
+  defineSymbol(config, "nimNoLibc")
+  defineSymbol(config, "nimEmulateOverflowChecks")
 
   config.astDiagToLegacyReport = cli_reporter.legacyReportBridge
   # XXX: only arc is support at the moment
