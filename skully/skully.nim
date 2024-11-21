@@ -1557,6 +1557,8 @@ proc main(args: openArray[string]) =
   config.backend = backendC
   initDefines(config.symbols)
 
+  # replace some system modules:
+  replaceModule(config, "system/osalloc", "osalloc.nim")
   # disable various C and platform specific code, in order to reduce the
   # amount of patching that's needed
   defineSymbol(config, "noSignalHandler") # disable default signal handlers
