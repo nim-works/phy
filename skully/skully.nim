@@ -24,6 +24,7 @@ import
   ],
   compiler/utils/[
     containers,
+    pathutils,
     platform
   ],
   compiler/backend/[
@@ -1436,6 +1437,27 @@ template measure(name: string, body: untyped) =
   let a = getMonoTime()
   body
   echo name, " took: ", inMilliseconds(getMonoTime() - a)
+
+proc replaceModule(config: ConfigRef, name: string, with: string) =
+  var patchDir = getAppDir()
+  # search for the directory that contains the patch modules
+  if dirExists(patchDir / ".." / "skully" / "patch"):
+    patchDir = patchDir / ".." / "skully" / "patch"
+  elif dirExists(patchDir / "patch"):
+    patchDir = patchDir / "patch"
+  else:
+    # give up
+    raise ValueError.newException("cannot find patch directory")
+
+  var known: bool
+  # this is a horrible hack, but it's the most simple and straightforward
+  # solution to replacing modules at compile time not requiring modifying
+  # the compiler. We register the real file and then replace its ``FileInfo``
+  # with that of the module we want to replace it with
+  let
+    idx = config.fileInfoIdx(findModule(config, name, ""), known)
+    other = config.fileInfoIdx(AbsoluteFile(patchDir / with), known)
+  config.m.fileInfos[ord idx] = config.m.fileInfos[ord other]
 
 proc compile(graph: ModuleGraph) =
   # --- run the semantic pass for the project
