@@ -73,6 +73,16 @@ type
     graph: ModuleGraph
     lit: Literals
 
+    typeMap: Table[TypeId, uint32]
+      ## maps MIR type IDs to the ID of the cached IL type
+    types: OrderedTable[seq[Node], uint32]
+      ## maps IL types to the associated ID (i.e., position in the typedefs
+      ## tree). This is used for simple culling of structurally equal types
+      ## XXX: this is incredibly inefficient. Not only does it allocate a lot
+      ##      of small sequences, the ordered table also incurs additional
+      ##      overhead. A table that allows storing the actual key data (i.e.,
+      ##      the type tree, in this case) should be used instead
+
     globalsMap: Table[GlobalId, uint32]
       ## maps MIR globals and constants to IL globals
     constMap: Table[ConstId, uint32]
@@ -144,15 +154,13 @@ proc compilerProc(c; env: var MirEnv, name: string): Node =
   let p = c.graph.getCompilerProc(name)
   result = node(Proc, env.procedures.add(p).uint32)
 
-proc canon(env: TypeEnv, typ: TypeId): Node =
-  var typ = env.canonical(typ)
-  if env.headerFor(typ, Lowered).kind == tkProc:
-    typ = PointerType
+proc genType(c; env: TypeEnv, typ: TypeId): uint32
 
-  node(Type, typ.uint32 - 1)
+proc typeRef(c; env: TypeEnv, typ: TypeId): Node =
+  node(Type, c.genType(env, typ))
 
-proc canon(env: MirEnv, typ: TypeId): Node =
-  env.types.canon(typ)
+proc typeRef(c; env: MirEnv, typ: TypeId): Node =
+  typeRef(c, env.types, typ)
 
 proc request(c: var ProcContext; label: LabelId): uint32 =
   if label in c.labelMap:
@@ -172,12 +180,7 @@ proc genExit(c; tree; n; bu) =
   else:
     unreachable()
 
-proc genProcType(env: MirEnv, typ: TypeId): Node =
-  var typ = typ
-  if env.types.headerFor(typ, Canonical).kind == tkClosure:
-    typ = env.types[env.types.lookupField(typ, 0)].typ
-
-  node(Type, typ.uint32 - 1)
+proc genProcType(c; env: MirEnv, typ: TypeId): Node
 
 proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: bool, bu) =
   template recurse(n: NodePosition, wantValue: bool) =
@@ -198,7 +201,7 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
   of mnkGlobal:
     # all globals are pointers, and thus a load is required
     bu.subTree (if wantValue: Load else: Deref):
-      bu.add env.canon(tree[n].typ)
+      bu.add typeRef(c, env, tree[n].typ)
       bu.subTree Copy:
         bu.add node(Global, tree[n].global.uint32)
   of mnkNilLit:
@@ -212,7 +215,7 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
       bu.add node(Local, c.prc.localMap[tree[n].local])
   of mnkAlias:
     bu.subTree (if wantValue: Load else: Deref):
-      bu.add env.canon(tree[n].typ)
+      bu.add typeRef(c, env, tree[n].typ)
       bu.subTree Copy:
         bu.add node(Local, c.prc.localMap[tree[n].local])
   of mnkConst:
@@ -223,19 +226,19 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
         c.dataMap[extract(id)] = c.newGlobal(env, tree[n].typ)
 
       bu.subTree (if wantValue: Load else: Deref):
-        bu.add env.canon(tree[n].typ)
+        bu.add typeRef(c, env, tree[n].typ)
         bu.subTree Copy:
           bu.add node(Global, c.dataMap[extract(id)])
     else:
       bu.subTree (if wantValue: Load else: Deref):
-        bu.add env.canon(tree[n].typ)
+        bu.add typeRef(c, env, tree[n].typ)
         bu.subTree Copy:
           bu.add node(Global, c.constMap[tree[n].cnst])
   of mnkProcVal:
     bu.add node(ProcVal, tree[n].prc.uint32)
   of mnkDeref, mnkDerefView:
     bu.subTree (if wantValue: Load else: Deref):
-      bu.add env.canon(tree[n].typ)
+      bu.add typeRef(c, env, tree[n].typ)
       recurse(tree.child(n, 0), true)
   of mnkPathPos:
     wrapCopy Field:
@@ -387,7 +390,7 @@ proc genLength(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
       exit = c.prc.newLabel()
     stmts.addStmt SelectBool:
       bu.subTree Eq:
-        bu.add env.canon(CstringType)
+        bu.add typeRef(c, env, CstringType)
         c.translateValue(env, tree, n, true, bu)
         bu.add node(IntVal, 0)
       bu.goto els
@@ -443,17 +446,17 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       value(tree.argument(n, 0))
   of mLtI, mLtF64, mLtEnum, mLtU, mLtCh:
     wrapAsgn Lt:
-      bu.add env.canon(tree[tree.argument(n, 0)].typ)
+      bu.add typeRef(c, env, tree[tree.argument(n, 0)].typ)
       value(tree.argument(n, 0))
       value(tree.argument(n, 1))
   of mLeI, mLeF64, mLeEnum, mLeU, mLeCh:
     wrapAsgn Le:
-      bu.add env.canon(tree[tree.argument(n, 0)].typ)
+      bu.add typeRef(c, env, tree[tree.argument(n, 0)].typ)
       value(tree.argument(n, 0))
       value(tree.argument(n, 1))
   of mEqI, mEqF64, mEqEnum, mEqRef, mEqCh, mEqB:
     wrapAsgn Eq:
-      bu.add env.canon(tree[tree.argument(n, 0)].typ)
+      bu.add typeRef(c, env, tree[tree.argument(n, 0)].typ)
       value(tree.argument(n, 0))
       value(tree.argument(n, 1))
   of mEqProc:
@@ -461,7 +464,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     if env.types.headerFor(typ, Lowered).kind == tkProc:
       # simple integer equality suffices
       wrapAsgn Eq:
-        bu.add env.canon(typ)
+        bu.add typeRef(c, env, typ)
         value(tree.argument(n, 0))
         value(tree.argument(n, 1))
     else:
@@ -473,11 +476,11 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     wrapAsgn Eq:
       let arg = tree.argument(n, 0)
       if env.types.headerFor(tree[arg].typ, Lowered).kind == tkProc:
-        bu.add env.canon(tree[arg].typ)
+        bu.add typeRef(c, env, tree[arg].typ)
         value(arg)
       else:
         # must be a closure
-        bu.add env.canon(tree[arg].typ)
+        bu.add typeRef(c, env, tree[arg].typ)
         bu.subTree Copy:
           bu.subTree Field:
             lvalue(arg)
@@ -486,36 +489,36 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   of mAddU, mSubU, mMulU, mDivU, mModU:
     const Map = [mAddU: Add, mSubU: Sub, mMulU: Mul, mDivU: Div, mModU: Mod]
     wrapAsgn Map[tree[n, 1].magic]:
-      bu.add  env.canon(tree[n, 2].typ)
+      bu.add typeRef(c, env, tree[n].typ)
       value(tree.argument(n, 0))
       value(tree.argument(n, 1))
   of mBitandI:
     wrapAsgn BitAnd:
-      bu.add env.canon(tree[n].typ)
+      bu.add typeRef(c, env, tree[n].typ)
       value(tree.argument(n, 0))
       value(tree.argument(n, 1))
   of mBitxorI:
     wrapAsgn BitXor:
-      bu.add env.canon(tree[n].typ)
+      bu.add typeRef(c, env, tree[n].typ)
       value(tree.argument(n, 0))
       value(tree.argument(n, 1))
   of mBitnotI:
     wrapAsgn BitNot:
-      bu.add env.canon(tree[n].typ)
+      bu.add typeRef(c, env, tree[n].typ)
       value(tree.argument(n, 0))
   of mBitorI:
     wrapAsgn BitOr:
-      bu.add env.canon(tree[n].typ)
+      bu.add typeRef(c, env, tree[n].typ)
       value(tree.argument(n, 0))
       value(tree.argument(n, 1))
   of mShlI:
     wrapAsgn Shl:
-      bu.add env.canon(tree[n].typ)
+      bu.add typeRef(c, env, tree[n].typ)
       value(tree.argument(n, 0))
       value(tree.argument(n, 1))
   of mAshrI, mShrI:
     wrapAsgn Shr:
-      bu.add env.canon(tree[n].typ)
+      bu.add typeRef(c, env, tree[n].typ)
       value(tree.argument(n, 0))
       value(tree.argument(n, 1))
   of mOrd:
@@ -523,8 +526,8 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       value(tree.argument(n, 0))
   of mChr:
     wrapAsgn Conv:
-      bu.add env.canon(tree[n].typ)
-      bu.add env.canon(tree[tree.argument(n, 0)].typ)
+      bu.add typeRef(c, env, tree[n].typ)
+      bu.add typeRef(c, env, tree[tree.argument(n, 0)].typ)
       value(tree.argument(n, 0))
   of mDefault:
     c.genDefault(env, dest, tree[n].typ, stmts)
@@ -540,7 +543,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
           (1, 0)
 
       bu.subTree Lt:
-        bu.add env.canon(tree[n].typ)
+        bu.add typeRef(c, env, tree[n].typ)
         value(tree.argument(n, arg1))
         value(tree.argument(n, arg2))
       bu.goto(b)
@@ -575,9 +578,9 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         value(tree.argument(n, 1))
   of mFinished:
     wrapAsgn Eq:
-      bu.add env.canon(env.types.sizeType)
+      bu.add typeRef(c, env, env.types.sizeType)
       bu.subTree Load:
-        bu.add env.canon(env.types.sizeType)
+        bu.add typeRef(c, env, env.types.sizeType)
         bu.subTree Copy:
           bu.subTree Field:
             lvalue(tree.argument(n, 0))
@@ -592,7 +595,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         c.genField(env, tree, NodePosition tree.argument(n, 1), -1, bu)
   of mSamePayload:
     wrapAsgn Eq:
-      bu.add env.canon(PointerType)
+      bu.add typeRef(c, env, PointerType)
       bu.subTree Copy:
         bu.subTree Field:
           lvalue(tree.argument(n, 0))
@@ -607,7 +610,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     let tmp = Expr(nodes: @[node(Local, c.newTemp(env.types.sizeType))])
     c.genLength(env, tree, NodePosition tree.argument(n, 0), tmp, stmts)
     wrapAsgn Sub:
-      bu.add env.canon(env.types.sizeType)
+      bu.add typeRef(c, env, env.types.sizeType)
       bu.use tmp
       bu.add node(IntVal, 1)
   of mSetLengthStr:
@@ -639,7 +642,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     #     dealloc(x.p)
     stmts.addStmt SelectBool:
       bu.subTree Eq:
-        bu.add env.canon(ptrTyp)
+        bu.add typeRef(c, env, ptrTyp)
         bu.subTree Copy:
           bu.subTree Field:
             lvalue(tree.argument(n, 0))
@@ -651,13 +654,13 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     then = c.prc.newLabel()
     stmts.addStmt SelectBool:
       bu.subTree Eq:
-        bu.add env.canon(env.types.sizeType)
+        bu.add typeRef(c, env, env.types.sizeType)
         bu.subTree BitAnd:
-          bu.add env.canon(env.types.sizeType)
+          bu.add typeRef(c, env, env.types.sizeType)
           bu.subTree Copy:
             bu.subTree Field:
               bu.subTree Deref:
-                bu.add env.canon(elem env.types.headerFor(ptrTyp, Lowered))
+                bu.add typeRef(c, env, elem env.types.headerFor(ptrTyp, Lowered))
                 bu.subTree Copy:
                   bu.subTree Field:
                     lvalue(tree.argument(n, 0))
@@ -734,8 +737,8 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       value(n)
   of mnkConv, mnkStdConv:
     wrapAsgn Conv:
-      bu.add env.canon(tree[n].typ)
-      bu.add env.canon(tree[n, 0].typ)
+      bu.add typeRef(c, env, tree[n].typ)
+      bu.add typeRef(c, env, tree[n, 0].typ)
       value(tree.child(n, 0))
   of mnkCopy, mnkMove, mnkSink:
     wrapAsgn:
@@ -764,7 +767,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
           let typ = env.types.canonical(tree[n, 1].typ)
           isClosure = env.types.headerFor(typ, Canonical).kind == tkClosure
 
-          bu.add genProcType(env, typ)
+          bu.add c.genProcType(env, typ)
           if isClosure:
             bu.subTree Copy:
               bu.subTree Field:
@@ -813,12 +816,12 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   of mnkAdd, mnkSub, mnkMul, mnkDiv, mnkModI:
     const Map = [mnkAdd: Add, mnkSub: Sub, mnkMul: Mul, mnkDiv: Div, mnkModI: Mod]
     wrapAsgn Map[tree[n].kind]:
-      bu.add  env.canon(tree[n, 0].typ)
+      bu.add typeRef(c, env, tree[n, 0].typ)
       value(tree.child(n, 0))
       value(tree.child(n, 1))
   of mnkNeg:
     wrapAsgn Neg:
-      bu.add  env.canon(tree[n, 0].typ)
+      bu.add typeRef(c, env, tree[n, 0].typ)
       value(tree.child(n, 0))
   of mnkObjConstr:
     c.genDefault(env, dest, tree[n].typ, stmts)
@@ -911,7 +914,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
           bu.subTree Addr:
             bu.subTree Field:
               bu.subTree Deref:
-                bu.add env.canon(elem(env.types.headerFor(env.types[env.types.lookupField(tree[n, 0].typ, 1)].typ, Canonical)))
+                bu.add typeRef(c, env, elem(env.types.headerFor(env.types[env.types.lookupField(tree[n, 0].typ, 1)].typ, Canonical)))
                 bu.subTree Copy:
                   bu.subTree Field:
                     lvalue(tree.child(n, 0))
@@ -955,8 +958,8 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       let b = env.types.headerFor(src, Lowered).size(env.types)
       if a == b: # same size, only reinterpret
         wrapAsgn Reinterp:
-          bu.add env.canon(dst)
-          bu.add env.canon(src)
+          bu.add typeRef(c, env, dst)
+          bu.add typeRef(c, env, src)
           value tree.child(n, 0)
       else:
         # TODO: needs to first reinterpret and then convert
@@ -1048,7 +1051,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
           let other = c.prc.newLabel()
           stmts.addStmt SelectBool:
             bu.subTree Lt:
-              bu.add env.canon(tree[n, 0].typ)
+              bu.add typeRef(c, env, tree[n, 0].typ)
               bu.subTree Copy:
                 bu.add node(Local, tmp.uint32)
               c.translateValue(env, tree, tree.child(it, 0), true, bu)
@@ -1057,7 +1060,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
           stmts.join other
           stmts.addStmt SelectBool:
             bu.subTree Lt:
-              bu.add env.canon(tree[n, 0].typ)
+              bu.add typeRef(c, env, tree[n, 0].typ)
               c.translateValue(env, tree, tree.child(it, 0), true, bu)
               bu.subTree Copy:
                 bu.add node(Local, tmp.uint32)
@@ -1066,7 +1069,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
         else:
           stmts.addStmt SelectBool:
             bu.subTree Eq:
-              bu.add canon(env, tree[n, 0].typ)
+              bu.add typeRef(c, env, tree[n, 0].typ)
               bu.subTree Copy:
                 bu.add node(Local, tmp.uint32)
               c.translateValue(env, tree, it, true, bu)
@@ -1213,41 +1216,36 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
 
     # assemble the complete definition:
     var bu = initBuilder[NodeKind](ProcDef)
-    bu.add genProcType(env, env.types.add(evt.sym.typ))
+    bu.add c.genProcType(env, env.types.add(evt.sym.typ))
     bu.subTree Locals:
       for it in body.locals.items:
         if it.typ != VoidType:
-          bu.add env.canon(it.typ)
+          bu.add typeRef(c, env, it.typ)
 
       for it in c.prc.temps.items:
-        bu.add env.canon(it)
+        bu.add typeRef(c, env, it)
 
     bu.add content
     bodies[evt.id] = bu.finish()
   else:
     discard
 
-proc gen(bu; env: TypeEnv, id: TypeId) =
+proc translateProcType(c; env: TypeEnv, id: TypeId, bu) =
+  let desc = env.headerFor(id, Canonical)
+  bu.subTree ProcTy:
+    if desc.retType(env) == VoidType:
+      bu.subTree Void: discard
+    else:
+      bu.add typeRef(c, env, desc.retType(env))
+
+    for (i, typ, flags) in env.params(desc):
+      # exclude compile-time-only parameters
+      if env.headerFor(typ, Lowered).kind != tkVoid:
+        bu.add typeRef(c, env, typ)
+
+proc translate(c; env: TypeEnv, id: TypeId, bu) =
   let desc = env.headerFor(id, Lowered)
   case desc.kind
-  of tkVoid:
-    # TODO: handle differently
-    bu.subTree Int:
-      bu.add node(Immediate, 0)
-  of tkProc:
-    # TODO: this is wrong. In non-signature context, a proc type always
-    #       maps to a pointer type
-    bu.subTree ProcTy:
-      if desc.retType(env) == VoidType:
-        bu.subTree Void:
-          discard
-      else:
-        bu.add env.canon(desc.retType(env))
-
-      for (i, typ, flags) in env.params(desc):
-        if env.headerFor(typ, Lowered).kind != tkVoid:
-          bu.add env.canon(typ)
-
   of tkInt:
     bu.subTree Int:
       bu.add node(Immediate, desc.size(env).uint32)
@@ -1257,9 +1255,9 @@ proc gen(bu; env: TypeEnv, id: TypeId) =
   of tkUInt:
     bu.subTree UInt:
       bu.add node(Immediate, desc.size(env).uint32)
-  of tkPointer, tkPtr, tkRef, tkVar, tkLent, tkCstring:
+  of tkPointer:
     bu.subTree UInt:
-      bu.add node(Immediate, 8)
+      bu.add node(Immediate, desc.size(env).uint32)
   of tkBool, tkChar:
     bu.subTree UInt:
       bu.add node(Immediate, 1)
@@ -1267,21 +1265,24 @@ proc gen(bu; env: TypeEnv, id: TypeId) =
     bu.subTree Array:
       bu.add node(Immediate, desc.size(env).uint32)
       bu.add node(Immediate, desc.arrayLen(env).uint32)
-      bu.add env.canon(desc.elem())
+      bu.add typeRef(c, env, desc.elem())
   of tkUncheckedArray:
     bu.subTree Array:
       bu.add node(Immediate, 0)
       bu.add node(Immediate, 1)
-      bu.add env.canon(desc.elem())
+      bu.add typeRef(c, env, desc.elem())
   of tkRecord, tkUnion:
     bu.subTree Record:
-      bu.add node(Immediate, env.headerFor(id, Lowered).size(env).uint32)
-      for f, recf in env.fields(env.headerFor(id, Lowered)):
+      bu.add node(Immediate, desc.size(env).uint32)
+      for f, recf in env.fields(desc):
         privateAccess(RecField)
         bu.subTree Field:
           bu.add node(Immediate, recf.offset.uint32)
-          bu.add env.canon(recf.typ)
-  of tkIndirect, tkImported:
+          bu.add typeRef(c, env, recf.typ)
+  of tkImported:
+    # TODO: imported types need to be handled differently. Either the target
+    #       IL needs to support them, or they have to treated as their
+    #       "underlying" type for now
     bu.subTree Record:
       bu.add node(Immediate, 0)
       bu.subTree Field:
@@ -1291,8 +1292,30 @@ proc gen(bu; env: TypeEnv, id: TypeId) =
     bu.subTree Record:
       bu.add node(Immediate, desc.size(env).uint32)
       # TODO: complete
+  of tkProc, tkPtr, tkRef, tkVar, tkLent, tkCstring:
+    c.translate(env, PointerType, bu)
   else:
-    unreachable()
+    unreachable($desc.kind)
+
+proc genProcType(c; env: MirEnv, typ: TypeId): Node =
+  let typ = env.types.canonical(typ)
+  assert env.types.headerFor(typ, Canonical).kind in {tkProc, tkClosure}
+
+  # XXX: the type is currently not cached
+  var bu = initBuilder[NodeKind]()
+  c.translateProcType(env.types, typ, bu)
+  node(Type, c.types.mgetOrPut(finish(bu), c.types.len.uint32))
+
+proc genType(c; env: TypeEnv, typ: TypeId): uint32 =
+  let typ = env.canonical(typ)
+  c.typeMap.withValue typ, val:
+    # already cached
+    result = val[]
+  do:
+    # translate the type and cache it
+    var bu = initBuilder[NodeKind]()
+    c.translate(env, typ, bu)
+    c.typeMap[typ] = c.types.mgetOrPut(finish(bu), c.types.len.uint32)
 
 template measure(name: string, body: untyped) =
   let a = getMonoTime()
@@ -1342,12 +1365,8 @@ proc compile(graph: ModuleGraph) =
   # assemble the final tree from the various fragments:
   var bu = initBuilder[NodeKind](NodeKind.Module)
   bu.subTree TypeDefs:
-    var i = 0
-    privateAccess(TypeEnv)
-    for id, it in env.types.symbols.pairs:
-      if i > 0:
-        gen(bu, env.types, id)
-      inc i
+    for it in c.types.keys:
+      bu.add it
 
   bu.subTree GlobalDefs:
     for it in c.globals.items:
