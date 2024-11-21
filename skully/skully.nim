@@ -1190,7 +1190,7 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
 
     var bias = 0
     for id, it in body.locals.pairs:
-      if it.typ == VoidType:
+      if env.types.canonical(it.typ) == VoidType:
         inc bias
       else:
         c.prc.localMap[id] = uint32(id.ord - bias)
@@ -1219,7 +1219,7 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
     bu.add c.genProcType(env, env.types.add(evt.sym.typ))
     bu.subTree Locals:
       for it in body.locals.items:
-        if it.typ != VoidType:
+        if env.types.canonical(it.typ) != VoidType:
           bu.add typeRef(c, env, it.typ)
 
       for it in c.prc.temps.items:
@@ -1240,7 +1240,7 @@ proc translateProcType(c; env: TypeEnv, id: TypeId, bu) =
 
     for (i, typ, flags) in env.params(desc):
       # exclude compile-time-only parameters
-      if env.headerFor(typ, Lowered).kind != tkVoid:
+      if env.canonical(typ) != VoidType:
         bu.add typeRef(c, env, typ)
 
 proc translate(c; env: TypeEnv, id: TypeId, bu) =
