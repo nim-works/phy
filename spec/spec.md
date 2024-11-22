@@ -209,6 +209,27 @@ The type of the `If` expression is the common type between `A` and `B`.
 **Expression kind**: r-value
 **Uses**: `cond`, `body`, and - if present - `else`
 
+#### `While`
+
+```grammar
+expr += (While cond:<expr> body:<expr>)
+```
+
+Repeatedly evaluates `body`, as long as `cond` evaluates to `true`. Both
+`body` and `cond` are part of a new scope.
+
+Let `C` be the type of `cond` and let `T` be the type of `body`. An error is
+reported if:
+* `C` is not `bool`
+* `T` is not `unit`
+
+The type of a `While` expression depends on the `cond` expression. If `cond`
+is the built-in `true` literal `(Ident "true")`, then the expression is of
+type `void`, otherwise it is of type `unit`.
+
+**Expression kind**: r-value
+**Uses**: `cond` and `body`
+
 #### `Return`
 
 ```grammar
