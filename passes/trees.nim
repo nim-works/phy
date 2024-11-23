@@ -235,7 +235,7 @@ proc toSexp*[T](tree: PackedTree[T], at: NodeIndex): SexpNode =
       result.add toSexp(tree, it)
 
 proc fromSexp[T](n: SexpNode, to: var PackedTree[T]) =
-  mixin isAtom, fromSexp
+  mixin isAtom, fromSexp, fromSexpSym
   case n.kind
   of SList:
     assert n.len > 0
@@ -247,7 +247,11 @@ proc fromSexp[T](n: SexpNode, to: var PackedTree[T]) =
       for i in 1..<n.len:
         fromSexp(n[i], to)
   of SInt:
-    to.nodes.add fromSexp(n.num, T)
+    to.nodes.add fromSexp(to, n.num)
+  of SFloat:
+    to.nodes.add fromSexp(to, n.fnum)
+  of SSymbol:
+    to.nodes.add fromSexpSym(to, n.symbol)
   else:
     doAssert false
 
