@@ -221,7 +221,7 @@ Repeatedly evaluates `body`, as long as `cond` evaluates to `true`. Both
 Let `C` be the type of `cond` and let `T` be the type of `body`. An error is
 reported if:
 * `C` is not `bool`
-* `T` is not `unit`
+* `T` is neither `unit` nor `void`
 
 The type of a `While` expression depends on the `cond` expression. If `cond`
 is the built-in `true` literal `(Ident "true")`, then the expression is of

@@ -869,8 +869,8 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
     if cond.typ.kind != tkBool:
       c.error("condition expression must be of type bool")
 
-    if body.typ.kind != tkUnit:
-      c.error("`While` body must be a unit expression")
+    if body.typ.kind notin {tkUnit, tkVoid}:
+      c.error("`While` body must be a unit or void expression")
 
     stmts.addStmt Loop:
       bu.subTree Stmts:

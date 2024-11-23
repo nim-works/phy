@@ -1,0 +1,5 @@
+discard """
+  output: "(): unit"
+"""
+(While (Ident "false")
+  (Unreachable))
