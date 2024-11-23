@@ -227,6 +227,10 @@ The type of a `While` expression depends on the `cond` expression. If `cond`
 is the built-in `true` literal `(Ident "true")`, then the expression is of
 type `void`, otherwise it is of type `unit`.
 
+> TODO: once constant expression evaluation is specified, consider changing the
+>       rules such that a `While` is of type `void` when the is a constant
+>       expression that evaluates to true
+
 **Expression kind**: r-value
 **Uses**: `cond` and `body`
 
