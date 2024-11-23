@@ -3,7 +3,7 @@ discard """
     A `(While (Ident true))` loop never exits normally, and is thus of type
     void
   "
-  arguments: "c"
+  arguments: "c" # don't run the program; it doesn't terminate
 """
 (ProcDecl (Ident "p") (VoidTy) (Params)
   (While (Ident "true")
