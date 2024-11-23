@@ -1,0 +1,5 @@
+discard """
+  reject: true
+"""
+(While (Ident "true")
+  (Unreachable))

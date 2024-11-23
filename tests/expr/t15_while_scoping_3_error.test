@@ -1,0 +1,13 @@
+discard """
+  description: "
+    Declarations within the `While` condition are not visible to the outside
+  "
+  reject: true
+"""
+(Exprs
+  (While
+    (Exprs
+      (Decl (Ident "x") (IntVal 0))
+      (Ident "false"))
+    (TupleCons))
+  (Ident "x"))

@@ -1,0 +1,10 @@
+discard """
+  description: "
+    A `(While (Ident true))` loop never exits normally, and is thus of type
+    void
+  "
+  arguments: "c"
+"""
+(ProcDecl (Ident "p") (VoidTy) (Params)
+  (While (Ident "true")
+    (TupleCons)))
