@@ -857,6 +857,41 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
         c.genAsgn(Node(kind: Local, val: tmp), fe.expr, fe.typ, bu)
     genLocal(tmp, typ, bu)
     result = typ + {}
+  of SourceKind.While:
+    let (a, b) = t.pair(n)
+
+    c.openScope()
+    let
+      cond = c.exprToIL(t, a)
+      body = c.exprToIL(t, b)
+    c.closeScope()
+
+    if cond.typ.kind != tkBool:
+      c.error("condition expression must be of type bool")
+
+    if body.typ.kind notin {tkUnit, tkVoid}:
+      c.error("`While` body must be a unit or void expression")
+
+    stmts.addStmt Loop:
+      bu.subTree Stmts:
+        bu.add cond.stmts
+        bu.subTree If:
+          bu.subTree Not:
+            genUse(cond.expr, bu)
+          bu.subTree Break:
+            bu.add Node(kind: Immediate, val: 1)
+
+        bu.add body.stmts
+        genDrop(body.expr, body.typ, bu)
+
+    if t[a].kind == SourceKind.Ident and t.getString(a) == "true":
+      # it's a loop that doesn't exit via non-exception control-flow
+      stmts.addStmt Unreachable:
+        discard
+      result = prim(tkVoid) + {}
+    else:
+      bu.add UnitNode
+      result = prim(tkUnit) + {}
   of SourceKind.Call:
     result = callToIL(c, t, n, bu, stmts) + {}
   of SourceKind.TupleCons:

@@ -1,0 +1,16 @@
+discard """
+  description: "
+    The body is evaluated repeatedly, as long as the condition evaluates
+    to true
+  "
+  output: "10: int"
+"""
+(Exprs
+  (Decl (Ident "repeat") (Ident "true"))
+  (Decl (Ident "x") (IntVal 0))
+  (While (Ident "repeat")
+    (Exprs
+      (Asgn (Ident "repeat") (Ident "false"))
+      (Asgn (Ident "x")
+        (Call (Ident "+") (Ident "x") (IntVal 10)))))
+  (Ident "x"))
