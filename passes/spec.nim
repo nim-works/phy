@@ -69,5 +69,14 @@ proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
   of Global:    sexp([newSSymbol("Global"), sexp n.val.int])
   else:         unreachable()
 
-proc fromSexp*(i: BiggestInt, _: typedesc[NodeKind]): TreeNode[NodeKind] =
+proc fromSexp*(tree: var PackedTree[NodeKind], i: BiggestInt
+              ): TreeNode[NodeKind] =
   TreeNode[NodeKind](kind: Immediate, val: i.uint32)
+
+proc fromSexp*(tree: var PackedTree[NodeKind], i: BiggestFloat
+              ): TreeNode[NodeKind] =
+  TreeNode[NodeKind](kind: FloatVal, val: tree.pack(i))
+
+proc fromSexpSym*(tree: var PackedTree[NodeKind], sym: string
+                 ): TreeNode[NodeKind] =
+  unreachable("standalone S-expr symbols are not supported")

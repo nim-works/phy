@@ -9,7 +9,7 @@ import
 
 type
   NodeKind* {.pure.} = enum
-    Immediate, IntVal, FloatVal
+    IntVal, FloatVal
     Ident,
     VoidTy, UnitTy, BoolTy, IntTy, FloatTy, TupleTy, UnionTy, ProcTy
     And, Or
@@ -51,11 +51,19 @@ proc fromSexp*(tree: var PackedTree[NodeKind], kind: NodeKind,
 proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
              n: TreeNode[NodeKind]): SexpNode =
   case n.kind
-  of Immediate: sexp(n.val.int)
   of IntVal:    sexp([newSSymbol("IntVal"), sexp tree.getInt(idx)])
   of FloatVal:  sexp([newSSymbol("FloatVal"), sexp tree.getFloat(idx)])
   of Ident:     sexp([newSSymbol("Ident"), sexp tree.getString(idx)])
   else:         unreachable()
 
-proc fromSexp*(i: BiggestInt, _: typedesc[NodeKind]): TreeNode[NodeKind] =
-  TreeNode[NodeKind](kind: Immediate, val: i.uint32)
+proc fromSexp*(tree: var PackedTree[NodeKind], i: BiggestInt
+              ): TreeNode[NodeKind] =
+  TreeNode[NodeKind](kind: IntVal, val: tree.pack(i))
+
+proc fromSexp*(tree: var PackedTree[NodeKind], f: BiggestFloat
+              ): TreeNode[NodeKind] =
+  TreeNode[NodeKind](kind: FloatVal, val: tree.pack(f))
+
+proc fromSexpSym*(tree: var PackedTree[NodeKind], sym: string
+                 ): TreeNode[NodeKind] =
+  TreeNode[NodeKind](kind: Ident, val: tree.pack(sym))
