@@ -189,21 +189,70 @@ proc genField(c; env: MirEnv; e: Expr; pos: int32, bu) =
   ## Emits a field access for field `pos`.
   let typ = env.types.canonical(e.typ)
 
-  proc base(env: TypeEnv, e: Expr, typ: TypeId, pos: int32, bu): int32 =
+  proc findType(env: TypeEnv, typ: TypeId, pos: int32): (TypeId, int) =
     let desc = env.headerFor(typ, Lowered)
-    result = desc.fieldOffset(env)
-    if result > pos:
-      bu.subTree Field: # follow the base field
-        discard base(env, e, desc.base(env), pos, bu)
-        bu.add node(Immediate, 0)
+    if desc.fieldOffset(env) > pos:
+      result = findType(env, desc.base(env), pos)
+      result[1] += 1
     else:
-      bu.add e.nodes
+      result = (typ, 0)
+
+  proc findField(env: TypeEnv, typ: TypeId, id: FieldId,
+                 steps: var seq[uint32]): bool =
+    var pos = 0
+    block search:
+      for (f, recf) in env.fields(env.headerFor(typ, Lowered)):
+        if env.headerFor(recf.typ, Canonical).kind == tkTaggedUnion:
+          # a tagged union field counts as two: one for the tag, and one for
+          # the union
+          inc pos # skip the tag
+          if findField(env, recf.typ, id, steps):
+            if steps[^1] == 0: # is the field a tag field?
+              # the tag is part of the embedder
+              steps.del(steps.high)
+              dec pos
+            break search
+        elif env[recf.typ].isNil and
+             env.headerFor(recf.typ, Canonical).kind == tkRecord:
+          # it's an embedded record type
+          if findField(env, recf.typ, id, steps):
+            break search
+        elif f == id:
+          break search
+
+        inc pos
+
+      # not found
+      return false
+
+    result = true
+    steps.add uint32(pos)
 
   case env.types.headerFor(typ, Lowered).kind
   of tkRecord:
-    bu.subTree Field:
-      let bias = base(env.types, e, typ, pos, bu)
-      bu.add node(Immediate, uint32(pos - bias))
+    let
+      id = env.types.lookupField(typ, pos)
+      (typ, depth) = findType(env.types, typ, pos)
+    var steps: seq[uint32]
+    # tagged unions are "inlined" in MIR record types, but not in IL types,
+    # requiring additional field access
+    doAssert findField(env.types, typ, id, steps)
+
+    var nodes: seq[Node]
+    for _ in 0..<(steps.len + depth):
+      nodes.add node(Field, 2)
+
+    nodes.add e.nodes
+
+    # add the base field access first...
+    for _ in 0..<depth:
+      nodes.add node(Immediate, 0)
+
+    # ... then the extra steps, but in reverse
+    for i in countdown(steps.high, 0):
+      nodes.add node(Immediate, uint32 steps[i])
+
+    bu.add nodes
   of tkUnion:
     bu.subTree Field:
       bu.add e.nodes
@@ -281,10 +330,7 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
     wrapCopy:
       c.genField(env, e, tree[n, 1].field, bu)
   of mnkPathVariant:
-    wrapCopy Field:
-      recurse(tree.child(n, 0), false)
-      # TODO: implement properly. Traversing the base fields is missing
-      bu.add node(Immediate, tree[n, 1].field.uint32)
+    recurse(tree.child(n, 0), false)
   of mnkPathArray:
     let typ = env.types.canonical(tree[n, 0].typ)
     case env.types.headerFor(typ, Canonical).kind
@@ -331,6 +377,7 @@ proc gen(c; env: MirEnv, tree; n; wantsValue: bool): Expr =
   var bu = initBuilder[NodeKind]()
   c.translateValue(env, tree, n, wantsValue, bu)
   result = makeExpr(finish(bu), tree[n].typ)
+  assert result.nodes.len > 0
 
 proc takeAddr(e: Expr, bu) =
   if e.nodes[0].kind == Deref:
@@ -1424,9 +1471,26 @@ proc translate(c; env: TypeEnv, id: TypeId, bu) =
 
       for f, recf in env.fields(desc):
         privateAccess(RecField)
-        bu.subTree Field:
-          bu.add node(Immediate, recf.offset.uint32)
-          bu.add typeRef(c, env, recf.typ)
+        if env.headerFor(recf.typ, Canonical).kind == tkTaggedUnion:
+          # the tag field is inlined into the embedder. This is simpler,
+          # as it removes having to use another intermediate type
+          let tag = env[env.lookupField(recf.typ, 0)].typ
+          bu.subTree Field:
+            bu.add node(Immediate, recf.offset.uint32)
+            bu.add typeRef(c, env, tag)
+
+          # XXX: all field offsets within the tagged union are relative to the
+          #      start of the embedding record, and thus the union has to be
+          #      placed at offset 0. This results in correct code generation,
+          #      but it will cause issues as soon as the passes responsible for
+          #      lowering records start to expect sane input
+          bu.subTree Field:
+            bu.add node(Immediate, 0)
+            bu.add typeRef(c, env, recf.typ)
+        else:
+          bu.subTree Field:
+            bu.add node(Immediate, recf.offset.uint32)
+            bu.add typeRef(c, env, recf.typ)
   of tkImported:
     # TODO: imported types need to be handled differently. Either the target
     #       IL needs to support them, or they have to treated as their
@@ -1437,9 +1501,14 @@ proc translate(c; env: TypeEnv, id: TypeId, bu) =
         bu.add node(Immediate, 0)
         bu.add node(Type, CharType.uint32)
   of tkTaggedUnion:
+    # only generate the union part, the tag field is inlined into the embedder
     bu.subTree Record:
-      bu.add node(Immediate, desc.size(env).uint32)
-      # TODO: complete
+      # TODO: properly compute the size. It's not stored in the MIR type header
+      bu.add node(Immediate, 0)
+      for f, recf in env.fields(desc, 1):
+        bu.subTree Field:
+          bu.add node(Immediate, 0)
+          bu.add typeRef(c, env, recf.typ)
   of tkProc, tkPtr, tkRef, tkVar, tkLent, tkCstring:
     c.translate(env, PointerType, bu)
   else:
