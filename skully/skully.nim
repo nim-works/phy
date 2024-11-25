@@ -887,6 +887,37 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     # the control-flow path needs to be marked as unreachable:
     stmts.addStmt Unreachable:
       discard
+  of mEcho:
+    # emit the array construction:
+    let tmp = c.newTemp(tree[tree.argument(n, 0)].typ)
+    for i in 1..<tree.numArgs(n):
+      stmts.addStmt Asgn:
+        bu.subTree At:
+          bu.add node(Local, tmp)
+          bu.add node(IntVal, c.lit.pack(i - 1))
+        value(tree.argument(n, i))
+
+    # emit the openArray construction:
+    let
+      prc = c.graph.getCompilerProc("echoBinSafe")
+      oa  = c.newTemp(env.types.add(prc.typ[1]))
+
+    stmts.addStmt Asgn:
+      bu.subTree Field:
+        bu.add node(Local, oa)
+        bu.add node(Immediate, 0)
+      bu.subTree Addr:
+        bu.add node(Local, tmp)
+    stmts.addStmt Asgn:
+      bu.subTree Field:
+        bu.add node(Local, oa)
+        bu.add node(Immediate, 1)
+      bu.add node(IntVal, c.lit.pack(tree.numArgs(n) - 1))
+
+    stmts.addStmt Call:
+      bu.add compilerProc(c, env, "echoBinSafe")
+      bu.subTree Copy:
+        bu.add node(Local, oa)
   of mOf:
     wrapAsgn:
       c.genOf(env, tree,
