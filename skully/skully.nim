@@ -1567,6 +1567,14 @@ proc compile(graph: ModuleGraph) =
   registerPass graph, collectPass
   compileProject(graph, graph.config.projectMainIdx)
 
+  block:
+    # the ``TFrame`` system type must not be treated as an imported type (as
+    # those are not supported by skully), so we have to "correct" the type
+    # prior to the MIR processing
+    let s = graph.systemModuleSym(graph.cache.getIdent("TFrame"))
+    s.flags.excl sfImportc
+    s.extFlags.excl exfNoDecl
+
   # --- run the MIR processing and translate the MIR code
   let config =
     BackendConfig(noImported: true, # prefer not using FFI procedures
