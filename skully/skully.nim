@@ -99,6 +99,7 @@ type
 
   Expr = object
     nodes: seq[Node]
+    typ {.requiresInit.}: TypeId
 
   ProcMap = SeqMap[ProcedureId, seq[Node]]
 
@@ -121,6 +122,9 @@ iterator items(tree: MirTree, n: NodePosition, start: int, last: BackwardsIndex)
 
 template node(k: NodeKind, v: uint32): Node =
   Node(kind: k, val: v)
+
+proc makeExpr(nodes: sink seq[Node], typ: TypeId): Expr {.inline.} =
+  Expr(nodes: nodes, typ: typ)
 
 proc goto(bu; label: uint32) =
   bu.subTree Continue:
@@ -300,7 +304,7 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
 proc gen(c; env: MirEnv, tree; n; wantsValue: bool): Expr =
   var bu = initBuilder[NodeKind]()
   c.translateValue(env, tree, n, wantsValue, bu)
-  result = Expr(nodes: finish(bu))
+  result = makeExpr(finish(bu), tree[n].typ)
 
 proc takeAddr(e: Expr, bu) =
   if e.nodes[0].kind == Deref:
@@ -335,18 +339,18 @@ template putInto(builder: Builder[NodeKind], dest: Expr, kind: NodeKind,
   if true:
     var bu {.inject.} = initBuilder(kind)
     body
-    genAsgn(dest, Expr(nodes: bu.finish()), builder)
+    genAsgn(dest, makeExpr(bu.finish(), dest.typ), builder)
 
 proc putInto(bu; dest: Expr, node: Node) =
-  genAsgn(dest, Expr(nodes: @[node]), bu)
+  genAsgn(dest, makeExpr(@[node], dest.typ), bu)
 
 proc genDefault(c; env: MirEnv; dest: Expr, typ: TypeId, bu) =
   let typ = env.types.canonical(typ)
   case env.types.headerFor(typ, Lowered).kind
   of tkBool, tkChar, tkInt, tkUInt, tkRef, tkPtr, tkVar, tkLent, tkPointer:
-    genAsgn(dest, Expr(nodes: @[node(IntVal, 0)]), bu)
+    genAsgn(dest, makeExpr(@[node(IntVal, 0)], typ), bu)
   of tkFloat:
-    genAsgn(dest, Expr(nodes: @[node(FloatVal, c.lit.pack(0.0))]), bu)
+    genAsgn(dest, makeExpr(@[node(FloatVal, c.lit.pack(0.0))], typ), bu)
   else:
     # TODO: implement
     discard
@@ -439,7 +443,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     if true:
       var bu {.inject.} = initBuilder[NodeKind]()
       body
-      genAsgn(dest, Expr(nodes: finish(bu)), stmts)
+      genAsgn(dest, makeExpr(finish(bu), dest.typ), stmts)
 
   case tree[n, 1].magic
   of mNot:
@@ -621,7 +625,8 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   of mLengthSeq, mLengthOpenArray, mLengthStr:
     c.genLength(env, tree, NodePosition tree.argument(n, 0), dest, stmts)
   of mHigh:
-    let tmp = Expr(nodes: @[node(Local, c.newTemp(env.types.sizeType))])
+    let tmp = makeExpr(@[node(Local, c.newTemp(env.types.sizeType))],
+                       env.types.sizeType)
     c.genLength(env, tree, NodePosition tree.argument(n, 0), tmp, stmts)
     wrapAsgn Sub:
       bu.add typeRef(c, env, env.types.sizeType)
@@ -834,7 +839,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     if true:
       var bu {.inject.} = initBuilder[NodeKind]()
       body
-      genAsgn(dest, Expr(nodes: finish(bu)), stmts)
+      genAsgn(dest, makeExpr(finish(bu), dest.typ), stmts)
 
   case tree[n].kind
   of LvalueExprKinds, LiteralDataNodes, mnkProcVal:
@@ -1091,7 +1096,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
       c.genDefault(env, dest, tree[n, 0].typ, stmts)
   of mnkVoid:
     guardActive()
-    c.translateExpr(env, tree, tree.child(n, 0), Expr(), stmts)
+    c.translateExpr(env, tree, tree.child(n, 0), Expr(typ: VoidType), stmts)
     if tree[n, 0].kind in {mnkCall, mnkCheckedCall}:
       # handle noreturn calls; they need to be followed by an Unreachable
       let callee = tree.callee(tree.child(n, 0))
@@ -1208,7 +1213,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
       let then = c.prc.newLabel()
       var els = c.prc.newLabel()
 
-      let ex = Expr(nodes: @[node(Local, c.newTemp(PointerType))])
+      let ex = makeExpr(@[node(Local, c.newTemp(PointerType))], PointerType)
       stmts.putInto ex, Call:
         bu.add compilerProc(c, env, "nimBorrowCurrentException")
 
