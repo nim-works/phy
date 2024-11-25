@@ -7,6 +7,7 @@ import
     condsyms,
     commands,
     cmdlinehelper,
+    msgs
   ],
   compiler/sem/[
     passes,
@@ -14,8 +15,11 @@ import
     modulelowering
   ],
   compiler/ast/[
+    ast,
+    ast_types,
+    ast_query,
     idents,
-    ast_types
+    lineinfos
   ],
   compiler/modules/[
     modulegraphs,
@@ -1361,6 +1365,48 @@ proc complete(c; env: MirEnv, typ: Node, prc: ProcContext, body: MirBody,
   bu.add content
   result = bu.finish()
 
+proc replaceProcAst(config: ConfigRef, prc: PSym, with: PNode) =
+  ## Replaces the ``PSym.ast`` of `prc` with the routine AST `with`,
+  ## reparenting all symbols found in the body. This is crude, brittle, and
+  ## best described as "don't do this" -- we rely on the patched-with
+  ## procedure bodies to be simple enough for this to not cause any problems.
+  assert with.kind in {nkProcDef, nkFuncDef}
+  var map: Table[int, PSym]
+  var prev = with[namePos].sym
+
+  proc patch(n: PNode) =
+    case n.kind
+    of nkSym:
+      if n.sym.owner == prev:
+        map.withValue n.sym.id, it:
+          n.sym = it[]
+        do:
+          # IDs for locals only need to be unique within their parent procedure,
+          # so duplicating the ID here is fine
+          let s = copySym(n.sym, n.sym.itemId)
+          s.owner = prc # reparent
+          map[s.id] = s
+          n.sym = s
+
+    of nkWithoutSons - {nkSym}:
+      discard "nothing to do"
+    of nkTypeSection, callableDefs:
+      config.internalError(n.info, "too complex to patch")
+    else:
+      for it in n.items:
+        patch(it)
+
+  var n = copyTree(with)
+  n[namePos] = newSymNode(prc)
+  # don't patch the name
+  for i in (namePos + 1)..<n.len:
+    patch(n[i])
+
+  prc.ast = n
+  # the proc type also contains symbols; it needs to be updated too
+  prc.typ = copyType(with[namePos].sym.typ, with[namePos].sym.typ.itemId, prc)
+  patch(prc.typ.n)
+
 proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[ProcedureId, PartialProc], graph: ModuleGraph, c; evt: sink BackendEvent) =
   case evt.kind
   of bekDiscovered:
@@ -1371,7 +1417,20 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
       # constants are translated to IL globals too
       c.constMap[evt.entity.cnst] = c.newGlobal(env, evt.entity.typ)
     of mnkProc:
-      discard "nothing to do"
+      let prc = env.procedures[evt.entity.prc]
+      if sfImportc in prc.flags:
+        # replace importc'ed procedures with their corresponding overrides
+        let override = graph.getCompilerProc("hook_" & prc.name.s)
+        if override.isNil:
+          graph.config.internalError(prc.info):
+            "no override for importc'ed procedure found"
+        else:
+          replaceProcAst(graph.config, prc, override.ast)
+          # the procedure is no longer an FFI procedure; update the flags
+          prc.flags.excl sfImportc
+          prc.extFlags.excl exfDynamicLib
+          prc.extFlags.excl exfNoDecl
+
     else:
       unreachable()
   of bekPartial:
@@ -1540,7 +1599,7 @@ template measure(name: string, body: untyped) =
   body
   echo name, " took: ", inMilliseconds(getMonoTime() - a)
 
-proc replaceModule(config: ConfigRef, name: string, with: string) =
+proc findPatchFile(config: ConfigRef, file: string): FileIndex =
   var patchDir = getAppDir()
   # search for the directory that contains the patch modules
   if dirExists(patchDir / ".." / "skully" / "patch"):
@@ -1552,13 +1611,17 @@ proc replaceModule(config: ConfigRef, name: string, with: string) =
     raise ValueError.newException("cannot find patch directory")
 
   var known: bool
+  result = config.fileInfoIdx(AbsoluteFile(patchDir / file), known)
+
+proc replaceModule(config: ConfigRef, name: string, with: string) =
+  var known: bool
   # this is a horrible hack, but it's the most simple and straightforward
   # solution to replacing modules at compile time not requiring modifying
   # the compiler. We register the real file and then replace its ``FileInfo``
   # with that of the module we want to replace it with
   let
     idx = config.fileInfoIdx(findModule(config, name, ""), known)
-    other = config.fileInfoIdx(AbsoluteFile(patchDir / with), known)
+    other = findPatchFile(config, with)
   config.m.fileInfos[ord idx] = config.m.fileInfos[ord other]
 
 proc compile(graph: ModuleGraph) =
@@ -1669,6 +1732,12 @@ proc main(args: openArray[string]) =
 
   # replace some system modules:
   replaceModule(config, "system/osalloc", "osalloc.nim")
+
+  # add the overrides module as an implicit import, so that the hook
+  # procedures part of it are added to the compilation
+  config.implicitImportsAdd:
+    config[findPatchFile(config, "overrides.nim")].fullPath.string
+
   # disable various C and platform specific code, in order to reduce the
   # amount of patching that's needed
   defineSymbol(config, "noSignalHandler") # disable default signal handlers
