@@ -26,7 +26,8 @@ import
     trees,
   ],
   phy/[
-    default_reporting
+    default_reporting,
+    tree_parser
   ],
   common/[
     vmexec

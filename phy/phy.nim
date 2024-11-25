@@ -9,9 +9,6 @@ import
     streams,
     strutils
   ],
-  experimental/[
-    sexp
-  ],
   common/[
     vmexec
   ],
@@ -38,6 +35,7 @@ import
   ],
   phy/[
     default_reporting,
+    tree_parser,
     types
   ],
   vm/[
@@ -152,7 +150,7 @@ proc sourceToIL(text: string): (PackedTree[spec.NodeKind], SemType) =
   ## procedure to run.
   ##
   ## A failure during analysis aborts the program.
-  var code = fromSexp[spec_source.NodeKind](parseSexp(text))
+  var code = fromSexp[spec_source.NodeKind](text)
 
   var reporter = initDefaultReporter[string]()
   var ctx = source2il.open(reporter)
@@ -313,9 +311,9 @@ proc main(args: openArray[string]) =
     elif gRunner:
       # in order to reduce visual noise in tests, the ``(Module ...)`` top
       # level node is added implicitly
-      code = fromSexp[spec.NodeKind](parseSexp("(Module " & text & ")"))
+      code = fromSexp[spec.NodeKind]("(Module " & text & ")")
     else:
-      code = fromSexp[spec.NodeKind](parseSexp(text))
+      code = fromSexp[spec.NodeKind](text)
 
     if target == langBytecode:
       # compile to L0 code and then translate to bytecode
