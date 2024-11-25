@@ -1674,6 +1674,7 @@ proc main(args: openArray[string]) =
   defineSymbol(config, "noSignalHandler") # disable default signal handlers
   defineSymbol(config, "nimNoLibc")
   defineSymbol(config, "nimEmulateOverflowChecks")
+  defineSymbol(config, "nimPreviewFloatRoundtrip")
 
   config.astDiagToLegacyReport = cli_reporter.legacyReportBridge
   # XXX: only arc is support at the moment
