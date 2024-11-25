@@ -1749,6 +1749,7 @@ proc main(args: openArray[string]) =
 
   # replace some system modules:
   replaceModule(config, "system/osalloc", "osalloc.nim")
+  replaceModule(config, "pure/os", "os.nim")
 
   # add the overrides module as an implicit import, so that the hook
   # procedures part of it are added to the compilation
