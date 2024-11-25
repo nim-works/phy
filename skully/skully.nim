@@ -185,7 +185,34 @@ proc genExit(c; tree; n; bu) =
   else:
     unreachable()
 
+proc genField(c; env: MirEnv; e: Expr; pos: int32, bu) =
+  ## Emits a field access for field `pos`.
+  let typ = env.types.canonical(e.typ)
+
+  proc base(env: TypeEnv, e: Expr, typ: TypeId, pos: int32, bu): int32 =
+    let desc = env.headerFor(typ, Lowered)
+    result = desc.fieldOffset(env)
+    if result > pos:
+      bu.subTree Field: # follow the base field
+        discard base(env, e, desc.base(env), pos, bu)
+        bu.add node(Immediate, 0)
+    else:
+      bu.add e.nodes
+
+  case env.types.headerFor(typ, Lowered).kind
+  of tkRecord:
+    bu.subTree Field:
+      let bias = base(env.types, e, typ, pos, bu)
+      bu.add node(Immediate, uint32(pos - bias))
+  of tkUnion:
+    bu.subTree Field:
+      bu.add e.nodes
+      bu.add node(Immediate, uint32 pos)
+  else:
+    unreachable()
+
 proc genProcType(c; env: MirEnv, typ: TypeId): Node
+proc gen(c; env: MirEnv, tree; n; wantsValue: bool): Expr
 
 proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: bool, bu) =
   template recurse(n: NodePosition, wantValue: bool) =
@@ -250,10 +277,9 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
       recurse(tree.child(n, 0), false)
       bu.add node(Immediate, tree[n, 1].imm)
   of mnkPathNamed:
-    wrapCopy Field:
-      recurse(tree.child(n, 0), false)
-      # TODO: implement properly. Traversing the base fields is missing
-      bu.add node(Immediate, tree[n, 1].field.uint32)
+    let e = c.gen(env, tree, tree.child(n, 0), false)
+    wrapCopy:
+      c.genField(env, e, tree[n, 1].field, bu)
   of mnkPathVariant:
     wrapCopy Field:
       recurse(tree.child(n, 0), false)
@@ -355,13 +381,7 @@ proc genDefault(c; env: MirEnv; dest: Expr, typ: TypeId, bu) =
     # TODO: implement
     discard
 
-proc genField(c; env: MirEnv; e: Expr; pos: int, bu) =
-  # TODO: properly follow the base field(s), when needed
-  bu.subTree Field:
-    bu.add e.nodes
-    bu.add node(Immediate, uint32 pos)
-
-proc genField(c; env: MirEnv; tree; n; pos: int, bu) =
+proc genField(c; env: MirEnv; tree; n; pos: int32, bu) =
   c.genField(env, c.gen(env, tree, n, false), pos, bu)
 
 proc genOf(c; env: var MirEnv, tree; e: Expr, typ: TypeId; bu) =
@@ -1395,6 +1415,13 @@ proc translate(c; env: TypeEnv, id: TypeId, bu) =
   of tkRecord, tkUnion:
     bu.subTree Record:
       bu.add node(Immediate, desc.size(env).uint32)
+
+      if desc.kind == tkRecord and desc.base(env) != VoidType:
+        # the inherited-from type is added as the first field
+        bu.subTree Field:
+          bu.add node(Immediate, 0)
+          bu.add typeRef(c, env, desc.base(env))
+
       for f, recf in env.fields(desc):
         privateAccess(RecField)
         bu.subTree Field:
