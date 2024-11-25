@@ -130,6 +130,15 @@ template node(k: NodeKind, v: uint32): Node =
 proc makeExpr(nodes: sink seq[Node], typ: TypeId): Expr {.inline.} =
   Expr(nodes: nodes, typ: typ)
 
+template buildExpr(typ: TypeId, body: untyped): Expr =
+  if true:
+    let t = typ
+    var bu {.inject.} = initBuilder[NodeKind]()
+    body
+    makeExpr(finish(bu), t)
+  else:
+    unreachable()
+
 proc goto(bu; label: uint32) =
   bu.subTree Continue:
     bu.add node(Immediate, label)
@@ -1284,7 +1293,15 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
       let then = c.prc.newLabel()
       var els = c.prc.newLabel()
 
-      let ex = makeExpr(@[node(Local, c.newTemp(PointerType))], PointerType)
+      let
+        ex = makeExpr(@[node(Local, c.newTemp(PointerType))], PointerType)
+        excType = env.types.add(c.graph.getCompilerProc("Exception").typ)
+        expr = buildExpr excType:
+          bu.subTree Deref:
+            bu.add typeRef(c, env, excType)
+            bu.subTree Copy:
+              bu.add ex.nodes
+
       stmts.putInto ex, Call:
         bu.add compilerProc(c, env, "nimBorrowCurrentException")
 
@@ -1292,7 +1309,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
         stmts.join(els)
         els = c.prc.newLabel()
         stmts.addStmt SelectBool:
-          c.genOf(env, tree, ex, tree[it].typ, bu)
+          c.genOf(env, tree, expr, tree[it].typ, bu)
           bu.goto(els)
           bu.goto(then)
 
