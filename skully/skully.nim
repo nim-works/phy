@@ -1532,7 +1532,8 @@ proc genType(c; env: TypeEnv, typ: TypeId): uint32 =
     # translate the type and cache it
     var bu = initBuilder[NodeKind]()
     c.translate(env, typ, bu)
-    c.typeMap[typ] = c.types.mgetOrPut(finish(bu), c.types.len.uint32)
+    result = c.types.mgetOrPut(finish(bu), c.types.len.uint32)
+    c.typeMap[typ] = result
 
 template measure(name: string, body: untyped) =
   let a = getMonoTime()
