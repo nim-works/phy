@@ -1,8 +1,6 @@
-.type t0 (Float)
-.type t1 (Float)
-.type t2 (Proc t0)
+.type t0 () -> float
 .const c0 0.5000000149
-.start t2 p0
+.start t0 p0
   LdConst c0
   ReinterpI32
   ReinterpF32

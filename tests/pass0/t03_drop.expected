@@ -1,6 +1,5 @@
-.type t0 (Int)
-.type t1 (Proc (Void))
-.start t1 p0
+.type t0 () -> void
+.start t0 p0
   LdImmInt 8
   Drop
   Ret
