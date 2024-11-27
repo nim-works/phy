@@ -16,9 +16,6 @@ import
     streams,
     tables
   ],
-  experimental/[
-    sexp_parse
-  ],
   vm/[
     utils,
     vmspec,
@@ -92,6 +89,15 @@ proc expectChar(s: Stream, c: char) =
   if s.readChar() != c:
     raise AssemblerError.newException("expected '" & c & "' got")
 
+proc expectString(s: Stream, str: string) =
+  var i = 0
+  while i < str.len and s.readChar() == str[i]:
+    inc i
+
+  if i < str.len:
+    raise AssemblerError.newException:
+      "expected '" & str & "', got '" & str[0..i] & "'"
+
 proc parseIntLike[T](s: Stream, _: typedesc[T]): T =
   var str = ""
   while (let c = s.peekChar(); c notin {' ', '\t', '\n', '\r', '\0'}):
@@ -123,28 +129,6 @@ proc ident(s: Stream): string =
 
   expect result.len > 0, "expected identifier"
 
-# SexpParser helpers
-# -------------------
-
-template scopedParser(s: Stream) =
-  ## Injects a ``SexpParser`` local `p` opened with `s`. It's closed at the end of
-  ## the scope.
-  let start = s.getPosition()
-  var p {.inject.}: SexpParser
-  p.open(s)
-  defer:
-    # move the stream to the correct position
-    s.setPosition(start + p.offsetBase + p.bufpos)
-    # **important:** do not close the parser! It would also close the stream
-
-proc consumeSym(p: var SexpParser): string =
-  result = captureCurrString(p)
-  discard p.getTok() # move to the next token
-
-proc consumeTok(p: var SexpParser): TTokKind =
-  result = p.currToken
-  discard p.getTok() # move to the next token
-
 # Parsing
 # -------
 
@@ -157,55 +141,42 @@ proc parseTypedVal(s: Stream): TypedValue =
   let typ = parseEnum[ValueType]("vt" & s.ident())
   TypedValue(typ: typ, val: s.parseValue(typ))
 
-proc parseType(p: var SexpParser, env: var VmEnv, a: AssemblerState, allowRef: bool): TypeId =
-  ## Parses the sexp type representation given by `sexp` and adds the
-  ## resulting type directly to `env`.
-  if p.currToken == tkSymbol:
-    expect allowRef, "cannot use type reference in this context"
-    return a.types[p.consumeSym()]
-
-  expect p.currToken == tkParensLe
-  p.space()
-  expect p.getTok == tkSymbol
-
-  var desc: VmType
-  case p.consumeSym()
-  of "Void":
-    desc = VmType(kind: tkVoid)
-  of "Int":
-    desc = VmType(kind: TypeKind.tkInt)
-  of "Float":
-    desc = VmType(kind: TypeKind.tkFloat)
-  of "Foreign":
-    desc = VmType(kind: tkForeign)
-  of "Proc":
-    desc = VmType(kind: tkProc)
-    var params: seq[TypeId]
-
-    p.space()
-    while p.currToken != tkParensRi:
-      params.add parseType(p, env, a, true)
-      p.space()
-
-    desc.a = env.types.params.len.uint32
-    desc.b = desc.a + uint32(params.len)
-    env.types.params.add params
-  else:
-    expect false
-
-  p.space()
-  expect p.consumeTok() == tkParensRi
-  if desc.kind != tkVoid:
-    env.types.add(desc)
-  else:
-    VoidType
-
 proc parseType(s: Stream, env: var VmEnv, a: AssemblerState): TypeId =
-  ## Parses a type description provided as an S-expression from `s`. The type
-  ## description is added directly to `env`.
-  scopedParser(s)
-  discard p.getTok() # read the first token
-  result = parseType(p, env, a, false)
+  ## Parses a signature type from `s` and adds the type directly to `env`,
+  ## returning its ID.
+  s.expectChar('(')
+  s.space()
+
+  proc parseTypeName(s: Stream): TypeKind =
+    let name = s.ident()
+    # the type names are case insensitive
+    case toLower(name)
+    of "void":    tkVoid
+    of "int":     tkInt
+    of "float":   tkFloat
+    of "foreign": tkForeign
+    else:
+      raise AssemblerError.newException("unknown type name: " & name)
+
+  var params: seq[VmType]
+
+  if s.peekChar() == ')':
+    discard s.readChar() # an empt parameter list
+  else:
+    while true:
+      params.add s.parseTypeName()
+      s.space()
+      if s.peekChar() == ',': # a trailing comma is allowed
+        discard s.readChar()
+        s.space()
+      else:
+        s.expectChar(')')
+        break
+
+  s.space()
+  s.expectString("->")
+  s.space()
+  result = env.types.add(s.parseTypeName(), params)
 
 proc prc(a: var AssemblerState): var ProcState {.inline.} =
   a.stack[a.stack.len - 1]
