@@ -1,6 +1,9 @@
 ## Implements the translation/lowering of L0 code into VM bytecode.
 
 import
+  std/[
+    tables
+  ],
   passes/[
     trees,
     spec
@@ -16,6 +19,9 @@ type
   PassCtx = object
     # inputs:
     types: NodeIndex
+    signatures: ptr Table[uint32, TypeId]
+      ## maps signature type IDs to their VM equivalent. A pointer in order to
+      ## get around unnecessary copies
 
     # productions:
     code: seq[Instr]
@@ -62,9 +68,9 @@ func id(n: TreeNode[NodeKind]): int32 {.inline.} =
   assert n.kind in {Local, Global, Proc, ProcVal}
   cast[int32](n.val)
 
-func typ(n: TreeNode[NodeKind]): TypeId {.inline.} =
+func typ(n: TreeNode[NodeKind]): uint32 {.inline.} =
   assert n.kind == Type
-  TypeId(n.val + 1) # offset by one, to accomodate for the Void type
+  n.val
 
 proc parseType(tree; at: NodeIndex): Type0 =
   case tree[at].kind
@@ -73,8 +79,8 @@ proc parseType(tree; at: NodeIndex): Type0 =
   of Float: Type0(kind: t0kFloat, size: tree[at, 0].imm)
   else:     unreachable()
 
-proc parseType(tree; types: NodeIndex, id: TypeId): Type0 =
-  parseType(tree, tree.child(types, int(id) - 1))
+proc parseType(tree; types: NodeIndex, id: uint32): Type0 =
+  parseType(tree, tree.child(types, int(id)))
 
 func instr(c; op: Opcode) =
   c.code.add Instr(InstrType(op))
@@ -171,7 +177,7 @@ proc genCall(c; tree; call: NodeIndex,
 
     # the proc value is pushed to the stack last
     c.genExpr(tree, tree.child(call, start + 1))
-    c.instr(opcIndCall, tree[call, 0].typ.int32, numArgs(1))
+    c.instr(opcIndCall, int32 c.signatures[][tree[call, 0].typ], numArgs(1))
 
 proc signExtend(c; typ: Type0) =
   if typ.size < 8:
@@ -574,12 +580,13 @@ proc gen(c; tree; n: NodeIndex) =
 
   c.genExit(tree, tree.last(n))
 
-proc translate(tree; types, def: NodeIndex): ProcResult =
+proc translate(tree; types, def: NodeIndex,
+               signatures: Table[uint32, TypeId]): ProcResult =
   ## Translates the single procedure body `body` to VM bytecode. `types`
   ## provides the type environment.
   let (typ, locals, conts) = tree.triplet(def)
 
-  var c = PassCtx(types: types)
+  var c = PassCtx(types: types, signatures: addr signatures)
   # allocate and setup the local variables:
   c.locals.setLen(tree.len(locals))
   for i, it in tree.pairs(locals):
@@ -635,29 +642,29 @@ proc translate*(module: PackedTree[NodeKind], env: var VmEnv) =
   ## Translates a complete module to the VM bytecode and the associated
   ## environmental data.
   let (types, globals, procs) = module.triplet(NodeIndex(0))
+  var signatures: Table[uint32, TypeId]
 
-  for typ in module.items(types):
-    template addType(t: VmType) =
-      discard env.types.add(t)
-
+  for id, typ in module.pairs(types):
     case module[typ].kind
-    of Int, UInt:
-      # the VM makes no distinction between signed and unsigned integers
-      addType VmType(kind: tkInt)
-    of Float:
-      addType VmType(kind: tkFloat)
+    of Int, UInt, Float:
+      discard "nothing to do"
     of ProcTy:
       let start = env.types.params.len
       # the first type (i.e., return type) needs special handling:
       if module[typ, 0].kind == Void:
-        env.types.params.add(VoidType)
+        env.types.params.add(tkVoid)
 
       # the rest must be type references:
       for it in module.items(typ, env.types.params.len - start):
-        env.types.params.add(module[it].typ)
+        const Map = [t0kInt: tkInt, t0kUInt: tkInt, t0kFloat: tkFloat]
+        env.types.params.add:
+          Map[parseType(module, types, module[it].typ).kind]
 
-      addType VmType(kind: tkProc, a: start.uint32,
-                     b: env.types.params.len.uint32)
+      env.types.types.add start.uint32 .. env.types.params.high.uint32
+      # TODO: change the lang0 grammar such that only signatures are allowed
+      #       in the type section, which would result in a 1-to-1 mapping
+      #       between IL type IDs and VM type IDs, making the map obsolete
+      signatures[id.uint32] = env.types.types.high.TypeId
     else:
       unreachable()
 
@@ -678,7 +685,7 @@ proc translate*(module: PackedTree[NodeKind], env: var VmEnv) =
 
   # generate the code for the procedures and add them to the environment:
   for i, def in module.pairs(procs):
-    var prc = translate(module, types, def)
+    var prc = translate(module, types, def, signatures)
 
     if prc.constants.len > 0:
       # patch the LdConst instructions:
@@ -691,7 +698,8 @@ proc translate*(module: PackedTree[NodeKind], env: var VmEnv) =
 
       env.constants.add prc.constants
 
-    env.procs.add ProcHeader(kind: pkDefault, typ: module[def, 0].typ)
+    env.procs.add ProcHeader(kind: pkDefault,
+                             typ: signatures[module[def, 0].typ])
     env.procs[i].code = slice(env.code, prc.code)
     env.code.add prc.code
     env.procs[i].locals = hoSlice(env.locals, prc.locals)
