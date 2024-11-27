@@ -41,20 +41,13 @@ type
 
     Break, Return, Case, If, Block, Stmts
 
+  Node = TreeNode[NodeKind]
+
+using
+  lit: var Literals
+
 template isAtom*(x: NodeKind): bool =
   ord(x) <= ord(Global)
-
-proc fromSexp*(tree: var PackedTree[NodeKind], kind: NodeKind,
-               n: SexpNode): TreeNode[NodeKind] =
-  case kind
-  of IntVal:
-    TreeNode[NodeKind](kind: kind, val: tree.pack(n[1].num))
-  of FloatVal:
-    TreeNode[NodeKind](kind: FloatVal, val: tree.pack(n[1].fnum))
-  of ProcVal, Proc, Type, Local, Global:
-    TreeNode[NodeKind](kind: kind, val: n[1].num.uint32)
-  else:
-    unreachable()
 
 proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
              n: TreeNode[NodeKind]): SexpNode =
@@ -69,14 +62,33 @@ proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
   of Global:    sexp([newSSymbol("Global"), sexp n.val.int])
   else:         unreachable()
 
-proc fromSexp*(tree: var PackedTree[NodeKind], i: BiggestInt
-              ): TreeNode[NodeKind] =
-  TreeNode[NodeKind](kind: Immediate, val: i.uint32)
+proc fromSexp*(kind: NodeKind): Node =
+  raise ValueError.newException($kind & " node is missing operand")
 
-proc fromSexp*(tree: var PackedTree[NodeKind], i: BiggestFloat
-              ): TreeNode[NodeKind] =
-  TreeNode[NodeKind](kind: FloatVal, val: tree.pack(i))
+proc fromSexp*(kind: NodeKind, val: BiggestInt, lit): Node =
+  case kind
+  of IntVal:
+    Node(kind: kind, val: lit.pack(val))
+  of ProcVal, Proc, Type, Local, Global:
+    Node(kind: kind, val: val.uint32)
+  else:
+    unreachable()
 
-proc fromSexpSym*(tree: var PackedTree[NodeKind], sym: string
-                 ): TreeNode[NodeKind] =
-  unreachable("standalone S-expr symbols are not supported")
+proc fromSexp*(kind: NodeKind, val: BiggestFloat, lit): Node =
+  assert kind == FloatVal
+  Node(kind: kind, val: lit.pack(val))
+
+proc fromSexp*(kind: NodeKind, val: string, lit): Node =
+  raise ValueError.newException($kind & " node has no string operand")
+
+proc fromSexp*(_: typedesc[NodeKind], val: BiggestInt, lit): Node =
+  Node(kind: Immediate, val: val.uint32)
+
+proc fromSexp*(_: typedesc[NodeKind], val: BiggestFloat, lit): Node =
+  Node(kind: FloatVal, val: lit.pack(val))
+
+proc fromSexp*(_: typedesc[NodeKind], val: string, lit): Node =
+  raise ValueError.newException("standalone strings are not supported")
+
+proc fromSexpSym*(_: typedesc[NodeKind], val: string, lit): Node =
+  raise ValueError.newException("standalone S-expr symbols are not supported")

@@ -233,27 +233,3 @@ proc toSexp*[T](tree: PackedTree[T], at: NodeIndex): SexpNode =
     result.add newSSymbol($tree[at].kind)
     for it in tree.items(at):
       result.add toSexp(tree, it)
-
-proc fromSexp[T](n: SexpNode, to: var PackedTree[T]) =
-  mixin isAtom, fromSexp, fromSexpSym
-  case n.kind
-  of SList:
-    assert n.len > 0
-    let kind = parseEnum[T](n[0].symbol)
-    if isAtom(kind):
-      to.nodes.add fromSexp(to, kind, n)
-    else:
-      to.nodes.add TreeNode[T](kind: kind, val: uint32(n.len - 1))
-      for i in 1..<n.len:
-        fromSexp(n[i], to)
-  of SInt:
-    to.nodes.add fromSexp(to, n.num)
-  of SFloat:
-    to.nodes.add fromSexp(to, n.fnum)
-  of SSymbol:
-    to.nodes.add fromSexpSym(to, n.symbol)
-  else:
-    doAssert false
-
-proc fromSexp*[T](n: SexpNode): PackedTree[T] =
-  fromSexp(n, result)

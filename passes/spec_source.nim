@@ -28,26 +28,19 @@ type
     TypeDecl
     Module
 
+  Node = TreeNode[NodeKind]
+
 const
   ExprNodes* = {IntVal, FloatVal, Ident, And, Or, If, While, Call, TupleCons,
                 FieldAccess, Asgn, Return, Unreachable, Exprs, Decl}
   DeclNodes* = {ProcDecl, TypeDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 
+using
+  lit: var Literals
+
 template isAtom*(x: NodeKind): bool =
   ord(x) <= ord(Ident)
-
-proc fromSexp*(tree: var PackedTree[NodeKind], kind: NodeKind,
-               n: SexpNode): TreeNode[NodeKind] =
-  case kind
-  of IntVal:
-    TreeNode[NodeKind](kind: kind, val: tree.pack(n[1].num))
-  of FloatVal:
-    TreeNode[NodeKind](kind: FloatVal, val: tree.pack(n[1].fnum))
-  of Ident:
-    TreeNode[NodeKind](kind: Ident, val: tree.pack(n[1].str))
-  else:
-    unreachable()
 
 proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
              n: TreeNode[NodeKind]): SexpNode =
@@ -57,14 +50,29 @@ proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
   of Ident:     sexp([newSSymbol("Ident"), sexp tree.getString(idx)])
   else:         unreachable()
 
-proc fromSexp*(tree: var PackedTree[NodeKind], i: BiggestInt
-              ): TreeNode[NodeKind] =
-  TreeNode[NodeKind](kind: IntVal, val: tree.pack(i))
+proc fromSexp*(kind: NodeKind): Node =
+  raise ValueError.newException($kind & " node is missing operand")
 
-proc fromSexp*(tree: var PackedTree[NodeKind], f: BiggestFloat
-              ): TreeNode[NodeKind] =
-  TreeNode[NodeKind](kind: FloatVal, val: tree.pack(f))
+proc fromSexp*(kind: NodeKind, val: BiggestInt, lit): Node =
+  assert kind == IntVal
+  Node(kind: kind, val: lit.pack(val))
 
-proc fromSexpSym*(tree: var PackedTree[NodeKind], sym: string
-                 ): TreeNode[NodeKind] =
-  TreeNode[NodeKind](kind: Ident, val: tree.pack(sym))
+proc fromSexp*(kind: NodeKind, val: BiggestFloat, lit): Node =
+  assert kind == FloatVal
+  Node(kind: kind, val: lit.pack(val))
+
+proc fromSexp*(kind: NodeKind, val: string, lit): Node =
+  assert kind == Ident
+  Node(kind: kind, val: lit.pack(val))
+
+proc fromSexp*(_: typedesc[NodeKind], val: BiggestInt, lit): Node =
+  Node(kind: IntVal, val: lit.pack(val))
+
+proc fromSexp*(_: typedesc[NodeKind], val: BiggestFloat, lit): Node =
+  Node(kind: FloatVal, val: lit.pack(val))
+
+proc fromSexp*(_: typedesc[NodeKind], val: string, lit): Node =
+  raise ValueError.newException("standalone strings are not supported")
+
+proc fromSexpSym*(_: typedesc[NodeKind], val: string, lit): Node =
+  Node(kind: Ident, val: lit.pack(val))
