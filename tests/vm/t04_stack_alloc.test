@@ -1,7 +1,7 @@
 discard """
   output: "(Done 4096)"
 """
-.type P1 (Proc (Int))
+.type P1 () -> int
 .start P1 main
 StackAlloc 8
 Ret

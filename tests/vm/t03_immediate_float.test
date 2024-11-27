@@ -1,7 +1,7 @@
 discard """
   output: "(Done -0.5)"
 """
-.type P1 (Proc (Float))
+.type P1 () -> float
 .start P1 main
 LdImmFloat -0.5
 Ret
