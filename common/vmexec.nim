@@ -166,8 +166,8 @@ proc run*(env: var VmEnv, prc: ProcIndex): string =
   result = "(" & substr($res.kind, 3)
   case res.kind
   of yrkDone:
-    case env.types[res.typ].kind
-    of vmtypes.TypeKind.tkVoid, vmtypes.TypeKind.tkProc, tkForeign:
+    case res.typ
+    of vmtypes.TypeKind.tkVoid, tkForeign:
       discard
     of vmtypes.TypeKind.tkInt:
       result.add " "
