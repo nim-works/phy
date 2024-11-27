@@ -81,7 +81,7 @@ exit ::= <goto>
 stmt ::= (Asgn <local> <value>)
       |  (Store <type_id> <value> <value>)
       |  (Clear <value> <value>)
-      |  (Copy <value> <value> <value>)
+      |  (Blit <value> <value> <value>)
       |  (Call <proc> <value>*)
       |  (Call <type_id> <value>+)
       |  (Drop <value>)

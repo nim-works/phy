@@ -66,7 +66,7 @@ type
       ## locals that need to be pinned in memory (i.e., don't change location)
 
 const
-  IndirectAccess = {Copy, Clear, Store, Load, Call, CheckedCall,
+  IndirectAccess = {Blit, Clear, Store, Load, Call, CheckedCall,
                     CheckedCallAsgn}
     ## every operation that reads or writes through a pointer. Calls have to
     ## conservatively be treated as performing an indirect access.

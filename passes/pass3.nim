@@ -196,8 +196,8 @@ proc lowerExpr(c; tree; n; bu: var BuilderOrChangeset) =
         c.lowerExpr(tree, it, bu)
 
 proc genMemCopy(c; tree; n, dst, src, typ: NodeIndex, changes) =
-  ## Replaces the subtree at `n` with a ``Copy`` statement.
-  changes.replace(n, Copy):
+  ## Replaces the subtree at `n` with a ``Blit`` statement.
+  changes.replace(n, Blit):
     # can be either an l- or rvalue, depending on who called ``genMemCopy``
     if tree[dst].kind in {Field, At, Local}:
       c.lowerPathElem(tree, dst, bu)
@@ -247,7 +247,7 @@ proc lowerStmt(c; tree; n; changes) =
     else:
       c.lowerExpr(tree, a, changes)
       c.lowerExpr(tree, b, changes)
-  of Copy:
+  of Blit:
     let (a, b, size) = triplet(tree, n)
     c.lowerExpr(tree, a, changes)
     c.lowerExpr(tree, b, changes)

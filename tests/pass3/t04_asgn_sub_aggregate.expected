@@ -12,7 +12,7 @@
     (Continuations
       (Continuation (Params)
         (Locals (Local 0) (Local 1))
-        (Copy
+        (Blit
           (Add (Type 4)
             (Addr (Local 0))
             (IntVal 0))
