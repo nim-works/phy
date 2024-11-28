@@ -550,7 +550,7 @@ proc genStmt(c; tree; n: NodeIndex) =
     c.genExpr(tree, tree.child(n, 0))
     c.genExpr(tree, tree.child(n, 1))
     c.instr(opcMemClear)
-  of Copy:
+  of Blit:
     c.genExpr(tree, tree.child(n, 0))
     c.genExpr(tree, tree.child(n, 1))
     c.genExpr(tree, tree.child(n, 2))

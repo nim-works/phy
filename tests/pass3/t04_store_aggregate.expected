@@ -11,7 +11,7 @@
     (Continuations
       (Continuation (Params)
         (Locals (Local 0))
-        (Copy (IntVal 0)
+        (Blit (IntVal 0)
           (Addr (Local 0))
           (IntVal 8))
         (Continue 1))

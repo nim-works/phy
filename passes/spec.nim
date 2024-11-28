@@ -18,11 +18,11 @@ type
 
     Join
 
-    Copy, Asgn, Drop, Clear
+    Asgn, Drop, Clear, Blit
 
     Load, Store, Addr, Call
     Deref, Field, At
-    Move, Rename
+    Copy, Move, Rename
 
     Neg, Add, Sub, Mul, Div, Mod
     AddChck, SubChck
