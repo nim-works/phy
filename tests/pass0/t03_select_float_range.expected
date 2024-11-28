@@ -1,7 +1,5 @@
-.type t0 (Int)
-.type t1 (Float)
-.type t2 (Proc t0)
-.start t2 p0
+.type t0 () -> int
+.start t0 p0
   LdImmFloat 15.0
   LdImmFloat 20.0
   LeFloat

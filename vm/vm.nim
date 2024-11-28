@@ -39,7 +39,7 @@ type
     ## The result of a VM invocation. Describes why the execution stopped.
     case kind*: YieldReasonKind:
     of yrkDone:
-      typ*: TypeId        ## the return value's type (void indicates "none")
+      typ*: TypeKind      ## the return value's type (void indicates "none")
       result*: Value
     of yrkError:
       error*: ErrorCode
@@ -376,7 +376,7 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
         fp = t.frames[^1].start
       else:
         let ret = c.types.returnType(c[top.prc].typ)
-        if c.types[ret].kind == tkVoid:
+        if ret == tkVoid:
           return YieldReason(kind: yrkDone, typ: ret)
         else:
           return YieldReason(kind: yrkDone, typ: ret, result: stack.pop())

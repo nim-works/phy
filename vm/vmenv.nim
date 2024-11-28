@@ -125,8 +125,7 @@ template `[]`*(e: VmEnv, i: ProcIndex): ProcHeader =
 
 proc initVm*(initial, maxHost: uint): VmEnv =
   ## Sets up and returns a VM execution environment.
-  VmEnv(types: initTypeEnv(),
-        allocator: initAllocator(initial, maxHost))
+  VmEnv(allocator: initAllocator(initial, maxHost))
 
 # instruction decoding
 template opcode*(x: Instr): Opcode =

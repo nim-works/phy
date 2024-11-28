@@ -5,7 +5,7 @@ discard """
   "
   output: "(Done)"
 """
-.type P1 (Proc (Void))
+.type P1 () -> void
 .start P1 main
 ret
 .end
