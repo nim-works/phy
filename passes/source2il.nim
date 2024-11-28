@@ -171,6 +171,11 @@ template addType(c; kind: NodeKind, body: untyped): uint32 =
     body
   (let r = c.numTypes; inc c.numTypes; r.uint32)
 
+proc addType(c; node: Node): uint32 =
+  c.types.add node
+  result = c.numTypes.uint32
+  inc c.numTypes
+
 proc expect(c; name: string, ent: Entity, kind: EntityKind): bool =
   ## Convenience procedure for reporting an error if `ent` is not of the given
   ## `kind`. Returns 'true' if it is.
@@ -261,13 +266,13 @@ proc typeToIL(c; typ: SemType): uint32 =
     # XXX: there's no unit type in the target IL, and in order to not having
     #      to rewrite all ``unit`` type usages here, we're translating the
     #      type to a 1-byte integer
-    c.addType Int: c.types.add(Node(kind: Immediate, val: 1))
+    c.addType Node(kind: Int, val: 1)
   of tkBool:
-    c.addType Int: c.types.add(Node(kind: Immediate, val: 1))
+    c.addType Node(kind: Int, val: 1)
   of tkInt, tkError:
-    c.addType Int: c.types.add(Node(kind: Immediate, val: 8))
+    c.addType Node(kind: Int, val: 8)
   of tkFloat:
-    c.addType Float: c.types.add(Node(kind: Immediate, val: 8))
+    c.addType Node(kind: Float, val: 8)
   of tkTuple:
     let args = mapIt(typ.elems, c.typeToIL(it))
     c.addType Record:
@@ -301,7 +306,7 @@ proc typeToIL(c; typ: SemType): uint32 =
   of tkProc:
     # a proc type is used to represent both procedure signatures and the type
     # of procedural values. For values, the underlying storage type is a uint
-    c.addType UInt: c.types.add(Node(kind: Immediate, val: 8))
+    c.addType Node(kind: UInt, val: 8)
 
 proc rawGenProcType(c; typ: SemType): uint32 =
   ## Generates the IL representation for the procedure signature type `typ`
