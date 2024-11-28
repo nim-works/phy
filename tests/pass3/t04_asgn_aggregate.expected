@@ -2,8 +2,7 @@
 (TypeDefs
   (Int 8)
   (Blob 8)
-  (ProcTy (Void))
-  (UInt 8))
+  (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
   (ProcDef (Type 2)

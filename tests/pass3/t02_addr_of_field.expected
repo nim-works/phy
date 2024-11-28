@@ -3,7 +3,6 @@
   (Int 4)
   (Blob 8)
   (ProcTy (Void))
-  (UInt 8)
 )
 (GlobalDefs)
 (ProcDefs
@@ -13,13 +12,13 @@
       (Continuation (Params)
         (Locals (Local 0))
         (Drop
-          (Add (Type 3)
+          (Add (UInt 8)
             (Addr (Local 0))
             (IntVal 0)
           )
         )
         (Drop
-          (Add (Type 3)
+          (Add (UInt 8)
             (Addr (Local 0))
             (IntVal 4)
           )
