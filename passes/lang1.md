@@ -7,7 +7,7 @@
 Blob types describe arbitrarily-sized untyped binary data:
 
 ```grammar
-type += (Blob size:<int>)
+typedesc += (Blob size:<int>)
 ```
 
 The `Addr` operation only applies to locals instead of address offsets. Only
