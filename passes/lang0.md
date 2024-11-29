@@ -94,6 +94,15 @@ procdef ::= (ProcDef <type_id> (Locals <type_id>*) (Continuations <continuation>
 globaldef ::= <intVal> | <floatVal>
 ```
 
+### Foreign Procedures
+
+```grammar
+procdef += (Foreign <type_id> (StringVal <string>))
+```
+
+Foreign procedures are procedures that have an external implementation. How the
+identifier is interpreted is up to the code generator / linker to decide.
+
 ### Module
 
 All relevant entities (types, globals, and procedures) are stored under the

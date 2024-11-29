@@ -686,25 +686,33 @@ proc translate*(module: PackedTree[NodeKind]): VmModule =
 
   # generate the code for the procedures and add them to the environment:
   for i, def in module.pairs(procs):
-    var prc = translate(module, types, def, signatures)
+    if module[def].kind == ProcDef:
+      var prc = translate(module, types, def, signatures)
 
-    if prc.constants.len > 0:
-      # patch the LdConst instructions:
-      for instr in prc.code.mitems:
-        if instr.opcode == opcLdConst:
-          let i = imm32(instr)
-          instr = Instr(instr.InstrType and not(instrAMask shl instrAShift))
-          instr = Instr(instr.InstrType or
-                        (InstrType(i + env.constants.len) shl instrAShift))
+      if prc.constants.len > 0:
+        # patch the LdConst instructions:
+        for instr in prc.code.mitems:
+          if instr.opcode == opcLdConst:
+            let i = imm32(instr)
+            instr = Instr(instr.InstrType and not(instrAMask shl instrAShift))
+            instr = Instr(instr.InstrType or
+                          (InstrType(i + result.constants.len) shl instrAShift))
 
-      result.constants.add prc.constants
+        result.constants.add prc.constants
 
-    result.procs.add ProcHeader(kind: pkDefault,
-                                typ: signatures[module[def, 0].typ])
-    result.procs[i].code = slice(env.code, prc.code)
-    result.code.add prc.code
-    result.procs[i].locals = hoSlice(env.locals, prc.locals)
-    result.locals.add prc.locals
+      result.procs.add ProcHeader(kind: pkDefault,
+                                  typ: signatures[module[def, 0].typ])
+      result.procs[i].code = slice(result.code, prc.code)
+      result.code.add prc.code
+      result.procs[i].locals = hoSlice(result.locals, prc.locals)
+      result.locals.add prc.locals
 
-    result.procs[i].eh = hoSlice(result.ehTable, prc.ehTable)
-    result.ehTable.add prc.ehTable
+      result.procs[i].eh = hoSlice(result.ehTable, prc.ehTable)
+      result.ehTable.add prc.ehTable
+    else:
+      # must be a host procedure
+      result.host.add module.getString(module.child(def, 1))
+
+      result.procs.add ProcHeader(kind: pkCallback,
+                                  typ: signatures[module[def, 0].typ])
+      result.procs[i].code.a = result.host.high.uint32
