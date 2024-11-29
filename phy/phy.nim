@@ -35,6 +35,7 @@ import
   ],
   phy/[
     default_reporting,
+    host_impl,
     tree_parser,
     types
   ],
@@ -43,6 +44,7 @@ import
     disasm,
     utils,
     vmenv,
+    vmmodules,
     vmvalidation
   ]
 
@@ -319,7 +321,7 @@ proc main(args: openArray[string]) =
       # compile to L0 code and then translate to bytecode
       compile(code, newSource, lang0)
       syntaxCheck(code, lang0)
-      pass0.translate(code, env)
+      link(env, hostProcedures(gRunner), [pass0.translate(code)])
       # the bytecode is verified later
     else:
       compile(code, newSource, target)
