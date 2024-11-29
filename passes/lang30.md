@@ -8,8 +8,8 @@ Instead of one flat list of statements, statements in a procedure can now be
 nested:
 
 ```grammar
-procdef -= (ProcDef <type_id> (Locals <type_id>*) (Stmts <stmt>+))
-procdef += (ProcDef <type_id> (Locals <type_id>*) <single_stmt>)
+procdef -= (ProcDef <type_id> (Locals <type>*) (Stmts <stmt>+))
+procdef += (ProcDef <type_id> (Locals <type>*) <single_stmt>)
 ```
 
 The goto-based control-flow constructs are replaced with structured equivalents.
@@ -34,11 +34,11 @@ stmt -= (Join   <cont_name>)
 stmt += (Block <single_stmt>)
       | (Loop <single_stmt>)
       | (If <value> <single_stmt> <single_stmt>?)
-      | (Case <type_id> <simple> <choice>+)
+      | (Case <type> <simple> <choice>+)
       | (CheckedCall <proc> <value>*)
-      | (CheckedCall <type_id> <value>+)
+      | (CheckedCall <type> <value>+)
       | (CheckedCallAsgn <local> <proc> <value>*)
-      | (CheckedCallAsgn <local> <type_id> <value>+)
+      | (CheckedCallAsgn <local> <type> <value>+)
       | (Return <value>?)
       | (Raise <value>)
       | (Unreachable)

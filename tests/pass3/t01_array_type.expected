@@ -3,7 +3,6 @@
   (Int 4)
   (Blob 8)
   (ProcTy (Void))
-  (UInt 8)
 )
 (GlobalDefs)
 (ProcDefs

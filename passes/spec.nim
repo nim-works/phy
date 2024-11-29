@@ -11,10 +11,11 @@ import
 type
   NodeKind* = enum
     Immediate, IntVal, FloatVal, StringVal, ProcVal, Proc, Type, Local, Global
+    Int, UInt, Float
 
     List
 
-    Void, Int, UInt, Float, ProcTy, Blob, Record, Array
+    Void, ProcTy, Blob, Record, Array
 
     Join
 
@@ -47,7 +48,7 @@ using
   lit: var Literals
 
 template isAtom*(x: NodeKind): bool =
-  ord(x) <= ord(Global)
+  ord(x) <= ord(Float)
 
 proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
              n: TreeNode[NodeKind]): SexpNode =
@@ -61,6 +62,9 @@ proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
   of Type:      sexp([newSSymbol("Type"), sexp n.val.int])
   of Local:     sexp([newSSymbol("Local"), sexp n.val.int])
   of Global:    sexp([newSSymbol("Global"), sexp n.val.int])
+  of Int:       sexp([newSSymbol("Int"), sexp n.val.int])
+  of UInt:      sexp([newSSymbol("UInt"), sexp n.val.int])
+  of Float:     sexp([newSSymbol("Float"), sexp n.val.int])
   else:         unreachable()
 
 proc fromSexp*(kind: NodeKind): Node =
@@ -70,7 +74,7 @@ proc fromSexp*(kind: NodeKind, val: BiggestInt, lit): Node =
   case kind
   of IntVal:
     Node(kind: kind, val: lit.pack(val))
-  of ProcVal, Proc, Type, Local, Global:
+  of ProcVal, Proc, Type, Local, Global, Int, UInt, Float:
     Node(kind: kind, val: val.uint32)
   else:
     unreachable()

@@ -73,15 +73,16 @@ func typ(n: TreeNode[NodeKind]): uint32 {.inline.} =
   assert n.kind == Type
   n.val
 
-proc parseType(tree; at: NodeIndex): Type0 =
-  case tree[at].kind
-  of Int:   Type0(kind: t0kInt, size: tree[at, 0].imm)
-  of UInt:  Type0(kind: t0kUInt, size: tree[at, 0].imm)
-  of Float: Type0(kind: t0kFloat, size: tree[at, 0].imm)
-  else:     unreachable()
+proc parseType(tree; types: NodeIndex, n: NodeIndex): Type0 =
+  var n = n
+  if tree[n].kind == Type:
+    n = tree.child(types, tree[n].typ) # follow the indirection
 
-proc parseType(tree; types: NodeIndex, id: uint32): Type0 =
-  parseType(tree, tree.child(types, int(id)))
+  case tree[n].kind
+  of Int:   Type0(kind: t0kInt, size: tree[n].val.int)
+  of UInt:  Type0(kind: t0kUInt, size: tree[n].val.int)
+  of Float: Type0(kind: t0kFloat, size: tree[n].val.int)
+  else:     unreachable()
 
 func instr(c; op: Opcode) =
   c.code.add Instr(InstrType(op))
@@ -193,7 +194,7 @@ proc genBinaryOp(c; tree; op: NodeIndex,
   ## Generates the code for a two-operand operation, with the opcode picked
   ## based on the type.
   let (typ, a, b) = triplet(tree, op)
-  result = parseType(tree, c.types, tree[typ].typ)
+  result = parseType(tree, c.types, typ)
   c.genExpr(tree, a)
   c.genExpr(tree, b)
   case result.kind
@@ -212,7 +213,7 @@ proc genCheckedBinary(c; tree; op: NodeIndex, opc: Opcode) =
   let (typ, a, b) = triplet(tree, op)
   c.genExpr(tree, a)
   c.genExpr(tree, b)
-  c.instr(opc, int8(parseType(tree, c.types, tree[typ].typ).size * 8))
+  c.instr(opc, int8(parseType(tree, c.types, typ).size * 8))
   c.instr(opcPopLocal, tree[op, 3].id)
 
 proc loadLocal(c; local: int32) =
@@ -240,7 +241,7 @@ proc genExpr(c; tree; val: NodeIndex) =
     else:
       unreachable()
   of Load:
-    let typ = parseType(tree, c.types, tree[val, 0].typ)
+    let typ = parseType(tree, c.types, tree.child(val, 0))
     c.genExpr(tree, tree.child(val, 1))
     # TODO: if the operand is an addition or subtraction with a constant
     #       value, combine the addition with the load instruction
@@ -270,7 +271,7 @@ proc genExpr(c; tree; val: NodeIndex) =
   of Neg:
     let (typ, operand) = pair(tree, val)
     c.genExpr(tree, operand)
-    case parseType(tree, c.types, tree[typ].typ).kind
+    case parseType(tree, c.types, typ).kind
     of t0kInt:   c.instr(opcNegInt)
     of t0kFloat: c.instr(opcNegFloat)
     of t0kUInt:  unreachable()
@@ -292,7 +293,7 @@ proc genExpr(c; tree; val: NodeIndex) =
   of SubChck:
     c.genCheckedBinary(tree, val, opcSubChck)
   of BitNot:
-    let typ = parseType(tree, c.types, tree[val, 0].typ)
+    let typ = parseType(tree, c.types, tree.child(val, 0))
     c.genExpr(tree, tree.child(val, 1))
     c.instr(opcBitNot)
     c.mask(typ) # discard the unused higher bits
@@ -313,7 +314,7 @@ proc genExpr(c; tree; val: NodeIndex) =
     c.genExpr(tree, a)
     c.genExpr(tree, b)
     c.instr(opcShl)
-    let t = parseType(tree, c.types, tree[typ].typ)
+    let t = parseType(tree, c.types, typ)
     c.mask(t) # also cut off the upper bits for signed integers
     if t.kind == t0kInt:
       c.signExtend(t)
@@ -321,7 +322,7 @@ proc genExpr(c; tree; val: NodeIndex) =
     let (typ, a, b) = triplet(tree, val)
     c.genExpr(tree, a)
     c.genExpr(tree, b)
-    case parseType(tree, c.types, tree[typ].typ).kind
+    case parseType(tree, c.types, typ).kind
     of t0kInt:  c.instr(opcAshr)
     of t0kUInt: c.instr(opcShr)
     else:       unreachable()
@@ -337,8 +338,8 @@ proc genExpr(c; tree; val: NodeIndex) =
   of Reinterp:
     # reinterpret the bit pattern as another type
     let
-      dtyp = parseType(tree, c.types, tree[val, 0].typ)
-      styp = parseType(tree, c.types, tree[val, 1].typ)
+      dtyp = parseType(tree, c.types, tree.child(val, 0))
+      styp = parseType(tree, c.types, tree.child(val, 1))
     # sanity checks:
     assert dtyp.kind != styp.kind
     assert dtyp.size == styp.size
@@ -365,8 +366,8 @@ proc genExpr(c; tree; val: NodeIndex) =
   of Conv:
     # numeric conversion
     let
-      dtyp = parseType(tree, c.types, tree[val, 0].typ)
-      styp = parseType(tree, c.types, tree[val, 1].typ)
+      dtyp = parseType(tree, c.types, tree.child(val, 0))
+      styp = parseType(tree, c.types, tree.child(val, 1))
 
     c.genExpr(tree, tree.child(val, 2))
     case dtyp.kind
@@ -476,7 +477,7 @@ proc genExit(c; tree; exit: NodeIndex) =
     c.exit(tree[b, 0].imm)
   of Select:
     let
-      typ = parseType(tree, c.types, tree[exit, 0].typ)
+      typ = parseType(tree, c.types, tree.child(exit, 0))
       val = tree.child(exit, 1) # the value to select the target with
     for it in tree.items(exit, 2, ^2):
       c.genChoice(tree, typ, val, it)
@@ -527,7 +528,7 @@ proc genStmt(c; tree; n: NodeIndex) =
   of Store:
     let
       (tn, a, b) = triplet(tree, n)
-      typ = parseType(tree, c.types, tree[tn].typ)
+      typ = parseType(tree, c.types, tn)
     # TODO: if `a` is an addition/subtraction, merge its static operand into
     #       the store instruction, if possible
     c.genExpr(tree, a)
@@ -591,7 +592,7 @@ proc translate(tree; types, def: NodeIndex,
   # allocate and setup the local variables:
   c.locals.setLen(tree.len(locals))
   for i, it in tree.pairs(locals):
-    let typ = parseType(tree, c.types, tree[it].typ)
+    let typ = parseType(tree, c.types, it)
     c.locals[i] = (if typ.kind == t0kFloat: vtFloat else: vtInt)
 
   # put all parameters into locals:
@@ -658,8 +659,7 @@ proc translate*(module: PackedTree[NodeKind]): VmModule =
       # the rest must be type references:
       for it in module.items(typ, result.types.params.len - start):
         const Map = [t0kInt: tkInt, t0kUInt: tkInt, t0kFloat: tkFloat]
-        result.types.params.add:
-          Map[parseType(module, types, module[it].typ).kind]
+        result.types.params.add Map[parseType(module, types, it).kind]
 
       result.types.types.add start.uint32 .. result.types.params.high.uint32
       # TODO: change the lang0 grammar such that only signatures are allowed
