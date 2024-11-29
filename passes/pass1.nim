@@ -77,4 +77,5 @@ proc lower*(tree; ptrSize: int): ChangeSet[NodeKind] =
 
   # lower the procedures:
   for it in tree.items(tree.child(2)):
-    lower(result, tree, it)
+    if tree[it].kind == ProcDef:
+      lower(result, tree, it)

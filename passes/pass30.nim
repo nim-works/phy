@@ -202,4 +202,5 @@ proc lower*(tree): Changeset[NodeKind] =
   var c = PassCtx(types: tree.child(0))
 
   for it in tree.items(tree.child(2)):
-    c.lowerProc(tree, it, result)
+    if tree[it].kind == ProcDef:
+      c.lowerProc(tree, it, result)

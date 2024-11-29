@@ -316,4 +316,5 @@ proc lower*(tree; ptrSize: int): Changeset[NodeKind] =
     bu.add Node(kind: Immediate, val: ptrSize.uint32)
 
   for it in tree.items(tree.child(2)):
-    c.lowerProc(tree, it, result)
+    if tree[it].kind == ProcDef:
+      c.lowerProc(tree, it, result)
