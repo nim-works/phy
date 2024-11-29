@@ -9,7 +9,7 @@ of statements:
 
 ```grammar
 procdef -= (ProcDef <type_id> (Continuations <continuation>+))
-procdef += (ProcDef <type_id> (Locals <type_id>*) (Stmts <stmt>+))
+procdef += (ProcDef <type_id> (Locals <type>*) (Stmts <stmt>+))
 ```
 
 ### Control Flow
@@ -21,16 +21,16 @@ exit -= (Continue <cont_name> <value> (List <cont_arg>*))
       | (Loop <cont_name> (List <cont_arg>*))
       | (Raise <value> <err_goto>)
       | (CheckedCall <proc> <value>* <goto> <err_goto>)
-      | (CheckedCall <type_id> <value>+ <goto> <err_goto>)
+      | (CheckedCall <type> <value>+ <goto> <err_goto>)
 
 exit += (Continue <cont_name> <value>)
       | (Loop <cont_name>)
       | (Return <value>?)
       | (Raise <value> <err_goto>)
       | (CheckedCall <proc> <value>* <err_goto>)
-      | (CheckedCall <type_id> <value>+ <err_goto>)
+      | (CheckedCall <type> <value>+ <err_goto>)
       | (CheckedCallAsgn <local> <proc> <value>* <err_goto>)
-      | (CheckedCallAsgn <local> <type_id> <value>+ <err_goto>)
+      | (CheckedCallAsgn <local> <type> <value>+ <err_goto>)
 
 goto -= (Continue <cont_name> (List <cont_arg>*))
 goto += (Continue <cont_name>)
