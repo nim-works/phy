@@ -27,6 +27,7 @@ import
   ],
   phy/[
     default_reporting,
+    host_impl,
     tree_parser
   ],
   common/[
@@ -34,6 +35,7 @@ import
   ],
   vm/[
     vmenv,
+    vmmodules,
     vmvalidation
   ]
 
@@ -136,7 +138,7 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
 
     # generate the bytecode:
     var env = initVm(1024, 1024 * 1024)
-    translate(m, env)
+    link(env, hostProcedures(includeTest = false), [translate(m)])
 
     # make sure the bytecode and environment is correct:
     let errors = validate(env)

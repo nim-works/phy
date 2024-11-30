@@ -11,6 +11,7 @@ import
   vm/[
     utils,
     vmenv,
+    vmmodules,
     vmspec,
     vmtypes
   ]
@@ -639,7 +640,7 @@ proc slice[T](old, with: seq[T]): Slice[uint32] =
 proc hoSlice[T](old, with: seq[T]): HOslice[uint32] =
   hoSlice(old.len.uint32, uint32(old.len + with.len))
 
-proc translate*(module: PackedTree[NodeKind], env: var VmEnv) =
+proc translate*(module: PackedTree[NodeKind]): VmModule =
   ## Translates a complete module to the VM bytecode and the associated
   ## environmental data.
   let (types, globals, procs) = module.triplet(NodeIndex(0))
@@ -650,21 +651,21 @@ proc translate*(module: PackedTree[NodeKind], env: var VmEnv) =
     of Int, UInt, Float:
       discard "nothing to do"
     of ProcTy:
-      let start = env.types.params.len
+      let start = result.types.params.len
       # the first type (i.e., return type) needs special handling:
       if module[typ, 0].kind == Void:
-        env.types.params.add(tkVoid)
+        result.types.params.add(tkVoid)
 
       # the rest must be type references:
-      for it in module.items(typ, env.types.params.len - start):
+      for it in module.items(typ, result.types.params.len - start):
         const Map = [t0kInt: tkInt, t0kUInt: tkInt, t0kFloat: tkFloat]
-        env.types.params.add Map[parseType(module, types, it).kind]
+        result.types.params.add Map[parseType(module, types, it).kind]
 
-      env.types.types.add start.uint32 .. env.types.params.high.uint32
+      result.types.types.add start.uint32 .. result.types.params.high.uint32
       # TODO: change the lang0 grammar such that only signatures are allowed
       #       in the type section, which would result in a 1-to-1 mapping
       #       between IL type IDs and VM type IDs, making the map obsolete
-      signatures[id.uint32] = env.types.types.high.TypeId
+      signatures[id.uint32] = result.types.types.high.TypeId
     else:
       unreachable()
 
@@ -681,29 +682,37 @@ proc translate*(module: PackedTree[NodeKind], env: var VmEnv) =
       else:
         unreachable()
 
-    env.globals.add val
+    result.globals.add val
 
   # generate the code for the procedures and add them to the environment:
   for i, def in module.pairs(procs):
-    var prc = translate(module, types, def, signatures)
+    if module[def].kind == ProcDef:
+      var prc = translate(module, types, def, signatures)
 
-    if prc.constants.len > 0:
-      # patch the LdConst instructions:
-      for instr in prc.code.mitems:
-        if instr.opcode == opcLdConst:
-          let i = imm32(instr)
-          instr = Instr(instr.InstrType and not(instrAMask shl instrAShift))
-          instr = Instr(instr.InstrType or
-                        (InstrType(i + env.constants.len) shl instrAShift))
+      if prc.constants.len > 0:
+        # patch the LdConst instructions:
+        for instr in prc.code.mitems:
+          if instr.opcode == opcLdConst:
+            let i = imm32(instr)
+            instr = Instr(instr.InstrType and not(instrAMask shl instrAShift))
+            instr = Instr(instr.InstrType or
+                          (InstrType(i + result.constants.len) shl instrAShift))
 
-      env.constants.add prc.constants
+        result.constants.add prc.constants
 
-    env.procs.add ProcHeader(kind: pkDefault,
-                             typ: signatures[module[def, 0].typ])
-    env.procs[i].code = slice(env.code, prc.code)
-    env.code.add prc.code
-    env.procs[i].locals = hoSlice(env.locals, prc.locals)
-    env.locals.add prc.locals
+      result.procs.add ProcHeader(kind: pkDefault,
+                                  typ: signatures[module[def, 0].typ])
+      result.procs[i].code = slice(result.code, prc.code)
+      result.code.add prc.code
+      result.procs[i].locals = hoSlice(result.locals, prc.locals)
+      result.locals.add prc.locals
 
-    env.procs[i].eh = hoSlice(env.ehTable, prc.ehTable)
-    env.ehTable.add prc.ehTable
+      result.procs[i].eh = hoSlice(result.ehTable, prc.ehTable)
+      result.ehTable.add prc.ehTable
+    else:
+      # must be a host procedure
+      result.host.add module.getString(module.child(def, 1))
+
+      result.procs.add ProcHeader(kind: pkCallback,
+                                  typ: signatures[module[def, 0].typ])
+      result.procs[i].code.a = result.host.high.uint32

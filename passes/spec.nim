@@ -10,7 +10,7 @@ import
 
 type
   NodeKind* = enum
-    Immediate, IntVal, FloatVal, ProcVal, Proc, Type, Local, Global,
+    Immediate, IntVal, FloatVal, StringVal, ProcVal, Proc, Type, Local, Global
     Int, UInt, Float
 
     List
@@ -38,7 +38,7 @@ type
     CheckedCall, CheckedCallAsgn, Unwind, Choice
 
     Module, TypeDefs, ProcDefs, ProcDef, Locals, Continuations, Continuation,
-    Except, Params, GlobalDefs, GlobalDef
+    Except, Params, GlobalDefs, GlobalDef, Foreign
 
     Break, Return, Case, If, Block, Stmts
 
@@ -56,6 +56,7 @@ proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
   of Immediate: sexp(n.val.int)
   of IntVal:    sexp([newSSymbol("IntVal"), sexp tree.getInt(idx)])
   of FloatVal:  sexp([newSSymbol("FloatVal"), sexp tree.getFloat(idx)])
+  of StringVal: sexp([newSSymbol("StringVal"), sexp tree.getString(idx)])
   of ProcVal:   sexp([newSSymbol("ProcVal"), sexp n.val.int])
   of Proc:      sexp([newSSymbol("Proc"), sexp n.val.int])
   of Type:      sexp([newSSymbol("Type"), sexp n.val.int])
@@ -83,7 +84,8 @@ proc fromSexp*(kind: NodeKind, val: BiggestFloat, lit): Node =
   Node(kind: kind, val: lit.pack(val))
 
 proc fromSexp*(kind: NodeKind, val: string, lit): Node =
-  raise ValueError.newException($kind & " node has no string operand")
+  assert kind == StringVal
+  Node(kind: kind, val: lit.pack(val))
 
 proc fromSexp*(_: typedesc[NodeKind], val: BiggestInt, lit): Node =
   Node(kind: Immediate, val: val.uint32)
@@ -92,7 +94,7 @@ proc fromSexp*(_: typedesc[NodeKind], val: BiggestFloat, lit): Node =
   Node(kind: FloatVal, val: lit.pack(val))
 
 proc fromSexp*(_: typedesc[NodeKind], val: string, lit): Node =
-  raise ValueError.newException("standalone strings are not supported")
+  Node(kind: StringVal, val: lit.pack(val))
 
 proc fromSexpSym*(_: typedesc[NodeKind], val: string, lit): Node =
   raise ValueError.newException("standalone S-expr symbols are not supported")

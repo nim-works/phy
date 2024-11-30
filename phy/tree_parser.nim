@@ -70,6 +70,10 @@ proc parseSexp*[T](str: string, lit: var Literals): seq[TreeNode[T]] =
       incLen()
       result.add fromSexp(T, parseFloat(p.currString), lit)
       p.next()
+    of tkString:
+      incLen()
+      result.add fromSexp(T, captureCurrString(p), lit)
+      p.next()
     of tkSymbol:
       incLen()
       result.add fromSexpSym(T, captureCurrString(p), lit)
@@ -138,6 +142,8 @@ proc fromSexp[T](n: SexpNode, nodes: var seq[TreeNode[T]], lit: var Literals) =
     nodes.add fromSexp(T, n.num, lit)
   of SFloat:
     nodes.add fromSexp(T, n.fnum, lit)
+  of SString:
+    nodes.add fromSexp(T, n.str, lit)
   of SSymbol:
     nodes.add fromSexpSym(T, n.symbol, lit)
   else:

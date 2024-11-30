@@ -313,4 +313,5 @@ proc lower*(tree; ptrSize: int): Changeset[NodeKind] =
   var c = PassCtx(addrType: Node(kind: UInt, val: ptrSize.uint32))
 
   for it in tree.items(tree.child(2)):
-    c.lowerProc(tree, it, result)
+    if tree[it].kind == ProcDef:
+      c.lowerProc(tree, it, result)

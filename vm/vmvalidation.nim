@@ -349,4 +349,6 @@ proc validate*(env: VmEnv): seq[string] =
 
   # check the bodies:
   for i, it in env.procs.pairs:
-    handle verify(env, ProcIndex(i), env.code.toOpenArray(it.code.a.int, it.code.b.int))
+    if it.kind == pkDefault:
+      handle verify(env, ProcIndex(i),
+                    env.code.toOpenArray(it.code.a.int, it.code.b.int))

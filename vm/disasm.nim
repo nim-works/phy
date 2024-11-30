@@ -109,10 +109,10 @@ proc disassemble*(env: VmEnv, prc: ProcHeader, result: var string) =
         break
 
 proc disassemble*(env: VmEnv): string =
-  ## Returns the text representation for the full `env`. The text
-  ## representation only roundtrips in terms of meaning (re-assembling
-  ## the output results in a program behaving exactly the same); some
-  ## information may be lost.
+  ## Returns the text representation for the full `env`. Except when
+  ## containing stub and host/callback procedures, the text representation
+  ## can be re-assembled into a ``VmEnv`` that has the same meaning as the
+  ## input `env`.
   # emit the type directives:
   for i in 0..<env.types.types.len:
     let id = TypeId(i)
@@ -142,6 +142,12 @@ proc disassemble*(env: VmEnv): string =
 
   # emit the procedures:
   for i, prc in env.procs.pairs:
-    result.add &".start {prc.typ} p{i}\n"
-    disassemble(env, prc, result)
-    result.add ".end\n"
+    case prc.kind
+    of pkStub:
+      result.add &".stub {prc.typ} p{i}\n"
+    of pkDefault:
+      result.add &".start {prc.typ} p{i}\n"
+      disassemble(env, prc, result)
+      result.add ".end\n"
+    of pkCallback:
+      result.add &".host {prc.typ} p{i}\n"

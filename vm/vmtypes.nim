@@ -53,3 +53,14 @@ func add*(e: var TypeEnv, ret: VmType, params: openArray[VmType]): TypeId =
   e.types.add(e.params.len.uint32 .. uint32(e.params.len + params.len))
   e.params.add ret
   e.params.add params
+
+func append*(to: var TypeEnv, other: TypeEnv): int =
+  ## Appends all types from `other` to `to` and returns the index of
+  ## where the first type from `other` is located at afterwards.
+  result = to.types.len
+  to.types.add other.types
+  to.params.add other.params
+  # update the indices:
+  for i in result ..< to.types.len:
+    to.types[i].a += result.uint32
+    to.types[i].b += result.uint32
