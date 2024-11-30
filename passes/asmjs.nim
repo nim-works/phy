@@ -38,9 +38,6 @@ type
     labels: seq[tuple[isLoop: bool, val: int]]
 
   PassCtx = object
-    # inputs:
-    types: NodeIndex
-
     # per-procedure state:
     locals: NodeIndex
     returnType: JsType
@@ -109,19 +106,23 @@ func typ(n: TreeNode[NodeKind]): TypeId {.inline.} =
   assert n.kind == Type
   TypeId(n.val)
 
+func resolve(tree; typ: TypeId): NodeIndex =
+  tree.child(tree.child(0), typ.ord)
+
 proc parseType(tree; at: NodeIndex): TypeInfo =
+  var at = at
+  if tree[at].kind == Type:
+    at = tree.resolve(tree[at].typ) # resolve the indirection
+
   case tree[at].kind
-  of Int:   TypeInfo(kind: jsSigned, size: tree[at, 0].imm)
-  of UInt:  TypeInfo(kind: jsUnsigned, size: tree[at, 0].imm)
+  of Int:   TypeInfo(kind: jsSigned,   size: tree[at].val.int)
+  of UInt:  TypeInfo(kind: jsUnsigned, size: tree[at].val.int)
   of Float:
-    case tree[at, 0].imm
+    case tree[at].val
     of 4: TypeInfo(kind: jsFloat, size: 4)
     of 8: TypeInfo(kind: jsDouble, size: 8)
     else: unreachable()
   else:     unreachable()
-
-proc parseType(tree; types: NodeIndex, id: TypeId): TypeInfo =
-  parseType(tree, tree.child(types, int(id)))
 
 proc conv(f: var Formatter, typ: JsType, val: string) =
   case typ
@@ -184,8 +185,8 @@ proc jump(f; target: int) =
 proc toJs(t: TypeInfo): range[jsSigned..jsDouble] =
   t.kind
 
-proc toJs(tree; types: NodeIndex, t: TypeId): JsType =
-  toJs parseType(tree, types, t)
+proc toJs(tree; n: NodeIndex): JsType =
+  toJs parseType(tree, n)
 
 proc generic(x: JsType): JsType {.inline.} =
   if x in {jsSigned, jsUnsigned}:
@@ -193,12 +194,11 @@ proc generic(x: JsType): JsType {.inline.} =
   else:
     x
 
-proc returnType(tree; types: NodeIndex, t: TypeId): JsType =
-  let n = tree.child(types, int(t))
+proc returnType(tree; t: TypeId): JsType =
+  let n = tree.child(tree.child(0), int(t))
   case tree[n, 0].kind
   of Void: jsVoid
-  of Type: generic toJs(tree, types, tree[n, 0].typ)
-  else:    unreachable()
+  else:    generic toJs(tree, tree.child(n, 0))
 
 proc genCall(c; f; tree; call: NodeIndex,
              start: int, fin: BackwardsIndex): JsType =
@@ -207,17 +207,17 @@ proc genCall(c; f; tree; call: NodeIndex,
   if tree[call, start].kind == Proc:
     # it's a static call
     let id = tree[call, start].id
-    let typ = tree.child(c.types, tree[tree.child(tree.child(2), id), 0].val.int)
+    let typ = tree.resolve(tree[tree.child(tree.child(2), id), 0].typ)
 
     f.write "f" & $id & "("
     var i = 1
     for it in tree.items(call, start + 1, fin):
       if i > 1:
         f.write ", "
-      c.genExpr(f, tree, it, generic toJs(tree, c.types, tree[typ, i].typ))
+      c.genExpr(f, tree, it, generic toJs(tree, tree.child(typ, i)))
       inc i
     f.write ")"
-    result = returnType(tree, c.types, tree[tree.child(tree.child(2), id), 0].typ)
+    result = returnType(tree, tree[tree.child(tree.child(2), id), 0].typ)
   else:
     # it's an indirect call
     let bucket = c.tables.bucketMap[tree[call, start].typ]
@@ -226,16 +226,16 @@ proc genCall(c; f; tree; call: NodeIndex,
     f.write " - " & $(c.tables.buckets[bucket].start + 1) & ") & "
     f.write $(c.tables.buckets[bucket].elems.len-1) & "]("
 
-    let typ = tree.child(c.types, tree[call, start].val.int)
+    let typ = tree.resolve(tree[call, start].typ)
 
     var i = 1
     for it in tree.items(call, start + 2, fin):
       if i > 1:
         f.write ", "
-      c.genExpr(f, tree, it, generic toJs(tree, c.types, tree[typ, i].typ))
+      c.genExpr(f, tree, it, generic toJs(tree, tree.child(typ, i)))
       inc i
     f.write ")"
-    result = returnType(tree, c.types, tree[call, start].typ)
+    result = returnType(tree, tree[call, start].typ)
 
 proc signExtend(c; f; typ: TypeInfo, inTyp: JsType): JsType =
   if typ.size < 4:
@@ -264,7 +264,7 @@ proc genBinaryOp(c; f; tree; op: NodeIndex,
   ## Generates the code for a two-operand operation, with the opcode picked
   ## based on the type.
   let (typ, a, b) = triplet(tree, op)
-  result = parseType(tree, c.types, tree[typ].typ)
+  result = parseType(tree, typ)
   genBinaryOp(c, f, tree, a, b, binop, s)
 
 proc genBinaryArithOp(c; f; tree; op: NodeIndex, binop: string, s,u,fl,d: JsType): JsType =
@@ -311,7 +311,7 @@ proc heapAccess(c; f; tree; typ: TypeInfo, e: NodeIndex): JsType =
   of jsDouble: jsDouble # TODO: wrong, it's 'dobule?'
 
 proc typeof(c; tree; local: int): JsType =
-  generic toJs(tree, c.types, tree[c.locals, local].typ)
+  generic toJs(tree, tree.child(c.locals, local))
 
 proc genExpr(c; f; tree; val: NodeIndex): JsType =
   ## Generates the code for an expression (`val`), which is ``value`` in the
@@ -347,14 +347,14 @@ proc genExpr(c; f; tree; val: NodeIndex): JsType =
     else:
       unreachable()
   of Load:
-    let typ = parseType(tree, c.types, tree[val, 0].typ)
-    c.heapAccess(f, tree, typ, tree.child(val, 1))
+    let (typ, e) = tree.pair(val)
+    c.heapAccess(f, tree, parseType(tree, typ), e)
   of Addr:
     f.write "(bp + " & $tree.getInt(tree.child(val, 0)) & ")"
     jsIntish
   of Neg:
     let (typ, operand) = pair(tree, val)
-    let t = toJs(tree, c.types, tree[typ].typ)
+    let t = toJs(tree, typ)
     f.write "-"
     c.genExpr(f, tree, operand, t)
     case t
@@ -363,7 +363,7 @@ proc genExpr(c; f; tree; val: NodeIndex): JsType =
     else:        jsIntish
   of Add:
     let (typ, a, b) = triplet(tree, val)
-    let t = parseType(tree, c.types, tree[typ].typ)
+    let t = parseType(tree, typ)
     case toJs(t)
     of jsSigned: c.genBinaryOp(f, tree, a, b, "+", jsInt); jsIntish
     of jsUnsigned: c.genBinaryOp(f, tree, a, b, "+",  jsInt); c.mask(f, t, jsIntish)
@@ -371,7 +371,7 @@ proc genExpr(c; f; tree; val: NodeIndex): JsType =
     of jsDouble: c.genBinaryOp(f, tree, a, b, "+",  jsDouble); jsDouble
   of Sub:
     let (typ, a, b) = triplet(tree, val)
-    let t = parseType(tree, c.types, tree[typ].typ)
+    let t = parseType(tree, typ)
     case toJs(t)
     of jsSigned: c.genBinaryOp(f, tree, a, b, "-", jsInt); jsIntish
     of jsUnsigned: c.genBinaryOp(f, tree, a, b, "-", jsInt); c.mask(f, t, jsIntish)
@@ -379,7 +379,7 @@ proc genExpr(c; f; tree; val: NodeIndex): JsType =
     of jsDouble: c.genBinaryOp(f, tree, a, b, "-", jsDouble); jsDouble
   of Mul:
     let (typ, a, b) = triplet(tree, val)
-    let t = parseType(tree, c.types, tree[typ].typ)
+    let t = parseType(tree, typ)
     case t.kind
     of jsSigned, jsUnsigned:
       f.write "imul("
@@ -399,8 +399,7 @@ proc genExpr(c; f; tree; val: NodeIndex): JsType =
       jsDouble
   of Div:
     let (typ, a, b) = triplet(tree, val)
-    let t = parseType(tree, c.types, tree[typ].typ)
-    case toJs(t)
+    case toJs(parseType(tree, typ))
     of jsSigned: c.genBinaryOp(f, tree, a, b, "/", jsSigned); jsIntish
     of jsUnsigned: c.genBinaryOp(f, tree, a, b, "/", jsUnsigned); jsIntish
     of jsFloat: c.genBinaryOp(f, tree, a, b, "/", jsFloat); jsFloatish
@@ -409,7 +408,7 @@ proc genExpr(c; f; tree; val: NodeIndex): JsType =
     toJs c.genBinaryOp(f, tree, val, "%", jsIntish, jsIntish, jsDouble, jsDouble)
   of BitNot:
     let (typ, a) = pair(tree, val)
-    let t = parseType(tree, c.types, tree[typ].typ)
+    let t = parseType(tree, typ)
     f.write "~"
     c.genExpr(f, tree, a, jsIntish)
     if t.kind == jsUnsigned:
@@ -432,7 +431,7 @@ proc genExpr(c; f; tree; val: NodeIndex): JsType =
     c.genExpr(f, tree, a, jsIntish)
     f.write " << "
     c.genExpr(f, tree, b, jsIntish)
-    let t = parseType(tree, c.types, tree[typ].typ)
+    let t = parseType(tree, typ)
     if t.kind == jsSigned:
       c.signExtend(f, t, jsSigned)
     else:
@@ -440,7 +439,7 @@ proc genExpr(c; f; tree; val: NodeIndex): JsType =
   of Shr:
     let (typ, a, b) = triplet(tree, val)
     c.genExpr(f, tree, a, jsIntish)
-    case parseType(tree, c.types, tree[typ].typ).kind
+    case parseType(tree, typ).kind
     of jsSigned:   f.write " >> "  # arithmetic right-shift
     of jsUnsigned: f.write " >>> " # logical right-shift
     else:       unreachable()
@@ -462,8 +461,8 @@ proc genExpr(c; f; tree; val: NodeIndex): JsType =
   of Reinterp:
     # reinterpret the bit pattern as another type
     let
-      dtyp = parseType(tree, c.types, tree[val, 0].typ)
-      styp = parseType(tree, c.types, tree[val, 1].typ)
+      dtyp = parseType(tree, tree.child(val, 0))
+      styp = parseType(tree, tree.child(val, 1))
     # sanity checks:
     assert dtyp.kind != styp.kind
     assert dtyp.size == styp.size
@@ -487,8 +486,8 @@ proc genExpr(c; f; tree; val: NodeIndex): JsType =
   of Conv:
     # numeric conversion
     let
-      dtyp = parseType(tree, c.types, tree[val, 0].typ)
-      styp = parseType(tree, c.types, tree[val, 1].typ)
+      dtyp = parseType(tree, tree.child(val, 0))
+      styp = parseType(tree, tree.child(val, 1))
 
     case dtyp.kind
     of jsSigned:
@@ -599,9 +598,8 @@ proc genStmt(f; c; tree; n: NodeIndex) =
   of Store:
     let
       (tn, a, b) = triplet(tree, n)
-      typ = parseType(tree, c.types, tree[tn].typ)
 
-    let jt = c.heapAccess(f, tree, typ, a)
+    let jt = c.heapAccess(f, tree, parseType(tree, tn), a)
     f.write " = "
     c.genExpr(f, tree, b, jt) # TODO: using `jt` is not really correct here
     f.writeLine ";"
@@ -721,13 +719,12 @@ proc translate(f: var Formatter, tables: Tables, tree; types, def: NodeIndex) =
   ## provides the type environment.
   let (typ, locals, conts) = tree.triplet(def)
 
-  var c = PassCtx(types: types, locals: locals, tables: addr tables)
+  var c = PassCtx(locals: locals, tables: addr tables)
 
   let procTy = tree.child(types, tree[typ].val.int)
   let numParams = tree.len(procTy) - 1
 
-  if tree[procTy, 0].kind != Void:
-    c.returnType = generic toJs(tree, types, tree[procTy, 0].typ)
+  c.returnType = returnType(tree, tree[typ].typ)
 
   f.write "("
   # put all parameters into locals:
@@ -740,7 +737,7 @@ proc translate(f: var Formatter, tables: Tables, tree; types, def: NodeIndex) =
 
   for i in 0..<numParams:
     f.write "lo" & $i & " = "
-    f.conv(generic toJs(tree, types, tree[locals, i].typ), "lo" & $i)
+    f.conv(c.typeof(tree, i), "lo" & $i)
     f.writeLine ";"
 
   # compute the maximum amount of required stack space:
@@ -766,7 +763,7 @@ proc translate(f: var Formatter, tables: Tables, tree; types, def: NodeIndex) =
       f.write ", "
     first = false
     f.write "lo" & $i & " = "
-    f.default(toJs(tree, c.types, tree[it].typ))
+    f.default(toJs(tree, it))
 
   if not first:
     f.writeLine ";"
