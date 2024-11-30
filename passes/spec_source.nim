@@ -9,11 +9,12 @@ import
 
 type
   NodeKind* {.pure.} = enum
-    Immediate, IntVal, FloatVal
+    IntVal, FloatVal
     Ident,
     VoidTy, UnitTy, BoolTy, IntTy, FloatTy, TupleTy, UnionTy, ProcTy
     And, Or
     If
+    While
     Call
     TupleCons
     FieldAccess
@@ -22,40 +23,56 @@ type
     Return
     Unreachable
     Params
-    ProcDecl
+    ProcDecl, ParamDecl
     Decl
     TypeDecl
     Module
 
+  Node = TreeNode[NodeKind]
+
 const
-  ExprNodes* = {IntVal, FloatVal, Ident, And, Or, If, Call, TupleCons,
+  ExprNodes* = {IntVal, FloatVal, Ident, And, Or, If, While, Call, TupleCons,
                 FieldAccess, Asgn, Return, Unreachable, Exprs, Decl}
   DeclNodes* = {ProcDecl, TypeDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 
+using
+  lit: var Literals
+
 template isAtom*(x: NodeKind): bool =
   ord(x) <= ord(Ident)
-
-proc fromSexp*(tree: var PackedTree[NodeKind], kind: NodeKind,
-               n: SexpNode): TreeNode[NodeKind] =
-  case kind
-  of IntVal:
-    TreeNode[NodeKind](kind: kind, val: tree.pack(n[1].num))
-  of FloatVal:
-    TreeNode[NodeKind](kind: FloatVal, val: tree.pack(n[1].fnum))
-  of Ident:
-    TreeNode[NodeKind](kind: Ident, val: tree.pack(n[1].str))
-  else:
-    unreachable()
 
 proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
              n: TreeNode[NodeKind]): SexpNode =
   case n.kind
-  of Immediate: sexp(n.val.int)
   of IntVal:    sexp([newSSymbol("IntVal"), sexp tree.getInt(idx)])
   of FloatVal:  sexp([newSSymbol("FloatVal"), sexp tree.getFloat(idx)])
   of Ident:     sexp([newSSymbol("Ident"), sexp tree.getString(idx)])
   else:         unreachable()
 
-proc fromSexp*(i: BiggestInt, _: typedesc[NodeKind]): TreeNode[NodeKind] =
-  TreeNode[NodeKind](kind: Immediate, val: i.uint32)
+proc fromSexp*(kind: NodeKind): Node =
+  raise ValueError.newException($kind & " node is missing operand")
+
+proc fromSexp*(kind: NodeKind, val: BiggestInt, lit): Node =
+  assert kind == IntVal
+  Node(kind: kind, val: lit.pack(val))
+
+proc fromSexp*(kind: NodeKind, val: BiggestFloat, lit): Node =
+  assert kind == FloatVal
+  Node(kind: kind, val: lit.pack(val))
+
+proc fromSexp*(kind: NodeKind, val: string, lit): Node =
+  assert kind == Ident
+  Node(kind: kind, val: lit.pack(val))
+
+proc fromSexp*(_: typedesc[NodeKind], val: BiggestInt, lit): Node =
+  Node(kind: IntVal, val: lit.pack(val))
+
+proc fromSexp*(_: typedesc[NodeKind], val: BiggestFloat, lit): Node =
+  Node(kind: FloatVal, val: lit.pack(val))
+
+proc fromSexp*(_: typedesc[NodeKind], val: string, lit): Node =
+  raise ValueError.newException("standalone strings are not supported")
+
+proc fromSexpSym*(_: typedesc[NodeKind], val: string, lit): Node =
+  Node(kind: Ident, val: lit.pack(val))

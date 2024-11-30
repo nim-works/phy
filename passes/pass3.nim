@@ -25,12 +25,10 @@ import
   vm/[utils]
 
 type
-  TypeId = distinct uint32
   Node = TreeNode[NodeKind]
 
   PassCtx = object
-    types: NodeIndex
-    addrType: TypeId
+    addrType: Node
       ## the type of address values
 
     locals: NodeIndex
@@ -82,32 +80,38 @@ func imm(n: Node): uint32 {.inline.} =
   assert n.kind == Immediate
   n.val
 
-func typ(n: Node): TypeId {.inline.} =
-  assert n.kind == Type
-  n.val.TypeId
-
-func lookup(c; tree; typ: TypeId): NodeIndex =
+func resolve(tree; n: NodeIndex): NodeIndex =
   ## Returns the index of the type description for `typ`.
-  tree.child(c.types, typ.int)
+  if tree[n].kind == Type:
+    tree.child(tree.child(0), tree[n].val)
+  else:
+    n
 
-proc typeof(c; tree; n): TypeId =
+proc typeof(c; tree; n): NodeIndex =
   ## Computes the type ID for the ``path-elem``.
   case tree[n].kind
   of Local:
-    tree[c.locals, tree[n].val.int].typ
+    tree.child(c.locals, tree[n].val.int)
   of Deref:
-    tree[n, 0].typ
+    tree.child(n, 0)
   of At:
     let arr = c.typeof(tree, tree.child(n, 0)) # type of the array
-    tree[c.lookup(tree, arr), 2].typ
+    tree.child(resolve(tree, arr), 2)
   of Field:
     let
       (a, b) = pair(tree, n)
       rec = c.typeof(tree, a) # type of the record type
     # +1 to skip the size node
-    tree[tree.child(c.lookup(tree, rec), tree[b].val.int + 1), 1].typ
+    tree.child(tree.child(resolve(tree, rec), tree[b].val.int + 1), 1)
   else:
     unreachable()
+
+proc sizeof(tree; n: NodeIndex): int =
+  ## Returns the size of the type whose description is located at `n`.
+  case tree[n].kind
+  of Int, UInt, Float: tree[n].val.int
+  of Record, Array:    tree[n, 0].val.int
+  else:                unreachable()
 
 proc lowerExpr(c; tree; n; bu: var BuilderOrChangeset)
 
@@ -141,26 +145,26 @@ proc lowerExpr(c; tree; n; bu: var BuilderOrChangeset) =
   of At:
     let
       (a, b) = pair(tree, n)
-      typ = c.lookup(tree, c.typeof(tree, n)) # element type
+      typ = resolve(tree, c.typeof(tree, n)) # element type
     # turn ``(At a b)`` into ``(Add a (Mul b elemSize))``
     bu.replace(n, Add):
-      bu.add Node(kind: Type, val: c.addrType.uint32)
+      bu.add c.addrType
       c.lowerPathElem(tree, a, bu)
       # TODO: fold constant multiplications
       bu.subTree Mul:
-        bu.add Node(kind: Type, val: c.addrType.uint32)
+        bu.add c.addrType
         # higher-level ILs ensure that the index type already has the correct
         # type
         c.lowerExpr(tree, b, bu)
-        bu.add Node(kind: IntVal, val: tree[typ, 0].imm)
+        bu.add Node(kind: IntVal, val: uint32 sizeof(tree, typ))
   of Field:
     let
       (a, b) = pair(tree, n)
-      typ = c.lookup(tree, c.typeof(tree, a))
+      typ = resolve(tree, c.typeof(tree, a))
     # turn into pointer arithmetic
     # TODO: omit the Add if the offset is 0
     bu.replace(n, Add):
-      bu.add Node(kind: Type, val: c.addrType.uint32)
+      bu.add c.addrType
       c.lowerPathElem(tree, a, bu)
       let offset = tree[tree.child(typ, 1 + tree[b].imm), 0].imm
       bu.add Node(kind: IntVal, val: offset)
@@ -171,7 +175,7 @@ proc lowerExpr(c; tree; n; bu: var BuilderOrChangeset) =
     if tree[a].kind in {Field, At}:
       # turn into a Load
       bu.replace(n, Load):
-        bu.add Node(kind: Type, val: typ.uint32)
+        bu.add tree[typ]
         c.lowerExpr(tree, a, bu)
     else:
       bu.keep(tree, n)
@@ -196,8 +200,8 @@ proc lowerExpr(c; tree; n; bu: var BuilderOrChangeset) =
         c.lowerExpr(tree, it, bu)
 
 proc genMemCopy(c; tree; n, dst, src, typ: NodeIndex, changes) =
-  ## Replaces the subtree at `n` with a ``Copy`` statement.
-  changes.replace(n, Copy):
+  ## Replaces the subtree at `n` with a ``Blit`` statement.
+  changes.replace(n, Blit):
     # can be either an l- or rvalue, depending on who called ``genMemCopy``
     if tree[dst].kind in {Field, At, Local}:
       c.lowerPathElem(tree, dst, bu)
@@ -216,22 +220,21 @@ proc genMemCopy(c; tree; n, dst, src, typ: NodeIndex, changes) =
       unreachable()
 
     # the size-in-bytes to copy. Take it from the type
-    bu.add Node(kind: IntVal, val: tree[typ, 0].val)
+    bu.add Node(kind: IntVal, val: uint32 sizeof(tree, resolve(tree, typ)))
 
 proc lowerStmt(c; tree; n; changes) =
   case tree[n].kind
   of Asgn:
     let
       (a, b) = pair(tree, n)
-      typ = c.typeof(tree, a)
-      typN = c.lookup(tree, typ)
+      typN = c.typeof(tree, a)
 
-    if tree[typN].kind in AggregateTypes:
+    if tree[resolve(tree, typN)].kind in AggregateTypes:
       c.genMemCopy(tree, n, a, b, typN, changes)
     elif tree[a].kind in {Field, At}:
       # turn into a Store
       changes.replace(n, Store):
-        bu.add Node(kind: Type, val: typ.uint32)
+        bu.add tree[typN]
         c.lowerExpr(tree, a, bu)
         c.lowerExpr(tree, b, bu)
     else:
@@ -240,14 +243,14 @@ proc lowerStmt(c; tree; n; changes) =
   of Store:
     let
       (t, a, b) = triplet(tree, n)
-      typN = c.lookup(tree, tree[t].typ)
+      typN = resolve(tree, t)
 
     if tree[typN].kind in AggregateTypes:
       c.genMemCopy(tree, n, a, b, typN, changes)
     else:
       c.lowerExpr(tree, a, changes)
       c.lowerExpr(tree, b, changes)
-  of Copy:
+  of Blit:
     let (a, b, size) = triplet(tree, n)
     c.lowerExpr(tree, a, changes)
     c.lowerExpr(tree, b, changes)
@@ -307,13 +310,8 @@ proc lower*(tree; ptrSize: int): Changeset[NodeKind] =
   for it in tree.items(tree.child(0)):
     lowerType(tree, it, result)
 
-  var c = PassCtx(types: tree.child(0))
-
-  c.addrType = tree.len(tree.child(0)).TypeId
-  # TODO: don't introduce duplicate types; re-use existing ones.
-  #       Also, only create/lookup the addrType when really needed
-  result.insert(tree, c.types, c.addrType.int, UInt):
-    bu.add Node(kind: Immediate, val: ptrSize.uint32)
+  var c = PassCtx(addrType: Node(kind: UInt, val: ptrSize.uint32))
 
   for it in tree.items(tree.child(2)):
-    c.lowerProc(tree, it, result)
+    if tree[it].kind == ProcDef:
+      c.lowerProc(tree, it, result)

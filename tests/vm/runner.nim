@@ -67,8 +67,8 @@ env.dispose(move thread)
 var output = "(" & substr($res.kind, 3)
 case res.kind
 of yrkDone:
-  case env.types[res.typ].kind
-  of tkVoid, tkProc, tkForeign:
+  case res.typ
+  of tkVoid, tkForeign:
     discard
   of tkInt:
     output.add " "

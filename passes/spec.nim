@@ -10,19 +10,20 @@ import
 
 type
   NodeKind* = enum
-    Immediate, IntVal, FloatVal, ProcVal, Proc, Type, Local, Global
+    Immediate, IntVal, FloatVal, StringVal, ProcVal, Proc, Type, Local, Global
+    Int, UInt, Float
 
     List
 
-    Void, Int, UInt, Float, ProcTy, Blob, Record, Array
+    Void, ProcTy, Blob, Record, Array
 
     Join
 
-    Copy, Asgn, Drop, Clear
+    Asgn, Drop, Clear, Blit
 
     Load, Store, Addr, Call
     Deref, Field, At
-    Move, Rename
+    Copy, Move, Rename
 
     Neg, Add, Sub, Mul, Div, Mod
     AddChck, SubChck
@@ -37,24 +38,17 @@ type
     CheckedCall, CheckedCallAsgn, Unwind, Choice
 
     Module, TypeDefs, ProcDefs, ProcDef, Locals, Continuations, Continuation,
-    Except, Params, GlobalDefs, GlobalDef
+    Except, Params, GlobalDefs, GlobalDef, Foreign
 
     Break, Return, Case, If, Block, Stmts
 
-template isAtom*(x: NodeKind): bool =
-  ord(x) <= ord(Global)
+  Node = TreeNode[NodeKind]
 
-proc fromSexp*(tree: var PackedTree[NodeKind], kind: NodeKind,
-               n: SexpNode): TreeNode[NodeKind] =
-  case kind
-  of IntVal:
-    TreeNode[NodeKind](kind: kind, val: tree.pack(n[1].num))
-  of FloatVal:
-    TreeNode[NodeKind](kind: FloatVal, val: tree.pack(n[1].fnum))
-  of ProcVal, Proc, Type, Local, Global:
-    TreeNode[NodeKind](kind: kind, val: n[1].num.uint32)
-  else:
-    unreachable()
+using
+  lit: var Literals
+
+template isAtom*(x: NodeKind): bool =
+  ord(x) <= ord(Float)
 
 proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
              n: TreeNode[NodeKind]): SexpNode =
@@ -62,12 +56,45 @@ proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
   of Immediate: sexp(n.val.int)
   of IntVal:    sexp([newSSymbol("IntVal"), sexp tree.getInt(idx)])
   of FloatVal:  sexp([newSSymbol("FloatVal"), sexp tree.getFloat(idx)])
+  of StringVal: sexp([newSSymbol("StringVal"), sexp tree.getString(idx)])
   of ProcVal:   sexp([newSSymbol("ProcVal"), sexp n.val.int])
   of Proc:      sexp([newSSymbol("Proc"), sexp n.val.int])
   of Type:      sexp([newSSymbol("Type"), sexp n.val.int])
   of Local:     sexp([newSSymbol("Local"), sexp n.val.int])
   of Global:    sexp([newSSymbol("Global"), sexp n.val.int])
+  of Int:       sexp([newSSymbol("Int"), sexp n.val.int])
+  of UInt:      sexp([newSSymbol("UInt"), sexp n.val.int])
+  of Float:     sexp([newSSymbol("Float"), sexp n.val.int])
   else:         unreachable()
 
-proc fromSexp*(i: BiggestInt, _: typedesc[NodeKind]): TreeNode[NodeKind] =
-  TreeNode[NodeKind](kind: Immediate, val: i.uint32)
+proc fromSexp*(kind: NodeKind): Node =
+  raise ValueError.newException($kind & " node is missing operand")
+
+proc fromSexp*(kind: NodeKind, val: BiggestInt, lit): Node =
+  case kind
+  of IntVal:
+    Node(kind: kind, val: lit.pack(val))
+  of ProcVal, Proc, Type, Local, Global, Int, UInt, Float:
+    Node(kind: kind, val: val.uint32)
+  else:
+    unreachable()
+
+proc fromSexp*(kind: NodeKind, val: BiggestFloat, lit): Node =
+  assert kind == FloatVal
+  Node(kind: kind, val: lit.pack(val))
+
+proc fromSexp*(kind: NodeKind, val: string, lit): Node =
+  assert kind == StringVal
+  Node(kind: kind, val: lit.pack(val))
+
+proc fromSexp*(_: typedesc[NodeKind], val: BiggestInt, lit): Node =
+  Node(kind: Immediate, val: val.uint32)
+
+proc fromSexp*(_: typedesc[NodeKind], val: BiggestFloat, lit): Node =
+  Node(kind: FloatVal, val: lit.pack(val))
+
+proc fromSexp*(_: typedesc[NodeKind], val: string, lit): Node =
+  Node(kind: StringVal, val: lit.pack(val))
+
+proc fromSexpSym*(_: typedesc[NodeKind], val: string, lit): Node =
+  raise ValueError.newException("standalone S-expr symbols are not supported")

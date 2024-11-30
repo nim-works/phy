@@ -7,7 +7,7 @@
 There are no more procedure-wide locals:
 
 ```grammar
-procdef -= (ProcDef <type_id> (Locals <type_id>*) (Continuations <continuation>+))
+procdef -= (ProcDef <type_id> (Locals <type>*) (Continuations <continuation>+))
 procdef += (ProcDef <type_id> (Continuations <continuation>+))
 ```
 
@@ -17,8 +17,8 @@ a list of new locals it spawns:
 ```grammar
 continuation -= (Continuation (Params) (Locals <local>*) <stmt>* <exit>)
               | (Except       <local>  (Locals <local>*) <stmt>* <exit>)
-continuation += (Continuation (Params <type_id>*) (Locals <type_id>*) <stmt>* <exit>)
-              | (Except       (Params <type_id>*) (Locals <type_id>*) <stmt>* <exit>)
+continuation += (Continuation (Params <type>*) (Locals <type>*) <stmt>* <exit>)
+              | (Except       (Params <type>*) (Locals <type>*) <stmt>* <exit>)
 ```
 
 A `Local` with an ID < *number of parameters* refers to a parameter --
@@ -52,7 +52,7 @@ procedure exit continuation.
 
 ```grammar
 exit -= (CheckedCallAsgn <local> <proc> <value>* <goto> <err_goto>)
-      | (CheckedCallAsgn <local> <type_id> <value>+ <goto> <err_goto>)
+      | (CheckedCallAsgn <local> <type> <value>+ <goto> <err_goto>)
 ```
 
 Exits via exceptional control-flow always implicitly pass the exception to the

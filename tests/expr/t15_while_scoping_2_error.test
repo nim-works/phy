@@ -1,0 +1,10 @@
+discard """
+  description: "
+    Declarations within the `While` body are not visible to the outside
+  "
+  reject: true
+"""
+(Exprs
+  (While (Ident "false")
+    (Decl (Ident "x") (IntVal 0)))
+  (Ident "x"))

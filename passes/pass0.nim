@@ -1,6 +1,9 @@
 ## Implements the translation/lowering of L0 code into VM bytecode.
 
 import
+  std/[
+    tables
+  ],
   passes/[
     trees,
     spec
@@ -8,6 +11,7 @@ import
   vm/[
     utils,
     vmenv,
+    vmmodules,
     vmspec,
     vmtypes
   ]
@@ -16,6 +20,9 @@ type
   PassCtx = object
     # inputs:
     types: NodeIndex
+    signatures: ptr Table[uint32, TypeId]
+      ## maps signature type IDs to their VM equivalent. A pointer in order to
+      ## get around unnecessary copies
 
     # productions:
     code: seq[Instr]
@@ -62,19 +69,20 @@ func id(n: TreeNode[NodeKind]): int32 {.inline.} =
   assert n.kind in {Local, Global, Proc, ProcVal}
   cast[int32](n.val)
 
-func typ(n: TreeNode[NodeKind]): TypeId {.inline.} =
+func typ(n: TreeNode[NodeKind]): uint32 {.inline.} =
   assert n.kind == Type
-  TypeId(n.val + 1) # offset by one, to accomodate for the Void type
+  n.val
 
-proc parseType(tree; at: NodeIndex): Type0 =
-  case tree[at].kind
-  of Int:   Type0(kind: t0kInt, size: tree[at, 0].imm)
-  of UInt:  Type0(kind: t0kUInt, size: tree[at, 0].imm)
-  of Float: Type0(kind: t0kFloat, size: tree[at, 0].imm)
+proc parseType(tree; types: NodeIndex, n: NodeIndex): Type0 =
+  var n = n
+  if tree[n].kind == Type:
+    n = tree.child(types, tree[n].typ) # follow the indirection
+
+  case tree[n].kind
+  of Int:   Type0(kind: t0kInt, size: tree[n].val.int)
+  of UInt:  Type0(kind: t0kUInt, size: tree[n].val.int)
+  of Float: Type0(kind: t0kFloat, size: tree[n].val.int)
   else:     unreachable()
-
-proc parseType(tree; types: NodeIndex, id: TypeId): Type0 =
-  parseType(tree, tree.child(types, int(id) - 1))
 
 func instr(c; op: Opcode) =
   c.code.add Instr(InstrType(op))
@@ -171,7 +179,7 @@ proc genCall(c; tree; call: NodeIndex,
 
     # the proc value is pushed to the stack last
     c.genExpr(tree, tree.child(call, start + 1))
-    c.instr(opcIndCall, tree[call, 0].typ.int32, numArgs(1))
+    c.instr(opcIndCall, int32 c.signatures[][tree[call, 0].typ], numArgs(1))
 
 proc signExtend(c; typ: Type0) =
   if typ.size < 8:
@@ -186,7 +194,7 @@ proc genBinaryOp(c; tree; op: NodeIndex,
   ## Generates the code for a two-operand operation, with the opcode picked
   ## based on the type.
   let (typ, a, b) = triplet(tree, op)
-  result = parseType(tree, c.types, tree[typ].typ)
+  result = parseType(tree, c.types, typ)
   c.genExpr(tree, a)
   c.genExpr(tree, b)
   case result.kind
@@ -205,7 +213,7 @@ proc genCheckedBinary(c; tree; op: NodeIndex, opc: Opcode) =
   let (typ, a, b) = triplet(tree, op)
   c.genExpr(tree, a)
   c.genExpr(tree, b)
-  c.instr(opc, int8(parseType(tree, c.types, tree[typ].typ).size * 8))
+  c.instr(opc, int8(parseType(tree, c.types, typ).size * 8))
   c.instr(opcPopLocal, tree[op, 3].id)
 
 proc loadLocal(c; local: int32) =
@@ -233,7 +241,7 @@ proc genExpr(c; tree; val: NodeIndex) =
     else:
       unreachable()
   of Load:
-    let typ = parseType(tree, c.types, tree[val, 0].typ)
+    let typ = parseType(tree, c.types, tree.child(val, 0))
     c.genExpr(tree, tree.child(val, 1))
     # TODO: if the operand is an addition or subtraction with a constant
     #       value, combine the addition with the load instruction
@@ -263,7 +271,7 @@ proc genExpr(c; tree; val: NodeIndex) =
   of Neg:
     let (typ, operand) = pair(tree, val)
     c.genExpr(tree, operand)
-    case parseType(tree, c.types, tree[typ].typ).kind
+    case parseType(tree, c.types, typ).kind
     of t0kInt:   c.instr(opcNegInt)
     of t0kFloat: c.instr(opcNegFloat)
     of t0kUInt:  unreachable()
@@ -285,7 +293,7 @@ proc genExpr(c; tree; val: NodeIndex) =
   of SubChck:
     c.genCheckedBinary(tree, val, opcSubChck)
   of BitNot:
-    let typ = parseType(tree, c.types, tree[val, 0].typ)
+    let typ = parseType(tree, c.types, tree.child(val, 0))
     c.genExpr(tree, tree.child(val, 1))
     c.instr(opcBitNot)
     c.mask(typ) # discard the unused higher bits
@@ -306,7 +314,7 @@ proc genExpr(c; tree; val: NodeIndex) =
     c.genExpr(tree, a)
     c.genExpr(tree, b)
     c.instr(opcShl)
-    let t = parseType(tree, c.types, tree[typ].typ)
+    let t = parseType(tree, c.types, typ)
     c.mask(t) # also cut off the upper bits for signed integers
     if t.kind == t0kInt:
       c.signExtend(t)
@@ -314,7 +322,7 @@ proc genExpr(c; tree; val: NodeIndex) =
     let (typ, a, b) = triplet(tree, val)
     c.genExpr(tree, a)
     c.genExpr(tree, b)
-    case parseType(tree, c.types, tree[typ].typ).kind
+    case parseType(tree, c.types, typ).kind
     of t0kInt:  c.instr(opcAshr)
     of t0kUInt: c.instr(opcShr)
     else:       unreachable()
@@ -330,8 +338,8 @@ proc genExpr(c; tree; val: NodeIndex) =
   of Reinterp:
     # reinterpret the bit pattern as another type
     let
-      dtyp = parseType(tree, c.types, tree[val, 0].typ)
-      styp = parseType(tree, c.types, tree[val, 1].typ)
+      dtyp = parseType(tree, c.types, tree.child(val, 0))
+      styp = parseType(tree, c.types, tree.child(val, 1))
     # sanity checks:
     assert dtyp.kind != styp.kind
     assert dtyp.size == styp.size
@@ -358,8 +366,8 @@ proc genExpr(c; tree; val: NodeIndex) =
   of Conv:
     # numeric conversion
     let
-      dtyp = parseType(tree, c.types, tree[val, 0].typ)
-      styp = parseType(tree, c.types, tree[val, 1].typ)
+      dtyp = parseType(tree, c.types, tree.child(val, 0))
+      styp = parseType(tree, c.types, tree.child(val, 1))
 
     c.genExpr(tree, tree.child(val, 2))
     case dtyp.kind
@@ -388,15 +396,11 @@ proc genExpr(c; tree; val: NodeIndex) =
         c.instr(opcUIntToFloat, int8(dtyp.size * 8))
       of t0kFloat:
         if styp.size == 8 and dtyp.size == 4:
-          # narrowing conversion
-          c.instr(opcStackAlloc, int32 4)
-          c.instr(opcSwap)
-          c.instr(opcDup)
-          # write to memory location
-          c.instr(opcWrFlt32)
-          # read back
-          c.instr(opcLdFlt32)
-          c.instr(opcStackFree, int32 4)
+          # demote 64-bit float to 32-bit float value. Reinterpret the bits as
+          # a 32-bit integer (which internally converts to a 32-bit float
+          # first) and then reinterpret the result as a 32-bit float
+          c.instr(opcReinterpI32)
+          c.instr(opcReinterpF32)
   of Call:
     c.genCall(tree, val, 0, ^1)
   else:
@@ -473,7 +477,7 @@ proc genExit(c; tree; exit: NodeIndex) =
     c.exit(tree[b, 0].imm)
   of Select:
     let
-      typ = parseType(tree, c.types, tree[exit, 0].typ)
+      typ = parseType(tree, c.types, tree.child(exit, 0))
       val = tree.child(exit, 1) # the value to select the target with
     for it in tree.items(exit, 2, ^2):
       c.genChoice(tree, typ, val, it)
@@ -524,7 +528,7 @@ proc genStmt(c; tree; n: NodeIndex) =
   of Store:
     let
       (tn, a, b) = triplet(tree, n)
-      typ = parseType(tree, c.types, tree[tn].typ)
+      typ = parseType(tree, c.types, tn)
     # TODO: if `a` is an addition/subtraction, merge its static operand into
     #       the store instruction, if possible
     c.genExpr(tree, a)
@@ -548,7 +552,7 @@ proc genStmt(c; tree; n: NodeIndex) =
     c.genExpr(tree, tree.child(n, 0))
     c.genExpr(tree, tree.child(n, 1))
     c.instr(opcMemClear)
-  of Copy:
+  of Blit:
     c.genExpr(tree, tree.child(n, 0))
     c.genExpr(tree, tree.child(n, 1))
     c.genExpr(tree, tree.child(n, 2))
@@ -578,16 +582,17 @@ proc gen(c; tree; n: NodeIndex) =
 
   c.genExit(tree, tree.last(n))
 
-proc translate(tree; types, def: NodeIndex): ProcResult =
+proc translate(tree; types, def: NodeIndex,
+               signatures: Table[uint32, TypeId]): ProcResult =
   ## Translates the single procedure body `body` to VM bytecode. `types`
   ## provides the type environment.
   let (typ, locals, conts) = tree.triplet(def)
 
-  var c = PassCtx(types: types)
+  var c = PassCtx(types: types, signatures: addr signatures)
   # allocate and setup the local variables:
   c.locals.setLen(tree.len(locals))
   for i, it in tree.pairs(locals):
-    let typ = parseType(tree, c.types, tree[it].typ)
+    let typ = parseType(tree, c.types, it)
     c.locals[i] = (if typ.kind == t0kFloat: vtFloat else: vtInt)
 
   # put all parameters into locals:
@@ -635,33 +640,32 @@ proc slice[T](old, with: seq[T]): Slice[uint32] =
 proc hoSlice[T](old, with: seq[T]): HOslice[uint32] =
   hoSlice(old.len.uint32, uint32(old.len + with.len))
 
-proc translate*(module: PackedTree[NodeKind], env: var VmEnv) =
+proc translate*(module: PackedTree[NodeKind]): VmModule =
   ## Translates a complete module to the VM bytecode and the associated
   ## environmental data.
   let (types, globals, procs) = module.triplet(NodeIndex(0))
+  var signatures: Table[uint32, TypeId]
 
-  for typ in module.items(types):
-    template addType(t: VmType) =
-      discard env.types.add(t)
-
+  for id, typ in module.pairs(types):
     case module[typ].kind
-    of Int, UInt:
-      # the VM makes no distinction between signed and unsigned integers
-      addType VmType(kind: tkInt)
-    of Float:
-      addType VmType(kind: tkFloat)
+    of Int, UInt, Float:
+      discard "nothing to do"
     of ProcTy:
-      let start = env.types.params.len
+      let start = result.types.params.len
       # the first type (i.e., return type) needs special handling:
       if module[typ, 0].kind == Void:
-        env.types.params.add(VoidType)
+        result.types.params.add(tkVoid)
 
       # the rest must be type references:
-      for it in module.items(typ, env.types.params.len - start):
-        env.types.params.add(module[it].typ)
+      for it in module.items(typ, result.types.params.len - start):
+        const Map = [t0kInt: tkInt, t0kUInt: tkInt, t0kFloat: tkFloat]
+        result.types.params.add Map[parseType(module, types, it).kind]
 
-      addType VmType(kind: tkProc, a: start.uint32,
-                     b: env.types.params.len.uint32)
+      result.types.types.add start.uint32 .. result.types.params.high.uint32
+      # TODO: change the lang0 grammar such that only signatures are allowed
+      #       in the type section, which would result in a 1-to-1 mapping
+      #       between IL type IDs and VM type IDs, making the map obsolete
+      signatures[id.uint32] = result.types.types.high.TypeId
     else:
       unreachable()
 
@@ -678,28 +682,37 @@ proc translate*(module: PackedTree[NodeKind], env: var VmEnv) =
       else:
         unreachable()
 
-    env.globals.add val
+    result.globals.add val
 
   # generate the code for the procedures and add them to the environment:
   for i, def in module.pairs(procs):
-    var prc = translate(module, types, def)
+    if module[def].kind == ProcDef:
+      var prc = translate(module, types, def, signatures)
 
-    if prc.constants.len > 0:
-      # patch the LdConst instructions:
-      for instr in prc.code.mitems:
-        if instr.opcode == opcLdConst:
-          let i = imm32(instr)
-          instr = Instr(instr.InstrType and not(instrAMask shl instrAShift))
-          instr = Instr(instr.InstrType or
-                        (InstrType(i + env.constants.len) shl instrAShift))
+      if prc.constants.len > 0:
+        # patch the LdConst instructions:
+        for instr in prc.code.mitems:
+          if instr.opcode == opcLdConst:
+            let i = imm32(instr)
+            instr = Instr(instr.InstrType and not(instrAMask shl instrAShift))
+            instr = Instr(instr.InstrType or
+                          (InstrType(i + result.constants.len) shl instrAShift))
 
-      env.constants.add prc.constants
+        result.constants.add prc.constants
 
-    env.procs.add ProcHeader(kind: pkDefault, typ: module[def, 0].typ)
-    env.procs[i].code = slice(env.code, prc.code)
-    env.code.add prc.code
-    env.procs[i].locals = hoSlice(env.locals, prc.locals)
-    env.locals.add prc.locals
+      result.procs.add ProcHeader(kind: pkDefault,
+                                  typ: signatures[module[def, 0].typ])
+      result.procs[i].code = slice(result.code, prc.code)
+      result.code.add prc.code
+      result.procs[i].locals = hoSlice(result.locals, prc.locals)
+      result.locals.add prc.locals
 
-    env.procs[i].eh = hoSlice(env.ehTable, prc.ehTable)
-    env.ehTable.add prc.ehTable
+      result.procs[i].eh = hoSlice(result.ehTable, prc.ehTable)
+      result.ehTable.add prc.ehTable
+    else:
+      # must be a host procedure
+      result.host.add module.getString(module.child(def, 1))
+
+      result.procs.add ProcHeader(kind: pkCallback,
+                                  typ: signatures[module[def, 0].typ])
+      result.procs[i].code.a = result.host.high.uint32

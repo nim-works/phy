@@ -9,9 +9,6 @@ import
     streams,
     strutils
   ],
-  experimental/[
-    sexp
-  ],
   common/[
     vmexec
   ],
@@ -38,6 +35,8 @@ import
   ],
   phy/[
     default_reporting,
+    host_impl,
+    tree_parser,
     types
   ],
   vm/[
@@ -45,6 +44,7 @@ import
     disasm,
     utils,
     vmenv,
+    vmmodules,
     vmvalidation
   ]
 
@@ -152,7 +152,7 @@ proc sourceToIL(text: string): (PackedTree[spec.NodeKind], SemType) =
   ## procedure to run.
   ##
   ## A failure during analysis aborts the program.
-  var code = fromSexp[spec_source.NodeKind](parseSexp(text))
+  var code = fromSexp[spec_source.NodeKind](text)
 
   var reporter = initDefaultReporter[string]()
   var ctx = source2il.open(reporter)
@@ -313,15 +313,15 @@ proc main(args: openArray[string]) =
     elif gRunner:
       # in order to reduce visual noise in tests, the ``(Module ...)`` top
       # level node is added implicitly
-      code = fromSexp[spec.NodeKind](parseSexp("(Module " & text & ")"))
+      code = fromSexp[spec.NodeKind]("(Module " & text & ")")
     else:
-      code = fromSexp[spec.NodeKind](parseSexp(text))
+      code = fromSexp[spec.NodeKind](text)
 
     if target == langBytecode:
       # compile to L0 code and then translate to bytecode
       compile(code, newSource, lang0)
       syntaxCheck(code, lang0)
-      pass0.translate(code, env)
+      link(env, hostProcedures(gRunner), [pass0.translate(code)])
       # the bytecode is verified later
     else:
       compile(code, newSource, target)

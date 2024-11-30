@@ -36,20 +36,16 @@ type
 
 const
   errNotForwardJump = "not a forward jump"
-  errNotAProcType   = "type is not a proc type"
 
 proc toValueType(t: VmType): ValueType =
-  case t.kind
-  of tkInt, tkProc: vtInt
-  of tkFloat:       vtFloat
-  of tkForeign:     vtRef
-  of tkVoid:        unreachable()
+  case t
+  of tkInt:     vtInt
+  of tkFloat:   vtFloat
+  of tkForeign: vtRef
+  of tkVoid:    unreachable()
 
 proc param(env: TypeEnv, t: TypeId, i: int): ValueType =
-  toValueType(env[env.params[env[t].a + i.uint32 + 1]])
-
-proc numArgs(typ: VmType): int =
-  typ.len - 1
+  toValueType(vmtypes.param(env, t, i))
 
 proc test(a: seq|openArray, i: SomeInteger): bool =
   when i is SomeUnsignedInt:
@@ -203,8 +199,8 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
     expectEmpty()
     jump(rel)
   of opcRet:
-    let expect = env.types[env.types.returnType(env[ctx.prc].typ)]
-    if expect.kind != tkVoid:
+    let expect = env.types.returnType(env[ctx.prc].typ)
+    if expect != tkVoid:
       pop(toValueType expect)
     expectEmpty()
     ctx.active = false
@@ -220,21 +216,21 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
     of opcCall:
       typ = checked(env.procs, idx).typ
     of opcIndCall:
-      check checked(env.types.types, idx).kind == tkProc, errNotAProcType
+      discard checked(env.types.types, idx)
       typ = TypeId idx
       pop(vtInt) # callee
     else:
       unreachable()
 
-    check env.types[typ].numArgs() == num, "arity doesn't match"
+    check env.types.numParams(typ) == num, "arity doesn't match"
 
     # pop all arguments from the stack, expecting the given kinds
     for i in 0..<num:
       pop(env.types.param(typ, num - i - 1))
 
     # push the return value, if any
-    let ret = env.types[env.types.returnType(typ)]
-    if ret.kind != tkVoid:
+    let ret = env.types.returnType(typ)
+    if ret != tkVoid:
       push(toValueType ret)
   of opcExcept:
     check not ctx.active, "control-flow reaches 'opcExcept'"
@@ -289,7 +285,6 @@ proc verify*(hdr: ProcHeader, env: VmEnv): CheckResult =
     discard
 
   check test(env.types.types, hdr.typ.uint32), Error
-  check env.types[hdr.typ].kind == tkProc, errNotAProcType
   result.initSuccess()
 
 proc verify*(env: VmEnv, prc: ProcIndex, code: openArray[Instr]): CheckResult =
@@ -299,7 +294,7 @@ proc verify*(env: VmEnv, prc: ProcIndex, code: openArray[Instr]): CheckResult =
 
   # push all parameters to the operand stack:
   for _, it in parameters(env.types, env[prc].typ):
-    ctx.stack.add(toValueType env.types[it])
+    ctx.stack.add(toValueType it)
 
   # run abstract evaluation for all instructions:
   for pos, instr in code.pairs:
@@ -314,27 +309,13 @@ proc verify*(env: VmEnv, prc: ProcIndex, code: openArray[Instr]): CheckResult =
 
 proc verify*(types: TypeEnv): CheckResult =
   ## Verifies the type environment, making sure it is well-formed.
-  check types.types.len > 0, "type environment is empty"
-  check types[VoidType].kind == tkVoid, "void type is not valid"
-
   for i, it in types.types.pairs:
-    let i = uint32(i)
-    case it.kind
-    of tkInt, tkFloat, tkForeign:
-      discard "nothing to check"
-    of tkVoid:
-      check i == 0, "only the very first type can be a 'tkVoid'"
-    of tkProc:
-      check it.b > it.a, "proc type has no elements"
+    check it.a <= it.b, "illformed signature entry"
+    check test(types.params, it.a), "illformed signature entry"
+    check test(types.params, it.b), "illformed signature entry"
 
-      for x in it.a..<it.b:
-        let typ = types.params[x]
-        check uint32(typ) < i, "forward reference"
-        var se = {tkInt, tkFloat, tkForeign}
-        if x == it.a:
-          se.incl tkVoid # void is only allowed for the return type
-
-        check types[typ].kind in se, "parameter type isn't valid"
+    for _, p in parameters(types, TypeId i):
+      check p != tkVoid, "void is not a valid parameter type"
 
   result.initSuccess()
 
@@ -368,4 +349,6 @@ proc validate*(env: VmEnv): seq[string] =
 
   # check the bodies:
   for i, it in env.procs.pairs:
-    handle verify(env, ProcIndex(i), env.code.toOpenArray(it.code.a.int, it.code.b.int))
+    if it.kind == pkDefault:
+      handle verify(env, ProcIndex(i),
+                    env.code.toOpenArray(it.code.a.int, it.code.b.int))

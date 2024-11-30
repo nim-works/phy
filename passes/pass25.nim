@@ -66,7 +66,7 @@ type
       ## locals that need to be pinned in memory (i.e., don't change location)
 
 const
-  IndirectAccess = {Copy, Clear, Store, Load, Call, CheckedCall,
+  IndirectAccess = {Blit, Clear, Store, Load, Call, CheckedCall,
                     CheckedCallAsgn}
     ## every operation that reads or writes through a pointer. Calls have to
     ## conservatively be treated as performing an indirect access.
@@ -519,4 +519,5 @@ proc lower*(tree): Changeset[NodeKind] =
   var c = PassCtx(types: tree.child(0))
 
   for it in tree.items(tree.child(2)):
-    c.lowerProc(tree, it, result)
+    if tree[it].kind == ProcDef:
+      c.lowerProc(tree, it, result)
