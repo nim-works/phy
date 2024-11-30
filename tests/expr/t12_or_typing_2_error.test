@@ -1,0 +1,4 @@
+discard """
+  reject: true
+"""
+(Or (Ident "false") (IntVal 100))

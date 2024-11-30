@@ -1,0 +1,12 @@
+discard """
+  description: "Make sure a procedure with a single aggregate parameter runs"
+  output: "(): unit"
+"""
+(Module
+  (ProcDecl (Ident "p") (UnitTy)
+    (Params (ParamDecl (Ident "a") (TupleTy (IntTy))))
+    (Return))
+
+  (ProcDecl (Ident "main") (UnitTy) (Params)
+    (Return
+      (Call (Ident "p") (TupleCons (IntVal 30))))))

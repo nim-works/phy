@@ -1,0 +1,22 @@
+;$sexp
+(TypeDefs
+  (Int 8)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Continuations
+      (Continuation (Params) (Locals)
+        (Continue 1 (List)))
+      (Continuation (Params))))
+  (ProcDef (Type 1)
+    (Continuations
+      (Continuation (Params) (Locals)
+        (CheckedCall (Proc 0)
+          (Continue 1 (List))
+          (Continue 2 (List))))
+      (Continuation (Params) (Locals)
+        (Continue 3 (List)))
+      (Except (Params (Type 0)) (Locals)
+        (Continue 3 (List)))
+      (Continuation (Params)))))

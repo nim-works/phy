@@ -72,9 +72,9 @@ proc lower*(tree; ptrSize: int): ChangeSet[NodeKind] =
       # TODO: re-use a single pointer type, though this will require patching
       #       all used types. It might be better to introduce a ``None`` type,
       #       and leave mapping type IDs to ``pass0``
-      result.replace(it, UInt):
-        bu.add Node(kind: Immediate, val: uint32 ptrSize)
+      result.replace(it, Node(kind: UInt, val: uint32 ptrSize))
 
   # lower the procedures:
   for it in tree.items(tree.child(2)):
-    lower(result, tree, it)
+    if tree[it].kind == ProcDef:
+      lower(result, tree, it)

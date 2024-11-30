@@ -9,9 +9,6 @@ import
     streams,
     strutils
   ],
-  experimental/[
-    sexp
-  ],
   common/[
     vmexec
   ],
@@ -20,6 +17,7 @@ import
     lang1_checks,
     lang3_checks,
     lang4_checks,
+    lang25_checks,
     lang30_checks,
     source_checks
   ],
@@ -31,11 +29,14 @@ import
     pass1,
     pass3,
     pass4,
+    pass25,
     pass30,
     trees
   ],
   phy/[
     default_reporting,
+    host_impl,
+    tree_parser,
     types
   ],
   vm/[
@@ -43,6 +44,7 @@ import
     disasm,
     utils,
     vmenv,
+    vmmodules,
     vmvalidation
   ]
 
@@ -57,6 +59,7 @@ type
     lang1 = "L1"
     lang3 = "L3"
     lang4 = "L4"
+    lang25 = "L25"
     lang30 = "L30"
     langSource = "source"
 
@@ -113,6 +116,7 @@ proc syntaxCheck(code: PackedTree[spec.NodeKind], lang: Language) =
   of lang1:  syntaxCheck(code, lang1_checks, module)
   of lang3:  syntaxCheck(code, lang3_checks, module)
   of lang4:  syntaxCheck(code, lang4_checks, module)
+  of lang25: syntaxCheck(code, lang25_checks, module)
   of lang30: syntaxCheck(code, lang30_checks, module)
   else:      unreachable()
 
@@ -148,7 +152,7 @@ proc sourceToIL(text: string): (PackedTree[spec.NodeKind], SemType) =
   ## procedure to run.
   ##
   ## A failure during analysis aborts the program.
-  var code = fromSexp[spec_source.NodeKind](parseSexp(text))
+  var code = fromSexp[spec_source.NodeKind](text)
 
   var reporter = initDefaultReporter[string]()
   var ctx = source2il.open(reporter)
@@ -180,7 +184,7 @@ proc sourceToIL(text: string): (PackedTree[spec.NodeKind], SemType) =
     quit(2)
 
   result[1] =
-    if ctx.procList.len > 0: ctx.procList[^1].result
+    if ctx.procList.len > 0: ctx.procList[^1].typ.elems[0]
     else:                    prim(tkError)
   result[0] = ctx.close()
 
@@ -206,10 +210,14 @@ proc compile(tree: var PackedTree[spec.NodeKind], source, target: Language) =
       syntaxCheck(tree, lang4_checks, module)
       tree = tree.apply(pass4.lower(tree))
       current = lang3
+    of lang25:
+      syntaxCheck(tree, lang25_checks, module)
+      tree = tree.apply(pass25.lower(tree))
+      current = lang4
     of lang30:
       syntaxCheck(tree, lang30_checks, module)
       tree = tree.apply(pass30.lower(tree))
-      current = lang4
+      current = lang25
 
     print(tree, current)
 
@@ -305,15 +313,15 @@ proc main(args: openArray[string]) =
     elif gRunner:
       # in order to reduce visual noise in tests, the ``(Module ...)`` top
       # level node is added implicitly
-      code = fromSexp[spec.NodeKind](parseSexp("(Module " & text & ")"))
+      code = fromSexp[spec.NodeKind]("(Module " & text & ")")
     else:
-      code = fromSexp[spec.NodeKind](parseSexp(text))
+      code = fromSexp[spec.NodeKind](text)
 
     if target == langBytecode:
       # compile to L0 code and then translate to bytecode
       compile(code, newSource, lang0)
       syntaxCheck(code, lang0)
-      pass0.translate(code, env)
+      link(env, hostProcedures(gRunner), [pass0.translate(code)])
       # the bytecode is verified later
     else:
       compile(code, newSource, target)

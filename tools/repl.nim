@@ -19,19 +19,23 @@ import
     pass1,
     pass3,
     pass4,
+    pass25,
     pass30,
     source2il,
     spec_source,
     trees,
   ],
   phy/[
-    default_reporting
+    default_reporting,
+    host_impl,
+    tree_parser
   ],
   common/[
     vmexec
   ],
   vm/[
     vmenv,
+    vmmodules,
     vmvalidation
   ]
 
@@ -127,13 +131,14 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
 
     # lower to L0:
     m = m.apply(pass30.lower(m))
+    m = m.apply(pass25.lower(m))
     m = m.apply(pass4.lower(m))
     m = m.apply(pass3.lower(m, 8))
     m = m.apply(pass1.lower(m, 8))
 
     # generate the bytecode:
     var env = initVm(1024, 1024 * 1024)
-    translate(m, env)
+    link(env, hostProcedures(includeTest = false), [translate(m)])
 
     # make sure the bytecode and environment is correct:
     let errors = validate(env)

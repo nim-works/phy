@@ -1,0 +1,10 @@
+discard """
+  description: "
+    If the condition is not an immediate `(Ident true)` expression, the
+    `While` is not a void expression
+  "
+  reject: true
+"""
+(ProcDecl (Ident "p") (VoidTy) (Params)
+  (While (Exprs (TupleCons) (Ident "true"))
+    (TupleCons)))

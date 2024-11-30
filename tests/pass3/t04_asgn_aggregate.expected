@@ -2,8 +2,7 @@
 (TypeDefs
   (Int 8)
   (Blob 8)
-  (ProcTy (Void))
-  (UInt 8))
+  (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
   (ProcDef (Type 2)
@@ -11,7 +10,7 @@
     (Continuations
       (Continuation (Params)
         (Locals (Local 0) (Local 1))
-        (Copy
+        (Blit
           (Addr (Local 0))
           (Addr (Local 1))
           (IntVal 8))

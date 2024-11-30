@@ -1,10 +1,9 @@
-.type t0 (Int)
-.type t1 (Proc t0)
-.start t1 p0
+.type t0 () -> int
+.start t0 p0
   LdImmInt 100
   Ret
 .end
-.start t1 p1
+.start t0 p1
 .local lo0 int
   Call p0 0
   PopLocal lo0

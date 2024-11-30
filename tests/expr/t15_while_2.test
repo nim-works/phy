@@ -1,0 +1,13 @@
+discard """
+  description: "The condition expression is always evaluated at least once"
+  output: "10: int"
+"""
+(Exprs
+  (Decl (Ident "x") (IntVal 0))
+  (While
+    (Exprs
+      (Asgn (Ident "x")
+        (Call (Ident "+") (Ident "x") (IntVal 10)))
+      (Ident "false"))
+    (TupleCons))
+  (Ident "x"))

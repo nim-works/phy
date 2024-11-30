@@ -1,0 +1,16 @@
+discard """
+  output: "(Done 100)"
+"""
+(TypeDefs
+  (Int 8)
+  (ProcTy (Type 0) (Type 0))
+  (ProcTy (Type 0)))
+(GlobalDefs)
+(ProcDefs
+  (Foreign (Type 1) "core.test")
+  (ProcDef (Type 2) (Locals)
+    (Continuations
+      (Continuation (Params) 0
+        (Continue 1
+          (Call (Proc 0) (IntVal 100))))
+      (Continuation (Params (Type 0))))))

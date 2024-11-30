@@ -7,16 +7,16 @@
 There's no more unstructured `Blob` type:
 
 ```grammar
-type -= (Blob <int>)
+typedesc -= (Blob <int>)
 ```
 
 It's replaced with structured types:
 
 ```grammar
-field ::= (Field offset:<int> <type_id>)
+field ::= (Field offset:<int> <type>)
 
-type += (Record size:<Int> <field>+)
-     |  (Array size:<Int> count:<int> <type_id>)
+typedesc += (Record size:<Int> <field>+)
+         |  (Array size:<Int> count:<int> <type>)
 ```
 
 As long as fields stay within the bounds of the record, they can use any
@@ -33,7 +33,7 @@ The content of locations of such types is accessed with *path expressions*:
 path ::= (At    <path_elem> elem:<value>)
       |  (Field <path_elem> field:<int>)
 
-path_elem ::= (Deref <type_id> <value>)
+path_elem ::= (Deref <type> <value>)
            |  <local>
            |  <path>
 ```

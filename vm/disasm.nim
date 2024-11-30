@@ -21,9 +21,8 @@ template toOpenArray[T; I: Ordinal](s: seq[T], sl: HOslice[I]): untyped =
   s.toOpenArray(sl.a.int, sl.b.int - 1)
 
 proc formatValue(result: var string, t: TypeId, specifier: string) =
-  assert t != VoidType
   result.add 't'
-  result.addInt(t.int - 1)
+  result.addInt(t.int)
 
 proc formatValue(result: var string, v: TypedValue, specifier: string) =
   case v.typ
@@ -110,33 +109,28 @@ proc disassemble*(env: VmEnv, prc: ProcHeader, result: var string) =
         break
 
 proc disassemble*(env: VmEnv): string =
-  ## Returns the text representation for the full `env`. The text
-  ## representation only roundtrips in terms of meaning (re-assembling
-  ## the output results in a program behaving exactly the same); some
-  ## information may be lost.
+  ## Returns the text representation for the full `env`. Except when
+  ## containing stub and host/callback procedures, the text representation
+  ## can be re-assembled into a ``VmEnv`` that has the same meaning as the
+  ## input `env`.
   # emit the type directives:
-  for i in 1..<env.types.types.len:
-    let typ = env.types.types[i]
-    result.add fmt".type t{(i - 1)} "
-    case typ.kind
-    of tkVoid:
-      unreachable()
-    of tkInt:
-      result.add "(Int)"
-    of tkFloat:
-      result.add "(Float)"
-    of tkProc:
-      result.add "(Proc"
-      for it in typ.a..<typ.b:
-        if env.types.params[it] == VoidType:
-          result.add " (Void)"
-        else:
-          result.add fmt" {env.types.params[it]}"
-      result.add ")"
-    of tkForeign:
-      result.add "(Foreign)"
+  for i in 0..<env.types.types.len:
+    let id = TypeId(i)
+    result.add fmt".type t{i} ("
 
-    result.add "\n"
+    proc toString(kind: TypeKind): string =
+      case kind
+      of tkVoid:    "void"
+      of tkInt:     "int"
+      of tkFloat:   "float"
+      of tkForeign: "foreign"
+
+    for i, it in parameters(env.types, id):
+      if i > 0:
+        result.add ", "
+      result.add toString(it)
+
+    result.add ") -> " & toString(env.types.returnType(id)) & "\n"
 
   # emit the constants:
   for i, val in env.constants.pairs:
@@ -148,6 +142,12 @@ proc disassemble*(env: VmEnv): string =
 
   # emit the procedures:
   for i, prc in env.procs.pairs:
-    result.add &".start {prc.typ} p{i}\n"
-    disassemble(env, prc, result)
-    result.add ".end\n"
+    case prc.kind
+    of pkStub:
+      result.add &".stub {prc.typ} p{i}\n"
+    of pkDefault:
+      result.add &".start {prc.typ} p{i}\n"
+      disassemble(env, prc, result)
+      result.add ".end\n"
+    of pkCallback:
+      result.add &".host {prc.typ} p{i}\n"

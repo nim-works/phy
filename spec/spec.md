@@ -66,7 +66,11 @@ the same type.
 
 `union(...)` is the supertype of all its operand types.
 
-### Values, Objects, Locations, and Cells
+The `proc(R, T0, ..., Tn)` type constructor constructs a type that is inhabited
+by all procedure who take `T0` through `Tn` as parameters and return a value of
+type `R`. The parameter type order is significant.
+
+### Values, Objects, Locations, Cells, and Handles
 
 A *value* is something that inhabits a type. An *aggregate value* is a value
 inhabiting a composite type.
@@ -89,6 +93,13 @@ parent location, but without changing its *identity*.
 
 > Note: "constructing a value" is sometimes used interchangeably with
 > "constructing an object"
+
+A *handle* is the unique name of a location or cell. A *static handle* is
+a name defined in the source code (e.g., the name of a variable), while a
+*dynamic handle* is a *value* representing the name.
+
+Handles can be *mutable* or *immutable*, which informs what operations are
+possible on the l-value expression the handle is the root of.
 
 ### Normal, Linear, and Affine Types
 
@@ -148,15 +159,17 @@ expr ::= <ident>
 Refers to a previously declared entity.
 
 Let `E` be the entity `lookup(S, name)` (where `S` is the current scope)
-succeeds with. An error is reported when:
-* the lookup fails, or
-* `E` is neither a local variable nor the built-in `true` or `false`
+succeeds with. An error is reported if the lookup fails.
 
-If `E` is a local variable, the type of the expression is that of the local
-variable. If `E` is the built-in `true` or `false` entity, the type is `bool`.
+The meaning of the identifier depends on `E`:
+* if `E` is a local variable, the expression is an l-value expression of the
+  variable's type, evaluating to the location the local variable names
+* if `E` is the built-in `true` or `false` value, the expression is an r-value
+  expression of type `bool`
+* if `E` is a procedure, the expression is an r-value expression of the
+  procedure's type, evaluating to a procedural value representing the procedure
 
-**Expression kind**: r-value for boolean literals, otherwise l-value
-**Uses**: nothing
+An error is reported if `E` is neither of the entities listed above.
 
 #### Literals
 
@@ -196,6 +209,31 @@ The type of the `If` expression is the common type between `A` and `B`.
 **Expression kind**: r-value
 **Uses**: `cond`, `body`, and - if present - `else`
 
+#### `While`
+
+```grammar
+expr += (While cond:<expr> body:<expr>)
+```
+
+Repeatedly evaluates `body`, as long as `cond` evaluates to `true`. Both
+`body` and `cond` are part of a new scope.
+
+Let `C` be the type of `cond` and let `T` be the type of `body`. An error is
+reported if:
+* `C` is not `bool`
+* `T` is neither `unit` nor `void`
+
+The type of a `While` expression depends on the `cond` expression. If `cond`
+is the built-in `true` literal `(Ident "true")`, then the expression is of
+type `void`, otherwise it is of type `unit`.
+
+> TODO: once constant expression evaluation is specified, consider changing the
+>       rules such that a `While` is of type `void` when the is a constant
+>       expression that evaluates to true
+
+**Expression kind**: r-value
+**Uses**: `cond` and `body`
+
 #### `Return`
 
 ```grammar
@@ -233,21 +271,35 @@ The type of the `Unreachable` expression is `void`.
 #### Calls
 
 ```grammar
-expr += (Call callee:<ident> args:<expr>*)
+expr += (Call callee:<expr> args:<expr>*)
 ```
 
-Let `S` be the current *scope*. If `lookup(S, callee)` fails, an error is
-reported.
+Applies the procedure `callee` evaluates to to the given arguments. An error is
+reported if `callee` is not of `proc` type.
 
-Let `C` be the result of `lookup(S, callee)`. If `C` is not a procedure, an
-error is reported.
+Let `proc(F0, ..., Fn) -> R` be the type of `callee`. Let `A0` through `Ax` be
+the argument expressions (`args`). An error is reported if `n` is not equal to
+`x`, or if the type of an argument expression is not equal to the corresponding
+parameter's type.
 
-Let `A0`..`Ax` be the types of the argument expressions. Let `F0`..`Fy` be
-the types of the parameters of `C`. If `x` is not equal to `y`, an error is
-reported. Each argument type must match (i.e., be equal to) that of the
-corresponding parameter. If that's not the case, an error is reported.
+> TODO: allow for argument subtype matches
 
-The type of the call is the *return type* of `C`.
+The type of the expression is `R`.
+
+Evaluation of the call happens as follows:
+1. for each argument, going from left to right:
+  1. a temporary location is created
+  2. if the expression is an r-value expression, the resulting |object| is
+     *moved* into the temporary; otherwise, the |object| stored in the location
+     named by the l-value expression is *copied* into the temporary
+  3. the location is bound to the parameter the argument is passed to
+2. control is passed to the `callee` procedure
+3. once control leaves the called procedure, the |object|s stored in the
+   temporary locations are destroyed, in the reverse order they were assigned
+   to
+
+> TODO: once borrow checking is implemented, l-value arguments should always
+>       be borrowed from when allowed by the borrow checker
 
 When execution reaches the call expression, for each argument, the expression
 is evaluated (including the side-effects) and the resulting value is bound to
@@ -258,7 +310,7 @@ After evaluating the arguments (if any), control is passed to the callee.
 > TODO: specification for the built-in operations is missing
 
 **Expression kind**: r-value or `void`, depending on the return type
-**Uses**: each argument expression
+**Uses**: `callee` and each argument expression
 
 #### Tuple Constructors
 
@@ -314,6 +366,40 @@ expression is `void`, otherwise the type is that of the trailing expression.
 **Expression kind**: same as that of the trailing expression
 **Uses**: nothing
 
+#### Logical `And`
+
+```grammar
+expr += (And a:<expr> b:<expr>)
+```
+
+Evaluates to `true` when both `a` and `b` evaluate to `true`, `false`
+otherwise. `b` is only evaluated if `a` evaluates to `true`. The type of an
+`And` expression is `bool`.
+
+In terms of scoping, `(And a b)` is equivalent with `(If a b (Ident "false"))`.
+
+An error is reported if the type of either `a` or `b` is not `bool`.
+
+**Expression kind**: rvalue
+**Uses**: `a` and `b`
+
+#### Logical `Or`
+
+```grammar
+expr += (Or a:<expr> b:<expr>)
+```
+
+Evaluates to `true` when `a`, `b`, or both `a` and `b` evaluate to `true`,
+`false` otherwise. `b` is only evaluated if `a` evaluates to `false`. The type
+of an `Or` expression is `bool`.
+
+In terms of scoping, `(Or a b)` is equivalent with `(If a (Ident "true") b)`.
+
+An error is reported if the type of either `a` or `b` is not `bool`.
+
+**Expression kind**: rvalue
+**Uses**: `a` and `b`
+
 #### Assignment
 
 ```grammar
@@ -344,7 +430,7 @@ Evaluation happens as follows:
 
 Let `A` be the type of `lhs` and `B` be the type of `rhs`. An error is reported
 when:
-* `lhs` is not an l-value expression, or
+* `lhs` is not a mutable l-value expression, or
 * `B` is `void`, or
 * `B` is not the same type as or a subtype of `A`
 
@@ -401,17 +487,27 @@ An error is reported if:
 * any operand is the `void` type
 * a type is provided more than once
 
+#### Procedure Type Constructors
+
+```grammar
+type_expr += (ProcTy ret:<type_expr> params:<type_expr>*)
+```
+
+Constructs the type `proc(ret, params[0], ..., params[n])`. An error is
+reported if any of the provided *parameter* types is the `void` type.
+
 ### Declarations
 
 #### Procedure
 
 ```grammar
-decl ::= (ProcDecl name:<ident> ret:<type_expr> params:(Params) body:<expr>)
+decl ::= (ProcDecl name:<ident> ret:<type_expr> params:(Params <param_decl>*) body:<expr>)
 ```
 
 Let `S` be the current scope. If `lookup(S, name)` succeeds, an error is
 reported. Otherwise, `name` is added to `S`, referring to the declared
-procedure.
+procedure. `name` is of type `proc(R)`, where `R` is the type `ret` evaluates
+to.
 
 A procedure declarations opens a new scope for the body and closes it
 afterwards.
@@ -420,6 +516,19 @@ afterwards.
 procedure is called.
 
 `name` is added to `S` *before* any lookup takes place in the body.
+
+##### Parameters
+
+```grammar
+param_decl ::= (ParamDecl name:<ident> type:<type_expr>)
+```
+
+Let `S` be the current scope. An error is reported if:
+* `lookup(S, name)` succeeds
+* `type` is `void`
+
+`name` is added to the scope of the procedure body, referring to the handle of
+the location the argument |object| is stored in. The handle is immutable.
 
 #### Type Alias
 

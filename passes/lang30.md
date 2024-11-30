@@ -1,17 +1,18 @@
 ## L30 Language
 
 ```grammar
-.extends lang4
+.extends lang25
 ```
 
-Continuations are gone, and locals are scoped to procedures:
+Instead of one flat list of statements, statements in a procedure can now be
+nested:
 
 ```grammar
-procdef -= (ProcDef <type_id> (Continuations <continuation>+))
-procdef += (ProcDef <type_id> (Locals <type_id>*) <single_stmt>)
+procdef -= (ProcDef <type_id> (Locals <type>*) (Stmts <stmt>+))
+procdef += (ProcDef <type_id> (Locals <type>*) <single_stmt>)
 ```
 
-Control-flow statements appear in a normal statement context:
+The goto-based control-flow constructs are replaced with structured equivalents.
 
 ```grammar
 single_stmt ::= (Stmts <stmt>+)
@@ -25,14 +26,19 @@ choice -= (Choice <intVal> <goto>)
 choice += (Choice <intVal> <single_stmt>)
         | (Choice <floatVal> <single_stmt>)
 
+stmt -= (Join   <cont_name>)
+      | (Except <cont_name> <local>)
+      | <exit>
+      | <goto>
+
 stmt += (Block <single_stmt>)
       | (Loop <single_stmt>)
       | (If <value> <single_stmt> <single_stmt>?)
-      | (Case <type_id> <simple> <choice>+)
+      | (Case <type> <simple> <choice>+)
       | (CheckedCall <proc> <value>*)
-      | (CheckedCall <type_id> <value>+)
+      | (CheckedCall <type> <value>+)
       | (CheckedCallAsgn <local> <proc> <value>*)
-      | (CheckedCallAsgn <local> <type_id> <value>+)
+      | (CheckedCallAsgn <local> <type> <value>+)
       | (Return <value>?)
       | (Raise <value>)
       | (Unreachable)

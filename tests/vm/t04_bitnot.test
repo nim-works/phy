@@ -1,7 +1,7 @@
 discard """
   output: "(Done (18446744072277895850 or -1431655766))"
 """
-.type P1 (Proc (Int))
+.type P1 () -> int
 .start P1 main
 LdImmInt 0x55555555 # 0101_0101...
 BitNot
