@@ -138,7 +138,7 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
 
     # generate the bytecode:
     var env = initVm(1024, 1024 * 1024)
-    link(env, hostProcedures(false), [translate(m)])
+    link(env, hostProcedures(includeTest = false), [translate(m)])
 
     # make sure the bytecode and environment is correct:
     let errors = validate(env)
