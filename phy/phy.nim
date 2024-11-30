@@ -22,6 +22,7 @@ import
     source_checks
   ],
   passes/[
+    asmjs,
     changesets,
     debugutils,
     source2il,
@@ -55,6 +56,7 @@ import passes/spec_source except NodeKind
 type
   Language = enum
     langBytecode = "vm"
+    langAsmJs = "asmjs"
     lang0 = "L0"
     lang1 = "L1"
     lang3 = "L3"
@@ -194,7 +196,7 @@ proc compile(tree: var PackedTree[spec.NodeKind], source, target: Language) =
   var current = source
   while current != target:
     case current
-    of lang0, langBytecode, langSource:
+    of lang0, langBytecode, langSource, langAsmJs:
       assert false, "cannot be handled here: " & $current
     of lang1:
       syntaxCheck(tree, lang1_checks, module)
@@ -317,12 +319,16 @@ proc main(args: openArray[string]) =
     else:
       code = fromSexp[spec.NodeKind](text)
 
-    if target == langBytecode:
+    case target
+    of langBytecode:
       # compile to L0 code and then translate to bytecode
       compile(code, newSource, lang0)
       syntaxCheck(code, lang0)
       link(env, hostProcedures(gRunner), [pass0.translate(code)])
       # the bytecode is verified later
+    of langAsmJs:
+      compile(code, newSource, lang0)
+      syntaxCheck(code, lang0)
     else:
       compile(code, newSource, target)
       # make sure the output code is correct:
@@ -354,5 +360,12 @@ proc main(args: openArray[string]) =
       else:
         # we don't have high-level type information
         stdout.write run(env, env.procs.high.ProcIndex)
+  elif target == langAsmJs:
+    let module = asmjs.translate(code)
+
+    if langAsmJs in gShow:
+      stdout.write module
+
+    # TODO: implement the Eval command for asmjs modules
 
 main(getExecArgs())
