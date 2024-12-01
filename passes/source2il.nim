@@ -248,6 +248,9 @@ proc evalType(c; t; n: NodeIndex): SemType =
       list.add c.expectNot(c.evalType(t, it), tkVoid)
 
     SemType(kind: tkProc, elems: list)
+  of SourceKind.SeqTy:
+    SemType(kind: tkSeq,
+            elems: @[c.expectNot(c.evalType(t, t.child(n, 0)), tkVoid)])
   of Ident:
     let
       name = t.getString(n)
@@ -307,6 +310,20 @@ proc typeToIL(c; typ: SemType): uint32 =
     # a proc type is used to represent both procedure signatures and the type
     # of procedural values. For values, the underlying storage type is a uint
     c.addType Node(kind: UInt, val: 8)
+  of tkSeq:
+    let
+      lengthType  = c.typeToIL(prim(tkInt))
+      pointerType = c.typeToIL(pointerType)
+    c.addType Record:
+      c.types.add Node(kind: Immediate, val: size(typ).uint32)
+      # the length field:
+      c.types.subTree Field:
+        c.types.add Node(kind: Immediate, val: 0)
+        c.types.add Node(kind: Type, val: lengthType)
+      # the payload field:
+      c.types.subTree Field:
+        c.types.add Node(kind: Immediate, val: 8)
+        c.types.add Node(kind: Type, val: pointerType)
 
 proc rawGenProcType(c; typ: SemType): uint32 =
   ## Generates the IL representation for the procedure signature type `typ`
@@ -353,6 +370,31 @@ proc genProcType(c; typ: SemType): uint32 =
   do:
     result = rawGenProcType(c, typ)
     c.procTypeCache[typ] = result
+
+proc genPayloadType(c; typ: SemType): uint32 =
+  ## Generates and emits the payload type for a sequence with the given
+  ## element type (`typ`). Returns the ID of the payload type.
+  # TODO: cache the type description, so that it's only emitted once per
+  #       element type
+  let
+    intType = c.typeToIL(prim(tkInt))
+    elem = c.typeToIL(typ)
+
+  let arrayType = c.addType Array:
+    c.types.add Node(kind: Immediate, val: 1)
+    c.types.add Node(kind: Immediate, val: 0)
+    c.types.add Node(kind: Type, val: elem)
+
+  c.addType Record:
+    c.types.add Node(kind: Immediate, val: 9) # size of int
+    # the capacity field:
+    c.types.subTree Field:
+      c.types.add Node(kind: Immediate, val: 0)
+      c.types.add Node(kind: Type, val: intType)
+    # the data field:
+    c.types.subTree Field:
+      c.types.add Node(kind: Immediate, val: 8)
+      c.types.add Node(kind: Type, val: arrayType)
 
 template buildTree(kind: NodeKind, body: untyped): NodeSeq =
   ## Makes a builder available to `body`, evaluates `body`, and returns the
@@ -932,6 +974,79 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
       # it's the unit value
       bu.add UnitNode
       result = prim(tkUnit) + {}
+  of SourceKind.Seq:
+    let
+      typ = c.expectNot(c.evalType(t, t.child(n, 0)), tkVoid)
+      length = t.len(n)
+    var elems = newSeq[Expr](length - 1)
+
+    # assign all elements to temporaries first, so that the payload is only
+    # allocated when control-flow reaches past the argument expressions
+    block:
+      var i = 0
+      for it in t.items(n, 1):
+        let e = c.capture(c.fitExpr(c.exprToIL(t, it), typ), stmts)
+        elems[i] = Expr(expr: @[e], typ: typ)
+        inc i
+
+    result = SemType(kind: tkSeq, elems: @[typ]) + {}
+
+    var tmp = c.newTemp(result.typ)
+    # emit the length field assignment:
+    stmts.addStmt Asgn:
+      bu.subTree Field:
+        bu.add Node(kind: Local, val: tmp)
+        bu.add Node(kind: Immediate, val: 0)
+      bu.add Node(kind: IntVal, val: c.literals.pack(length))
+
+    # emit the payload field assignment:
+    if length > 0:
+      let size = size(prim(tkInt)) + size(typ) * length
+      # the size of the payload is sizeof(capacity) + sizeof(element) * length
+      stmts.addStmt Asgn:
+        bu.subTree Field:
+          bu.add Node(kind: Local, val: tmp)
+          bu.add Node(kind: Immediate, val: 1)
+        bu.subTree Call:
+          # TODO: use the 'alloc' procedure here
+          bu.add Node(kind: Proc, val: 0)
+          bu.add Node(kind: IntVal, val: c.literals.pack(size))
+
+      # emit the capacity assignment:
+      stmts.addStmt Asgn:
+        bu.subTree Field:
+          bu.subTree Deref:
+            bu.add Node(kind: Type, val: c.genPayloadType(typ))
+            bu.subTree Copy:
+              bu.subTree Field:
+                bu.add Node(kind: Local, val: tmp)
+                bu.add Node(kind: Immediate, val: 1)
+          bu.add Node(kind: Immediate, val: 0)
+        bu.add Node(kind: IntVal, val: c.literals.pack(length))
+
+      # emit the final assignments:
+      for i, it in elems.pairs:
+        stmts.addStmt Asgn:
+          bu.subTree At:
+            bu.subTree Field:
+              bu.subTree Deref:
+                bu.add Node(kind: Type, val: c.genPayloadType(typ))
+                bu.subTree Copy:
+                  bu.subTree Field:
+                    bu.add Node(kind: Local, val: tmp)
+                    bu.add Node(kind: Immediate, val: 1)
+              bu.add Node(kind: Immediate, val: 1)
+            bu.add Node(kind: IntVal, val: c.literals.pack(i))
+          genUse(it.expr, bu)
+    else:
+      # an empty sequence, set the payload pointer to zero (nil)
+      stmts.addStmt Asgn:
+        bu.subTree Field:
+          bu.add Node(kind: Local, val: tmp)
+          bu.add Node(kind: Immediate, val: 1)
+        bu.add Node(kind: IntVal, val: c.literals.pack(0))
+
+    bu.add Node(kind: Local, val: tmp)
   of SourceKind.FieldAccess:
     let
       (a, b) = t.pair(n)

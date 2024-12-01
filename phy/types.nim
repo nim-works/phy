@@ -26,6 +26,7 @@ type
     tkTuple ## an anonymous product type
     tkUnion ## an anonymous sum type
     tkProc
+    tkSeq
 
   SemType* = object
     ## Represents a source-language type. The "Sem" prefix is there to prevent
@@ -33,11 +34,11 @@ type
     case kind*: TypeKind
     of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:
       discard
-    of tkTuple, tkUnion, tkProc:
+    of tkTuple, tkUnion, tkProc, tkSeq:
       elems*: seq[SemType]
 
 const
-  AggregateTypes* = {tkTuple, tkUnion}
+  AggregateTypes* = {tkTuple, tkUnion, tkSeq}
   ComplexTypes*   = AggregateTypes + {tkProc}
     ## non-primitive types
 
@@ -53,7 +54,7 @@ proc cmp*(a, b: SemType): int =
   case a.kind
   of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:
     result = 0 # equal
-  of tkTuple, tkUnion, tkProc:
+  of tkTuple, tkUnion, tkProc, tkSeq:
     result = a.elems.len - b.elems.len
     if result != 0:
       return
@@ -84,7 +85,7 @@ proc `==`*(a, b: SemType): bool =
   case a.kind
   of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:
     result = true
-  of tkTuple, tkUnion, tkProc:
+  of tkTuple, tkUnion, tkProc, tkSeq:
     result = a.elems == b.elems
 
 proc isSubtypeOf*(a, b: SemType): bool =
@@ -117,6 +118,8 @@ proc size*(t: SemType): int =
     for it in t.elems.items:
       s = max(s, size(it))
     s + 8 # +8 for the tag
+  of tkSeq:
+    size(prim(tkInt)) * 2 # length + pointer
 
 proc commonType*(a, b: SemType): SemType =
   ## Finds the common type between `a` and `b`, or produces an error.
