@@ -70,6 +70,16 @@ The `proc(R, T0, ..., Tn)` type constructor constructs a type that is inhabited
 by all procedure who take `T0` through `Tn` as parameters and return a value of
 type `R`. The parameter type order is significant.
 
+#### Other Types
+
+The `seq(T)` type constructor construct a dynamic array type (that is, an array
+whose size is dynamic and determined at run time), with elements of type `T`.
+The `seq` type is *not* covariant.
+
+> Note: the language built-in `seq` type is an interim solution. The type is
+> going to be turned into a standard-library / system type once the language
+> supports user-defined type constructors.
+
 ### Values, Objects, Locations, Cells, and Handles
 
 A *value* is something that inhabits a type. An *aggregate value* is a value
@@ -439,6 +449,38 @@ The type of an assignment is always `unit`.
 **Expression kind**: r-value
 **Uses**: the `rhs` expression
 
+#### `Seq`
+
+```grammar
+expr += (Seq typ:<type_expr> args:<expr>*)
+```
+
+Constructs a dynamic array (i.e., sequence) with element type `T`, where `T` is
+the type `typ` evaluates to. The number of elements in the constructed
+sequence are equal to the number of arguments (`args`) in the constructor, with
+each element initialized to the value of the respective argument.
+
+Evaluation of the constructor happens as follows:
+1. for each argument, going from left to right:
+  1. a temporary location is created
+  2. the argument is evaluated and the resulting |object| is assigned to the
+     temporary as if done by `Asgn`
+2. the sequence is constructed, with the |object| from each temporary *moved* into
+   the respective sequence slot
+
+If control-flow leaves the `Seq` expression before all argument expressions were
+fully evaluated, all |object|s created up until this point are immediately
+destroyed.
+
+Let `T` be the type `typ` evaluates to. An error is reported if:
+* `T` is type `void`
+* the type of any element expression is neither equal to nor a subtype of `T`
+
+The expression is of type `seq(T)`.
+
+**Expression kind**: r-value
+**Uses**: every argument expression
+
 ### Type Expressions
 
 ```grammar
@@ -495,6 +537,14 @@ type_expr += (ProcTy ret:<type_expr> params:<type_expr>*)
 
 Constructs the type `proc(ret, params[0], ..., params[n])`. An error is
 reported if any of the provided *parameter* types is the `void` type.
+
+#### Sequence Type Constructors
+
+```grammar
+type_expr += (SeqTy elem:<type_expr>)
+```
+
+Constructs the type `seq(elem)`. An error is reported if `elem` is type `void`.
 
 ### Declarations
 
