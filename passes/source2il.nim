@@ -104,6 +104,9 @@ const
     "<=": ekBuiltinProc,
     "<": ekBuiltinProc,
     "not": ekBuiltinProc,
+    "len": ekBuiltinProc,
+    "add": ekBuiltinProc,
+    "clear": ekBuiltinProc,
     "true": ekBuiltinVal,
     "false": ekBuiltinVal
   }.toTable
@@ -753,6 +756,60 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
         result = relToIL(c, t, n, name, bu, stmts)
       of "not":
         result = notToIL(c, t, n, bu, stmts)
+      of "len":
+        lenCheck(t, n, bu, 1)
+        let e = c.exprToIL(t, t.child(n, 1))
+        if e.typ.kind != tkSeq:
+          c.error("'len' operand must be of sequence type")
+        bu.subTree Field:
+          bu.inline(c.exprToIL(t, t.child(n, 1)), stmts)
+          bu.add Node(kind: Immediate, val: 0)
+        result = prim(tkInt)
+      of "add":
+        lenCheck(t, n, bu, 2)
+        let s    = c.exprToIL(t, t.child(n, 1))
+        var elem = c.exprToIL(t, t.child(n, 2))
+        if s.typ.kind != tkSeq:
+          c.error("'add' expects sequence operand")
+        elif s.attribs * {Mutable, Lvalue} <= {Mutable, Lvalue}:
+          c.error("'add' expects mutable lvalue sequence operand")
+        else:
+          # fit to the element type
+          elem = c.fitExpr(elem, s.typ.elems[0])
+
+        if elem.typ.kind == tkVoid:
+          c.error("void expression is not allowed in this context")
+          elem.typ = errorType()
+
+        stmts.addStmt Store:
+          bu.add Node(kind: Type, val: c.typeToIL(elem.typ))
+          bu.subTree Call:
+            # TODO: call the 'prepareAdd' procedure here
+            bu.add Node(kind: Proc, val: 0)
+            bu.subTree Addr:
+              bu.inline(s, stmts)
+            bu.add Node(kind: IntVal, val: c.literals.pack(size(elem.typ)))
+          genUse(elem, bu, stmts)
+
+        bu.add UnitNode
+        result = prim(tkUnit)
+      of "clear":
+        lenCheck(t, n, bu, 2)
+        let s = c.exprToIL(t, t.child(n, 1))
+        if s.typ.kind != tkSeq:
+          c.error("'clear' expects sequence operand")
+        elif s.attribs * {Mutable, Lvalue} <= {Mutable, Lvalue}:
+          c.error("'clear' expects mutable lvalue sequence operand")
+
+        # set the length back to zero, but leave the capacity as is
+        stmts.addStmt Asgn:
+          bu.subTree Field:
+            bu.inline(s, stmts)
+            bu.add Node(kind: Immediate, val: 0)
+          bu.add Node(kind: IntVal, val: c.literals.pack(0))
+
+        bu.add UnitNode
+        result = prim(tkUnit)
       else:
         unreachable()
       return
