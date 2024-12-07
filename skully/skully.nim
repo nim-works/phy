@@ -236,9 +236,10 @@ proc genField(c; env: MirEnv; e: Expr; pos: int32, bu) =
 
   proc findField(env: TypeEnv, typ: TypeId, id: FieldId,
                  steps: var seq[uint32]): bool =
+    let desc = env.headerFor(typ, Lowered)
     var pos = 0
     block search:
-      for (f, recf) in env.fields(env.headerFor(typ, Lowered)):
+      for (f, recf) in env.fields(desc):
         if env.headerFor(recf.typ, Canonical).kind == tkTaggedUnion:
           # a tagged union field counts as two: one for the tag, and one for
           # the union
@@ -261,6 +262,10 @@ proc genField(c; env: MirEnv; e: Expr; pos: int32, bu) =
 
       # not found
       return false
+
+    if desc.kind == tkRecord and desc.base(env) != VoidType:
+      # account forthe base field (which is located at he start of the record)
+      inc pos
 
     result = true
     steps.add uint32(pos)
