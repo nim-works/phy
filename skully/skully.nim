@@ -249,6 +249,8 @@ proc genField(c; env: MirEnv; e: Expr; pos: int32, bu) =
               # the tag is part of the embedder
               steps.del(steps.high)
               dec pos
+            else:
+              dec steps[^1]
             break search
         elif env[recf.typ].isNil and
              env.headerFor(recf.typ, Canonical).kind == tkRecord:
