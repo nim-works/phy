@@ -1609,8 +1609,20 @@ proc translate(c; env: TypeEnv, id: TypeId, bu) =
       bu.add node(Immediate, 1)
       bu.add typeRef(c, env, desc.elem())
   of tkRecord, tkUnion:
+    let size =
+      if desc.size(env) >= 0:
+        desc.size(env)
+      elif env[id] != nil and
+           env[id].skipTypes(abstractVar).kind == tyOpenArray:
+        # the size for openArrays is never filled in correctly; we have to
+        # manually correct it here
+        c.graph.config.target.ptrSize * 2
+      else:
+        szUnknownSize
+
+    assert size >= 0
     bu.subTree Record:
-      bu.add node(Immediate, desc.size(env).uint32)
+      bu.add node(Immediate, size.uint32)
 
       if desc.kind == tkRecord and desc.base(env) != VoidType:
         # the inherited-from type is added as the first field
