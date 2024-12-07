@@ -1,5 +1,5 @@
 import
-  std/[importutils, monotimes, os, strtabs, tables, times],
+  std/[importutils, monotimes, os, strtabs, packedsets, tables, times],
   compiler/front/[
     options,
     cli_reporter,
@@ -65,6 +65,8 @@ type
   ProcContext = object
     localMap: Table[LocalId, uint32]
     labelMap: Table[LabelId, uint32]
+    passByRef: PackedSet[LocalId]
+      ## all parameters that use high-level pass-by-reference
     nextLabel: uint32
     nextLocal: uint32
     temps: seq[TypeId]
@@ -117,6 +119,14 @@ using
   n: NodePosition
   stmts: var Builder[NodeKind]
   c: var Context
+
+func isPassByRef(env: TypeEnv; typ: TypeId, param: int): bool =
+  # XXX: the MIR type API doesn't support querying the a proc type
+  #      parameter by position...
+  for (i, _, flags) in env.params(env.headerFor(typ, Canonical)):
+    if i == param:
+      return pfByRef in flags
+  unreachable()
 
 iterator items(tree: MirTree, n: NodePosition, start: int, last: BackwardsIndex): NodePosition =
   var it = tree.child(n, start)
@@ -304,9 +314,19 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
     bu.add node(IntVal, c.lit.pack(env.getInt(tree[n].number)))
   of mnkFloatLit:
     bu.add node(FloatVal, c.lit.pack(env.getFloat(tree[n].number)))
-  of mnkTemp, mnkLocal, mnkParam:
+  of mnkTemp, mnkLocal:
     wrapCopy:
       bu.add node(Local, c.prc.localMap[tree[n].local])
+  of mnkParam:
+    if tree[n].local in c.prc.passByRef:
+      # needs a pointer indirection
+      bu.subTree (if wantValue: Load else: Deref):
+        bu.add typeRef(c, env, tree[n].typ)
+        bu.subTree Copy:
+          bu.add node(Local, c.prc.localMap[tree[n].local])
+    else:
+      wrapCopy:
+        bu.add node(Local, c.prc.localMap[tree[n].local])
   of mnkAlias:
     bu.subTree (if wantValue: Load else: Deref):
       bu.add typeRef(c, env, tree[n].typ)
@@ -976,16 +996,18 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         else:
           CheckedCallAsgn
 
-      proc genOperands(c; env: var MirEnv; tree; n; bu) {.nimcall.} =
+      proc genOperands(c; env: var MirEnv; tree; n; bu; stmts) {.nimcall.} =
         var isClosure: bool
+        var typ: TypeId ## type of the callee
 
         if tree[n, 1].kind == mnkProc:
           # a static call
+          typ = env.types.add(env[tree[n, 1].prc].typ)
           bu.add node(Proc, tree[n, 1].prc.uint32)
           isClosure = false
         else:
           # a dynamic call
-          let typ = env.types.canonical(tree[n, 1].typ)
+          typ = env.types.canonical(tree[n, 1].typ)
           isClosure = env.types.headerFor(typ, Canonical).kind == tkClosure
 
           bu.add c.genProcType(env, typ)
@@ -997,14 +1019,26 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
           else:
             value(tree.child(n, 1))
 
+        var i = 0
         for kind, _, it in tree.arguments(n):
-          case kind
-          of mnkArg, mnkConsume:
-            # ignore compile-time-only arguments
-            if tree[it].kind != mnkNone:
+          # ignore compile-time-only arguments
+          if tree[it].kind != mnkNone:
+            # note: not all pass-by-reference arguments use the ``mnkName`` mode
+            if kind == mnkName or isPassByRef(env.types, typ, i):
+              if tree[it].kind in LiteralDataNodes:
+                # the expression doesn't have an address; introduce a temporary
+                let tmp = c.newTemp(tree[it].typ)
+                stmts.addStmt Asgn:
+                  bu.add node(Local, tmp)
+                  value(it)
+                bu.subTree Addr:
+                  bu.add node(Local, tmp)
+              else:
+                takeAddr NodePosition(it)
+            else:
               value(it)
-          of mnkName:
-            takeAddr NodePosition(it)
+
+          inc i
 
         if isClosure:
           # pass the environment to the procedure
@@ -1021,16 +1055,16 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         let tmp = c.newTemp(tree[n].typ)
         stmts.addStmt CheckedCallAsgn:
           bu.add node(Local, tmp)
-          c.genOperands(env, tree, n, bu)
+          c.genOperands(env, tree, n, bu, stmts)
 
         wrapAsgn Copy:
           bu.add node(Local, tmp)
       elif tree[n].typ == VoidType:
         stmts.addStmt kind:
-          c.genOperands(env, tree, n, bu)
+          c.genOperands(env, tree, n, bu, stmts)
       else:
         wrapAsgn kind:
-          c.genOperands(env, tree, n, bu)
+          c.genOperands(env, tree, n, bu, stmts)
   of mnkAddr, mnkView, mnkMutView:
     wrapAsgn:
       takeAddr tree.child(n, 0)
@@ -1403,9 +1437,12 @@ proc complete(c; env: MirEnv, typ: Node, prc: ProcContext, body: MirBody,
   var bu = initBuilder[NodeKind](ProcDef)
   bu.add typ
   bu.subTree Locals:
-    for it in body.locals.items:
+    for id, it in body.locals.pairs:
       if env.types.canonical(it.typ) != VoidType:
-        bu.add typeRef(c, env, it.typ)
+        if id in prc.passByRef:
+          bu.add typeRef(c, env, PointerType)
+        else:
+          bu.add typeRef(c, env, it.typ)
 
     for it in c.prc.temps.items:
       bu.add typeRef(c, env, it)
@@ -1501,6 +1538,13 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
       else:
         c.prc.localMap[id] = uint32(id.ord - bias)
 
+    let procType = env.types.add(evt.sym.typ)
+    # gather the parameters that use pass-by-reference
+    c.prc.passByRef.clear()
+    for (i, _, flags) in env.types.params(env.types.headerFor(procType, Canonical)):
+      if pfByRef in flags:
+        c.prc.passByRef.incl LocalId(i + 1)
+
     c.prc.nextLabel = body.nextLabel.uint32
     c.prc.nextLocal = uint32(body.locals.nextId.ord - bias)
     c.prc.active = true
@@ -1520,7 +1564,7 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
 
       bu.finish()
 
-    let typ = c.genProcType(env, env.types.add(evt.sym.typ))
+    let typ = c.genProcType(env, procType)
     bodies[evt.id] = c.complete(env, typ, c.prc, body, content)
   else:
     discard
@@ -1536,7 +1580,10 @@ proc translateProcType(c; env: TypeEnv, id: TypeId, bu) =
     for (i, typ, flags) in env.params(desc):
       # exclude compile-time-only parameters
       if env.canonical(typ) != VoidType:
-        bu.add typeRef(c, env, typ)
+        if pfByRef in flags:
+          bu.add typeRef(c, env, PointerType)
+        else:
+          bu.add typeRef(c, env, typ)
 
 proc translate(c; env: TypeEnv, id: TypeId, bu) =
   let desc = env.headerFor(id, Lowered)
