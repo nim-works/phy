@@ -882,6 +882,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
           bu.add compilerProc(c, env, "appendChar")
           bu.subTree Addr:
             bu.add node(Local, temp)
+          value(it)
       else:
         stmts.addStmt Call:
           bu.add compilerProc(c, env, "appendString")
