@@ -1727,6 +1727,9 @@ proc compile(graph: ModuleGraph) =
     let s = graph.systemModuleSym(graph.cache.getIdent("TFrame"))
     s.flags.excl sfImportc
     s.extFlags.excl exfNoDecl
+    # recompute the size:
+    s.typ.size = szUncomputedSize
+    discard graph.config.getSize(s.typ)
 
   # --- run the MIR processing and translate the MIR code
   let config =
