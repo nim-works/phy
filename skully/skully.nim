@@ -602,16 +602,17 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   of mIsNil:
     wrapAsgn Eq:
       let arg = tree.argument(n, 0)
-      if env.types.headerFor(tree[arg].typ, Lowered).kind == tkProc:
-        bu.add typeRef(c, env, tree[arg].typ)
-        value(arg)
-      else:
+      case env.types.headerFor(tree[arg].typ, Lowered).kind
+      of tkClosure:
         # must be a closure
         bu.add typeRef(c, env, tree[arg].typ)
         bu.subTree Copy:
           bu.subTree Field:
             lvalue(arg)
             bu.add node(Immediate, 0)
+      else:
+        bu.add typeRef(c, env, tree[arg].typ)
+        value(arg)
       bu.add node(IntVal, 0)
   of mAddU, mSubU, mMulU, mDivU, mModU:
     const Map = [mAddU: Add, mSubU: Sub, mMulU: Mul, mDivU: Div, mModU: Mod]
