@@ -1572,10 +1572,12 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
   of bekDiscovered:
     case evt.entity.kind
     of mnkGlobal:
-      c.globalsMap[evt.entity.global] = c.newGlobal(env, evt.entity.typ)
+      c.globalsMap[evt.entity.global] =
+        c.newGlobal(env, env.types.add(env[evt.entity.global].typ))
     of mnkConst:
       # constants are translated to IL globals too
-      c.constMap[evt.entity.cnst] = c.newGlobal(env, evt.entity.typ)
+      c.constMap[evt.entity.cnst] =
+        c.newGlobal(env, env.types.add(env[evt.entity.cnst].typ))
     of mnkProc:
       let prc = env.procedures[evt.entity.prc]
       if sfImportc in prc.flags:
