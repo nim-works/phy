@@ -1853,8 +1853,12 @@ proc main(args: openArray[string]) =
   config.backend = backendC
   initDefines(config.symbols)
 
+  # the maximum heap size is fixed at compile-time, with the possibility to
+  # override the default value
+  if not isDefined(config, "StandaloneHeapSize"):
+    defineSymbol(config, "StandaloneHeapSize", $(1024 * 1024 * 100)) # 100 MiB
+
   # replace some system modules:
-  replaceModule(config, "system/osalloc", "osalloc.nim")
   replaceModule(config, "pure/os", "os.nim")
 
   # add the overrides module as an implicit import, so that the hook
