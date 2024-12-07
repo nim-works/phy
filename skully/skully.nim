@@ -1585,6 +1585,9 @@ proc translateProcType(c; env: TypeEnv, id: TypeId, bu) =
         else:
           bu.add typeRef(c, env, typ)
 
+    if desc.callConv(env) == ccClosure:
+      bu.add typeRef(c, env, PointerType)
+
 proc translate(c; env: TypeEnv, id: TypeId, bu) =
   let desc = env.headerFor(id, Lowered)
   case desc.kind
