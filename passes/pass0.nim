@@ -671,18 +671,14 @@ proc translate*(module: PackedTree[NodeKind]): VmModule =
 
   # add the defined globals to the environment:
   for def in module.items(globals):
-    # the type is inferred from the value's node kind
-    let val =
-      case module[def].kind
-      of FloatVal:
-        TypedValue(val: cast[Value](getFloat(module, def)), typ: vtFloat)
-      of IntVal:
+    let (typ, val) = module.pair(def)
+    result.globals.add:
+      case parseType(module, types, typ).kind
+      of t0kFloat:
+        TypedValue(val: cast[Value](getFloat(module, val)), typ: vtFloat)
+      of t0kInt, t0kUInt:
         # signedness doesn't matter here
-        TypedValue(val: cast[Value](getUInt(module, def)), typ: vtInt)
-      else:
-        unreachable()
-
-    result.globals.add val
+        TypedValue(val: cast[Value](getUInt(module, val)), typ: vtInt)
 
   # generate the code for the procedures and add them to the environment:
   for i, def in module.pairs(procs):
