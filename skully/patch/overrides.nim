@@ -60,8 +60,20 @@ proc hook_c_memchr(cstr: pointer, c: char, n: csize_t
 
   result = nil
 
-proc hook_nimModInt(a, b: int): int {.compilerproc.} =
-  a mod b
+proc hook_nimModInt(a, b: int, p: ptr int): bool {.compilerproc.} =
+  p[] = a mod b
+
+proc hook_nimModInt8(a, b: int8, p: ptr int8): bool {.compilerproc.} =
+  p[] = a mod b
+
+proc hook_nimModInt16(a, b: int16, p: ptr int16): bool {.compilerproc.} =
+  p[] = a mod b
+
+proc hook_nimModInt32(a, b: int32, p: ptr int32): bool {.compilerproc.} =
+  p[] = a mod b
+
+proc hook_nimModInt64(a, b: int64, p: ptr int64): bool {.compilerproc.} =
+  p[] = a mod b
 
 proc hook_likelyProc(a: bool): bool {.compilerproc.} =
   a
