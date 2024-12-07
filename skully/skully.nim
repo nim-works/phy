@@ -66,8 +66,8 @@ type
   ProcContext = object
     localMap: Table[LocalId, uint32]
     labelMap: Table[LabelId, uint32]
-    passByRef: PackedSet[LocalId]
-      ## all parameters that use high-level pass-by-reference
+    indirectLocals: PackedSet[LocalId]
+      ## all locals that are references and not locals with storage
     nextLabel: uint32
     nextLocal: uint32
     temps: seq[TypeId]
@@ -338,10 +338,11 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
   of mnkFloatLit:
     bu.add node(FloatVal, c.lit.pack(env.getFloat(tree[n].number)))
   of mnkTemp, mnkLocal:
+    # MIR temporaries and locals can never be references
     wrapCopy:
       bu.add node(Local, c.prc.localMap[tree[n].local])
   of mnkParam:
-    if tree[n].local in c.prc.passByRef:
+    if tree[n].local in c.prc.indirectLocals:
       # needs a pointer indirection
       bu.subTree (if wantValue: Load else: Deref):
         bu.add typeRef(c, env, tree[n].typ)
@@ -1295,13 +1296,19 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
   #      properly
 
   case tree[n].kind
-  of mnkAsgn, mnkSwitch, mnkDef, mnkDefCursor, mnkInit, mnkBind, mnkBindMut:
+  of mnkAsgn, mnkSwitch, mnkDef, mnkDefCursor, mnkInit:
     guardActive()
     let dest = c.gen(env, tree, tree.child(n, 0), false)
     if tree[n, 1].kind != mnkNone:
       c.translateExpr(env, tree, tree.child(n, 1), dest, stmts)
     else:
       c.genDefault(env, dest, tree[n, 0].typ, stmts)
+  of mnkBind, mnkBindMut:
+    guardActive()
+    c.prc.indirectLocals.incl tree[n, 0].local
+    stmts.addStmt Asgn:
+      bu.add node(Local, c.prc.localMap[tree[n, 0].local])
+      takeAddr(c.gen(env, tree, tree.child(n, 1), false), bu)
   of mnkVoid:
     guardActive()
     c.translateExpr(env, tree, tree.child(n, 0), Expr(typ: VoidType), stmts)
@@ -1492,6 +1499,7 @@ proc reset(c: var ProcContext) =
   c.localMap.clear()
   c.labelMap.clear()
   c.temps.shrink(0)
+  c.indirectLocals.clear()
 
 proc complete(c; env: MirEnv, typ: Node, prc: ProcContext, body: MirBody,
               content: seq[Node]): seq[Node] =
@@ -1503,7 +1511,7 @@ proc complete(c; env: MirEnv, typ: Node, prc: ProcContext, body: MirBody,
   bu.subTree Locals:
     for id, it in body.locals.pairs:
       if env.types.canonical(it.typ) != VoidType:
-        if id in prc.passByRef:
+        if id in prc.indirectLocals:
           bu.add typeRef(c, env, PointerType)
         else:
           bu.add typeRef(c, env, it.typ)
@@ -1604,10 +1612,9 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
 
     let procType = env.types.add(evt.sym.typ)
     # gather the parameters that use pass-by-reference
-    c.prc.passByRef.clear()
     for (i, _, flags) in env.types.params(env.types.headerFor(procType, Canonical)):
       if pfByRef in flags:
-        c.prc.passByRef.incl LocalId(i + 1)
+        c.prc.indirectLocals.incl LocalId(i + 1)
 
     c.prc.nextLabel = body.nextLabel.uint32
     c.prc.nextLocal = uint32(body.locals.nextId.ord - bias)
