@@ -1170,7 +1170,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       # either the target or source type is an aggregate type -> use a blit copy
       let size = min(env.types.headerFor(dst, Lowered).size(env.types),
                      env.types.headerFor(src, Lowered).size(env.types))
-      stmts.addStmt Copy:
+      stmts.addStmt Blit:
         takeAddr(dest, bu)
         takeAddr tree.child(n, 0)
         bu.add node(IntVal, c.lit.pack(size))
@@ -1542,20 +1542,15 @@ proc translate(c; env: TypeEnv, id: TypeId, bu) =
   let desc = env.headerFor(id, Lowered)
   case desc.kind
   of tkInt:
-    bu.subTree Int:
-      bu.add node(Immediate, desc.size(env).uint32)
+    bu.add node(Int, desc.size(env).uint32)
   of tkFloat:
-    bu.subTree Float:
-      bu.add node(Immediate, desc.size(env).uint32)
+    bu.add node(Float, desc.size(env).uint32)
   of tkUInt:
-    bu.subTree UInt:
-      bu.add node(Immediate, desc.size(env).uint32)
+    bu.add node(UInt, desc.size(env).uint32)
   of tkPointer:
-    bu.subTree UInt:
-      bu.add node(Immediate, desc.size(env).uint32)
+    bu.add node(UInt, desc.size(env).uint32)
   of tkBool, tkChar:
-    bu.subTree UInt:
-      bu.add node(Immediate, 1)
+    bu.add node(UInt, 1)
   of tkArray:
     bu.subTree Array:
       bu.add node(Immediate, desc.size(env).uint32)
