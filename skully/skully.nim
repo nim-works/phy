@@ -830,6 +830,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       inc i
 
     stmts.addStmt Asgn:
+      bu.add node(Local, temp)
       bu.subTree Call:
         bu.add compilerProc(c, env, "rawNewString")
         bu.add nodes # the length expression
