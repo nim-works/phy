@@ -897,7 +897,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     wrapAsgn Call:
       bu.add compilerProc(c, env, "nimParseBiggestFloat")
       value(tree.argument(n, 0))
-      value(tree.argument(n, 1))
+      takeAddr NodePosition(tree.argument(n, 1))
       value(tree.argument(n, 2))
   of mAppendStrCh:
     stmts.addStmt Call:
