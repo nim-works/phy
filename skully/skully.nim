@@ -120,6 +120,10 @@ using
   stmts: var Builder[NodeKind]
   c: var Context
 
+func payloadType(env: TypeEnv, typ: TypeId): TypeId =
+  ## Returns the ID of a seq/string type's payload type.
+  env.headerFor(env[env.lookupField(typ, 1)].typ, Canonical).elem()
+
 func isPassByRef(env: TypeEnv; typ: TypeId, param: int): bool =
   # XXX: the MIR type API doesn't support querying the a proc type
   #      parameter by position...
@@ -381,7 +385,7 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
       wrapCopy At:
         bu.subTree Field:
           bu.subTree Deref:
-            bu.add node(Type, 0) # TODO: use the correct type
+            bu.add typeRef(c, env, payloadType(env.types, typ))
             bu.subTree Copy:
               bu.subTree Field:
                 recurse(tree.child(n, 0), false)
@@ -1132,7 +1136,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         bu.subTree At:
           bu.subTree Field:
             bu.subTree Deref:
-              bu.add node(Type, 0)
+              bu.add typeRef(c, env, payloadType(env.types, tree[n].typ))
               bu.subTree Copy:
                 bu.subTree Field:
                   bu.add dest.nodes
@@ -1169,7 +1173,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
           bu.subTree Addr:
             bu.subTree Field:
               bu.subTree Deref:
-                bu.add typeRef(c, env, elem(env.types.headerFor(env.types[env.types.lookupField(tree[n, 0].typ, 1)].typ, Canonical)))
+                bu.add typeRef(c, env, payloadType(env.types, tree[n, 0].typ))
                 bu.subTree Copy:
                   bu.subTree Field:
                     lvalue(tree.child(n, 0))
