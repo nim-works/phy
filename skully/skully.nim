@@ -928,9 +928,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     stmts.join els
   of mExit:
     # TODO: implement properly
-    # the control-flow path needs to be marked as unreachable:
-    stmts.addStmt Unreachable:
-      discard
+    discard
   of mEcho:
     # emit the array construction:
     let tmp = c.newTemp(tree[tree.argument(n, 0)].typ)
@@ -1269,8 +1267,9 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
     if tree[n, 0].kind in {mnkCall, mnkCheckedCall}:
       # handle noreturn calls; they need to be followed by an Unreachable
       let callee = tree.callee(tree.child(n, 0))
-      if tree[callee].kind == mnkProc and
-         sfNoReturn in env[tree[callee].prc].flags:
+      if (tree[callee].kind == mnkMagic and tree[callee].magic == mExit) or
+         (tree[callee].kind == mnkProc and
+          sfNoReturn in env[tree[callee].prc].flags):
         stmts.addStmt Unreachable:
           discard
         c.prc.active = false
