@@ -194,6 +194,16 @@ proc typeRef(c; env: TypeEnv, typ: TypeId): Node =
 proc typeRef(c; env: MirEnv, typ: TypeId): Node =
   typeRef(c, env.types, typ)
 
+proc genFlexArrayType(c; env: TypeEnv; typ: TypeId): uint32 =
+  ## Returns the IL type ID of an array type with unknown length.
+  var bu = initBuilder[NodeKind](Array)
+  # size and number don't matter, but use the minimum possible value to be
+  # safe
+  bu.add node(Immediate, 1) # size
+  bu.add node(Immediate, 0) # elements
+  bu.add typeRef(c, env, typ)
+  result = c.types.mgetOrPut(finish(bu), c.types.len.uint32)
+
 proc request(c: var ProcContext; label: LabelId): uint32 =
   if label in c.labelMap:
     result = c.labelMap[label]
@@ -370,7 +380,8 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
     recurse(tree.child(n, 0), false)
   of mnkPathArray:
     let typ = env.types.canonical(tree[n, 0].typ)
-    case env.types.headerFor(typ, Canonical).kind
+    let desc = env.types.headerFor(typ, Canonical)
+    case desc.kind
     of tkArray, tkUncheckedArray:
       wrapCopy At:
         recurse(tree.child(n, 0), false)
@@ -378,7 +389,7 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
     of tkCstring:
       wrapCopy At:
         bu.subTree Deref:
-          bu.add node(Type, 0) # TODO: use the correct type
+          bu.add node(Type, c.genFlexArrayType(env.types, CharType))
           recurse(tree.child(n, 0), true)
         recurse(tree.child(n, 1), true)
     of tkSeq, tkString:
@@ -395,7 +406,7 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
     of tkOpenArray:
       wrapCopy At:
         bu.subTree Deref:
-          bu.add node(Type, 0) # TODO: use the correct type
+          bu.add node(Type, c.genFlexArrayType(env.types, elem(desc)))
           bu.subTree Copy:
             bu.subTree Field:
               recurse(tree.child(n, 0), false)
