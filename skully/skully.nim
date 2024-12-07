@@ -19,7 +19,8 @@ import
     ast_types,
     ast_query,
     idents,
-    lineinfos
+    lineinfos,
+    types
   ],
   compiler/modules/[
     modulegraphs,
@@ -118,6 +119,7 @@ using
   tree: MirTree
   n: NodePosition
   stmts: var Builder[NodeKind]
+  env: MirEnv
   c: var Context
 
 func payloadType(env: TypeEnv, typ: TypeId): TypeId =
@@ -422,7 +424,45 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
     else:
       unreachable()
   of mnkPathConv:
-    recurse(tree.child(n, 0), wantValue)
+    let a = env.types.canonical(tree[n].typ)
+    let b = env.types.canonical(tree[n, 0].typ)
+    if a == b:
+      # same canonical type (happens for lvalue conversions involving
+      # ``distinct`` types); a no-op
+      recurse(tree.child(n, 0), wantValue)
+    else:
+      # it's either a down or up conversion
+      let diff = inheritanceDiff(env.types[a].skipTypes(skipPtrs),
+                                 env.types[b].skipTypes(skipPtrs))
+      if diff < 0:
+        # it's an object up conversion. The argument can either be a
+        # pointer-to-object or object
+        const PointerLike = {tkVar, tkLent, tkRef, tkPtr}
+
+        proc emit(c; env; tree; n; diff: int, src: TypeId, bu) {.nimcall.} =
+          if diff == 0:
+            if env.types.headerFor(src, Lowered).kind in PointerLike:
+              bu.subTree Deref:
+                bu.add typeRef(c, env, env.types.headerFor(src, Lowered).elem())
+                recurse(n, true)
+            else:
+              recurse(n, false)
+          else:
+            bu.subTree Field:
+              emit(c, env, tree, n, diff + 1, src, bu)
+              bu.add node(Immediate, 0)
+
+        if env.types.headerFor(b, Lowered).kind in PointerLike:
+          bu.subTree Addr:
+            emit(c, env, tree, tree.child(n, 0), diff, b, bu)
+        else:
+          wrapCopy:
+            emit(c, env, tree, tree.child(n, 0), diff, b, bu)
+      else:
+        # TODO: implement
+        recurse(tree.child(n, 0), wantValue)
+        echo "missing down-conversion"
+
   of mnkStrLit, mnkAstLit:
     unreachable()
   of AllNodeKinds - LvalueExprKinds - LiteralDataNodes - {mnkProcVal}:
