@@ -1727,14 +1727,12 @@ proc translate(c; env: TypeEnv, id: TypeId, bu) =
             bu.add node(Immediate, recf.offset.uint32)
             bu.add typeRef(c, env, recf.typ)
   of tkImported:
-    # TODO: imported types need to be handled differently. Either the target
-    #       IL needs to support them, or they have to treated as their
-    #       "underlying" type for now
-    bu.subTree Record:
-      bu.add node(Immediate, 0)
-      bu.subTree Field:
-        bu.add node(Immediate, 0)
-        bu.add node(Type, CharType.uint32)
+    # treat imported types as if they were equivalent to their "underlying"
+    # type
+    # XXX: in the longer term, and once the ILs are extended sufficiently, an
+    #      "imported" type needs to be translated to the appropriate foreign
+    #      type
+    translate(c, env, elem(desc), bu)
   of tkTaggedUnion:
     # only generate the union part, the tag field is inlined into the embedder
     bu.subTree Record:
