@@ -1261,8 +1261,11 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   of mnkCast:
     let dst = env.types.canonical(tree[n].typ)
     let src = env.types.canonical(tree[n, 0].typ)
-    if dst == src:
-      discard "a no-op"
+    let tdst = c.genType(env.types, dst)
+    let tsrc = c.genType(env.types, src)
+    if tdst == tsrc:
+      # a no-op; assign the source expression unchanged
+      genAsgn(dest, c.gen(env, tree, tree.child(n, 0), true), stmts)
     elif env.types.headerFor(dst, Lowered).kind in {tkRecord, tkArray, tkUnion} or
          env.types.headerFor(src, Lowered).kind in {tkRecord, tkArray, tkUnion}:
       # either the target or source type is an aggregate type -> use a blit copy
