@@ -201,9 +201,6 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
   template instrA(): Instr =
     makeInstr(s.parseIntLike(int32), 0, 0)
 
-  template instrAB(): Instr =
-    makeInstr(s.parseIntLike(int32), (s.space(); s.parseIntLike(int8)))
-
   template instrAC(): Instr =
     makeInstr(s.parseIntLike(int32), 0, (s.space(); s.parseIntLike(int8)))
 
@@ -236,7 +233,7 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
   of opcCall:
     makeInstr(int32 a.procs[s.ident()], (s.space(); s.parseIntLike(int16)))
   of opcIndCall:
-    instrAB()
+    makeInstr(int32 a.types[s.ident()], (s.space(); s.parseIntLike(int16)))
   of opcGetLocal, opcSetLocal, opcPopLocal:
     makeInstr(a.prc.localLookup[s.ident()])
   of opcGetGlobal:
