@@ -360,12 +360,12 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
   c.pinned.clear()
   c.map.clear()
 
-  c.locals = tree.child(n, 1)
-  c.conts = tree.child(n, 2)
+  c.locals = tree.child(n, 2)
+  c.conts = tree.child(n, 3)
 
   # disable the SSA from for all locals that need to be pinned in memory. Addr
   # operations can be nested, so don't use filter
-  for it in tree.flat(tree.child(n, 2)):
+  for it in tree.flat(c.conts):
     if tree[it].kind == Addr:
       var it = tree.child(it, 0)
       # skip paths:
@@ -375,10 +375,10 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
       if tree[it].kind == Local:
         c.pinned.incl tree[it].id
 
-  # add the entry basic block and register all procedure parameters with it:
+  # add the entry BB:
   c.bblocks.add BBlock(stmts: tree.child(c.conts, 0) .. c.conts)
-  for i in 1..<tree.len(c.lookup(tree, tree[n, 0].typ)):
-    c.bblocks[0].params.add LocalId(i - 1)
+  for it in tree.items(tree.child(n, 1)):
+    c.bblocks[0].params.add tree[it].id
 
   # scan the body:
   for it in tree.items(c.conts):
@@ -500,7 +500,8 @@ proc lowerProc(c: var PassCtx, tree; n; changes) =
   for it in c.returns.items:
     c.bblocks[it].outgoing.add c.bblocks.len.int32
 
-  changes.remove(tree, n, 1) # remove the list of locals
+  changes.remove(tree, n, 1) # remove the parameter list
+  changes.remove(tree, n, 2) # remove the list of locals
   changes.replace(c.conts, Continuations):
     for it in c.bblocks.items:
       c.genBlock(tree, it, bu)

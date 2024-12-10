@@ -4,6 +4,6 @@
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1) (Locals)
+  (ProcDef (Type 1) (Params) (Locals)
     (Stmts
       (Raise (IntVal 100) (Unwind)))))

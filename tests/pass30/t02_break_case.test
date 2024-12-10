@@ -3,7 +3,7 @@
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1) (Locals)
+  (ProcDef (Type 1) (Params) (Locals)
     (Stmts
       (Drop (IntVal 100))
       (Case (Type 0) (IntVal 0)

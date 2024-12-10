@@ -9,7 +9,7 @@ discard """
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1)
+  (ProcDef (Type 1) (Params)
     (Locals (Type 0))
     (Stmts
       (Join 0)

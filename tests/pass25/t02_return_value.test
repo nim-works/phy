@@ -4,11 +4,11 @@
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1) (Locals)
+  (ProcDef (Type 1) (Params) (Locals)
     (Stmts
       (Return (IntVal 100))))
 
-  (ProcDef (Type 2) (Locals)
+  (ProcDef (Type 2) (Params) (Locals)
     (Stmts
       (Drop (Call (Proc 0)))
       (Return))))

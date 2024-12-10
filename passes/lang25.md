@@ -9,7 +9,7 @@ of statements:
 
 ```grammar
 procdef -= (ProcDef <type_id> (Continuations <continuation>+))
-procdef += (ProcDef <type_id> (Locals <type>*) (Stmts <stmt>+))
+procdef += (ProcDef <type_id> (Params <local>*) (Locals <type>*) (Stmts <stmt>+))
 ```
 
 ### Control Flow
