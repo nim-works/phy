@@ -104,10 +104,10 @@ proc parseIntLike[T](s: Stream, _: typedesc[T]): T =
     str.add s.readChar()
 
   var temp: BiggestInt
-  if parseHex(str, temp) != str.len:
-    # error; might be a normal integer
-    if parseBiggestInt(str, temp) != str.len:
-      raise ValueError.newException("expected integer value")
+  if parseBiggestInt(str, temp) != str.len:
+    # error; might be an integer in hex format
+    if parseHex(str, temp) != str.len:
+        raise ValueError.newException("expected integer value")
 
   # cut off too large values
   result = cast[T](temp)
