@@ -5,7 +5,7 @@ discard """
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 0) (Locals)
+  (ProcDef (Type 0) (Params) (Locals)
     (Stmts
       (Join 0)
       (Loop 0))))

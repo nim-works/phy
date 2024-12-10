@@ -3,9 +3,9 @@
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1) (Locals)
+  (ProcDef (Type 1) (Params) (Locals)
     (Stmts (Return)))
-  (ProcDef (Type 1)
+  (ProcDef (Type 1) (Params)
     (Locals (Type 0))
     (Stmts
       (Drop (Addr (Local 0)))
