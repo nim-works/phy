@@ -1,0 +1,10 @@
+discard """
+  description: "Indirect call with invalid callee"
+  output: "(Error ecIllegalProc)"
+"""
+.type P1 () -> void
+.start P1 main
+LdImmInt 2
+IndCall P1 0
+Ret
+.end

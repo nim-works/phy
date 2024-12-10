@@ -1,0 +1,15 @@
+discard """
+  description: "Indirect call with incompatible type at run-time"
+  output: "(Error ecTypeError)"
+"""
+.type P1 (int) -> int
+.start P1 identity
+Ret
+.end
+
+.type P2 () -> void
+.start P2 main
+LdImmInt 1
+IndCall P2 0
+Ret
+.end

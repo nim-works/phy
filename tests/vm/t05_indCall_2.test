@@ -1,0 +1,16 @@
+discard """
+  description: "Indirect call with single parameter and return value"
+  output: "(Done 100)"
+"""
+.type P1 (int) -> int
+.start P1 identity
+Ret
+.end
+
+.type P2 () -> int
+.start P2 main
+LdImmInt 100
+LdImmInt 1
+IndCall P1 1
+Ret
+.end
