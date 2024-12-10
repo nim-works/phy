@@ -308,6 +308,12 @@ proc typeToIL(c; typ: SemType): uint32 =
     # of procedural values. For values, the underlying storage type is a uint
     c.addType Node(kind: UInt, val: 8)
 
+func numILParams(typ: SemType): int =
+  ## Returns the number of parameters the IL signature type generated from
+  ## `typ` is going to have.
+  assert typ.kind == tkProc
+  typ.elems.len - 1 + ord(typ.elems[0].kind in AggregateTypes)
+
 proc rawGenProcType(c; typ: SemType): uint32 =
   ## Generates the IL representation for the procedure signature type `typ`
   ## and adds it to `c`.
@@ -1093,6 +1099,9 @@ proc exprToIL*(c; t): SemType =
 
   bu.subTree ProcDef:
     bu.add Node(kind: Type, val: signature)
+    bu.subTree Params:
+      for i in 0..<numILParams(procTy):
+        bu.add Node(kind: Local, val: i.uint32)
     bu.subTree Locals:
       for it in c.locals.items:
         bu.add Node(kind: Type, val: c.typeToIL(it))
@@ -1171,6 +1180,9 @@ proc declToIL*(c; t; n: NodeIndex) =
 
     var bu = initBuilder[NodeKind](ProcDef)
     bu.add Node(kind: Type, val: signature)
+    bu.subTree Params:
+      for i in 0..<numILParams(procTy):
+        bu.add Node(kind: Local, val: i.uint32)
     bu.subTree Locals:
       for it in c.locals.items:
         bu.add Node(kind: Type, val: c.typeToIL(it))
