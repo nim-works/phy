@@ -1039,6 +1039,84 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     # TODO: implement the remaining magics
     echo "missing magic: ", tree[n, 1].magic
 
+proc genCall(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
+  let kind =
+    if tree[n].kind == mnkCall:
+      Call
+    elif tree[n].typ == VoidType:
+      CheckedCall
+    else:
+      CheckedCallAsgn
+
+  proc genOperands(c; env: var MirEnv; tree; n; bu; stmts) {.nimcall.} =
+    var isClosure: bool
+    var typ: TypeId ## type of the callee
+
+    if tree[n, 1].kind == mnkProc:
+      # a static call
+      typ = env.types.add(env[tree[n, 1].prc].typ)
+      bu.add node(Proc, tree[n, 1].prc.uint32)
+      isClosure = false
+    else:
+      # a dynamic call
+      typ = env.types.canonical(tree[n, 1].typ)
+      isClosure = env.types.headerFor(typ, Canonical).kind == tkClosure
+
+      bu.add c.genProcType(env, typ)
+      if isClosure:
+        bu.subTree Copy:
+          bu.subTree Field:
+            c.translateValue(env, tree, tree.child(n, 1), false, bu)
+            bu.add node(Immediate, 0)
+      else:
+        c.translateValue(env, tree, tree.child(n, 1), true, bu)
+
+    var i = 0
+    for kind, _, it in tree.arguments(n):
+      # ignore compile-time-only arguments
+      if tree[it].kind != mnkNone:
+        # note: not all pass-by-reference arguments use the ``mnkName`` mode
+        if kind == mnkName or isPassByRef(env.types, typ, i):
+          if tree[it].kind in LiteralDataNodes:
+            # the expression doesn't have an address; introduce a temporary
+            let tmp = c.newTemp(tree[it].typ)
+            stmts.addStmt Asgn:
+              bu.useLvalue tmp
+              c.translateValue(env, tree, NodePosition it, true, bu)
+            bu.subTree Addr:
+              bu.useLvalue tmp
+          else:
+            takeAddr(c.gen(env, tree, NodePosition it, false), bu)
+        else:
+          c.translateValue(env, tree, NodePosition it, true, bu)
+
+      inc i
+
+    if isClosure:
+      # pass the environment to the procedure
+      bu.subTree Copy:
+        bu.subTree Field:
+          c.translateValue(env, tree, tree.child(n, 1), false, bu)
+          bu.add node(Immediate, 1)
+
+    if tree[n].kind == mnkCheckedCall:
+      c.genExit(tree, tree.last(n), bu)
+
+  if kind == CheckedCallAsgn:
+    # go through a temporary
+    let tmp = c.newTemp(tree[n].typ)
+    stmts.addStmt CheckedCallAsgn:
+      bu.useLvalue tmp
+      c.genOperands(env, tree, n, bu, stmts)
+
+    genAsgn(dest, tmp, stmts)
+  elif tree[n].typ == VoidType:
+    stmts.addStmt kind:
+      c.genOperands(env, tree, n, bu, stmts)
+  else:
+    stmts.putInto dest, kind:
+      c.genOperands(env, tree, n, bu, stmts)
+
 proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   template value(n: NodePosition) =
     c.translateValue(env, tree, n, true, bu)
@@ -1046,9 +1124,6 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   template lvalue(n: NodePosition) =
     mixin bu
     c.translateValue(env, tree, n, false, bu)
-
-  template value(n: OpValue) =
-    value(NodePosition n)
 
   template takeAddr(n: NodePosition) =
     mixin bu
@@ -1079,82 +1154,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     if tree[n, 1].kind == mnkMagic:
       c.genMagic(env, tree, n, dest, stmts)
     else:
-      let kind =
-        if tree[n].kind == mnkCall:
-          Call
-        elif tree[n].typ == VoidType:
-          CheckedCall
-        else:
-          CheckedCallAsgn
-
-      proc genOperands(c; env: var MirEnv; tree; n; bu; stmts) {.nimcall.} =
-        var isClosure: bool
-        var typ: TypeId ## type of the callee
-
-        if tree[n, 1].kind == mnkProc:
-          # a static call
-          typ = env.types.add(env[tree[n, 1].prc].typ)
-          bu.add node(Proc, tree[n, 1].prc.uint32)
-          isClosure = false
-        else:
-          # a dynamic call
-          typ = env.types.canonical(tree[n, 1].typ)
-          isClosure = env.types.headerFor(typ, Canonical).kind == tkClosure
-
-          bu.add c.genProcType(env, typ)
-          if isClosure:
-            bu.subTree Copy:
-              bu.subTree Field:
-                lvalue(tree.child(n, 1))
-                bu.add node(Immediate, 0)
-          else:
-            value(tree.child(n, 1))
-
-        var i = 0
-        for kind, _, it in tree.arguments(n):
-          # ignore compile-time-only arguments
-          if tree[it].kind != mnkNone:
-            # note: not all pass-by-reference arguments use the ``mnkName`` mode
-            if kind == mnkName or isPassByRef(env.types, typ, i):
-              if tree[it].kind in LiteralDataNodes:
-                # the expression doesn't have an address; introduce a temporary
-                let tmp = c.newTemp(tree[it].typ)
-                stmts.addStmt Asgn:
-                  bu.useLvalue tmp
-                  value(it)
-                bu.subTree Addr:
-                  bu.useLvalue tmp
-              else:
-                takeAddr NodePosition(it)
-            else:
-              value(it)
-
-          inc i
-
-        if isClosure:
-          # pass the environment to the procedure
-          bu.subTree Copy:
-            bu.subTree Field:
-              lvalue(tree.child(n, 1))
-              bu.add node(Immediate, 1)
-
-        if tree[n].kind == mnkCheckedCall:
-          c.genExit(tree, tree.last(n), bu)
-
-      if kind == CheckedCallAsgn:
-        # go through a temporary
-        let tmp = c.newTemp(tree[n].typ)
-        stmts.addStmt CheckedCallAsgn:
-          bu.useLvalue tmp
-          c.genOperands(env, tree, n, bu, stmts)
-
-        genAsgn(dest, tmp, stmts)
-      elif tree[n].typ == VoidType:
-        stmts.addStmt kind:
-          c.genOperands(env, tree, n, bu, stmts)
-      else:
-        wrapAsgn kind:
-          c.genOperands(env, tree, n, bu, stmts)
+      c.genCall(env, tree, n, dest, stmts)
   of mnkAddr, mnkView, mnkMutView:
     wrapAsgn:
       takeAddr tree.child(n, 0)
