@@ -90,25 +90,25 @@ proc hook_fabs(a: float): float {.compilerproc.} =
 # TODO: the overrides below should not be needed. Instead, the procedures
 #       calling these I/O and formatting procedures need to be hooked
 
-proc hook_fflush(f: File): cint {.compilerproc.} =
-  discard
+proc hook_fflush(f: File): cint {.
+  compilerproc, importc: "cio.fflush".}
 
-proc hook_fwrite(buf: pointer, size, n: csize_t, f: File): cint {.compilerproc.} =
-  discard
+proc hook_fwrite(buf: pointer, size, n: csize_t, f: File): cint {.
+  compilerproc, importc: "cio.fwrite".}
 
-proc hook_fgets(c: cstring, n: cint, f: File): cstring {.compilerproc.} =
-  discard
+proc hook_fgets(c: cstring, n: cint, f: File): cstring {.
+  compilerproc, importc: "cio.fgets".}
 
-proc hook_clearerr(f: File) {.compilerproc.} =
-  discard
+proc hook_clearerr(f: File) {.
+  compilerproc, importc: "cio.clearerr".}
 
-proc hook_ferror(f: File): cint {.compilerproc.} =
-  discard
+proc hook_ferror(f: File): cint {.
+  compilerproc, importc: "cio.ferror".}
 
-proc hook_strerror(errnum: cint): cstring {.compilerproc.} =
-  discard
+proc hook_strerror(errnum: cint): cstring {.
+  compilerproc, importc: "cstr.strerror".}
 
-proc hook_strtod(buf: cstring, endptr: ptr cstring): float64 {.compilerproc.} =
-  discard
+proc hook_strtod(buf: cstring, endptr: ptr cstring): float64 {.
+  compilerproc, importc: "cstr.strtod".}
 
 {.pop.}
