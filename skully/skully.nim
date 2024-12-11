@@ -1929,6 +1929,23 @@ proc generateCodeForMain(c; env: var MirEnv; m: Module,
   c.prc.localMap[LocalId(0)] = 0'u32
 
   var bu = initBuilder(Stmts)
+  # make sure a global exists for all data underlying the constants:
+  for cnst, id in c.constMap.pairs:
+    let data = env.dataFor(cnst)
+    if data notin c.dataMap:
+      c.dataMap[data] = c.newGlobal(env, env.types.add(env[cnst].typ))
+
+  # emit the initialization for constants. While not required by the
+  # NimSkull specification, we give each constant its own unique location
+  for cnst, id in c.constMap.pairs:
+    bu.subTree NodeKind.Store:
+      bu.add typeRef(c, env, env.types.add(env[cnst].typ))
+      bu.subTree Copy:
+        bu.add node(Global, id)
+      bu.subTree Load:
+        bu.add typeRef(c, env, env.types.add(env[cnst].typ))
+        bu.subTree Copy:
+          bu.add node(Global, c.dataMap[env.dataFor(cnst)])
 
   c.prc.active = true
   genAll(env, body.code, bu, c)
