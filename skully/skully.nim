@@ -2090,7 +2090,7 @@ proc replaceProcAst(config: ConfigRef, prc: PSym, with: PNode) =
           map[s.id] = s
           n.sym = s
 
-    of nkWithoutSons - {nkSym}:
+    of nkArgList, nkWithoutSons - {nkSym}:
       discard "nothing to do"
     of nkTypeSection, callableDefs:
       config.internalError(n.info, "too complex to patch")
