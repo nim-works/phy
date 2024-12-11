@@ -1254,7 +1254,12 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
           bu.subTree Field:
             bu.add dest.nodes
             bu.add node(Immediate, 1)
-          bu.add node(IntVal, c.lit.pack(env.types.headerFor(typ, Canonical).arrayLen(env.types)))
+          # XXX: the MIR array type length is always clamped to 1, which makes
+          #      it have no use for our case here, as we need to know about
+          #      empty arrays. `mirgen` should special-case empty arrays in
+          #      mSlice operations
+          let L = c.graph.config.lengthOrd(env.types[typ]).toInt
+          bu.add node(IntVal, c.lit.pack(L))
       of tkSeq:
         stmts.addStmt Asgn:
           bu.subTree Field:
