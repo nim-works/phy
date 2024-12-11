@@ -1453,20 +1453,20 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
         if tree[it].kind == mnkRange:
           let other = c.prc.newLabel()
           stmts.addStmt SelectBool:
-            bu.subTree Lt:
+            bu.subTree Le:
               bu.add typeRef(c, env, tree[n, 0].typ)
+              c.translateValue(env, tree, tree.child(it, 0), true, bu)
               bu.subTree Copy:
                 bu.add node(Local, tmp.uint32)
-              c.translateValue(env, tree, tree.child(it, 0), true, bu)
             bu.goto(next)
             bu.goto(other)
           stmts.join other
           stmts.addStmt SelectBool:
-            bu.subTree Lt:
+            bu.subTree Le:
               bu.add typeRef(c, env, tree[n, 0].typ)
-              c.translateValue(env, tree, tree.child(it, 0), true, bu)
               bu.subTree Copy:
                 bu.add node(Local, tmp.uint32)
+              c.translateValue(env, tree, tree.child(it, 1), true, bu)
             bu.goto(next) # continue with the next check
             bu.goto(then) # jump to the body of the branch
         else:
