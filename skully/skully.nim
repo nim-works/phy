@@ -1109,6 +1109,11 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
               c.gen(env, tree, NodePosition tree.argument(n, 0), false),
               tree[tree.argument(n, 1)].typ,
               bu)
+  of mChckBounds:
+    # XXX: bound checks on to-openArray conversion are currently omitted, as
+    #      the implementation would simply be too error-prone at the moment
+    #      (bound checks are fairly involved, see ``cgen``)
+    discard
   else:
     # TODO: implement the remaining magics
     echo "missing magic: ", tree[n, 1].magic
