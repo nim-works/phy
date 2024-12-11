@@ -1835,7 +1835,18 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
   case tree[n].kind
   of mnkAsgn, mnkSwitch, mnkDef, mnkDefCursor, mnkInit:
     guardActive()
-    let dest = c.gen(env, tree, tree.child(n, 0), false)
+    var dest = c.gen(env, tree, tree.child(n, 0), false)
+    if tree[n, 0].kind == mnkPathVariant:
+      # ``mnkPathVariant`` refers to the tag field here, *not* to the union
+      let
+        root = tree.child(n, 0)
+        field = tree[root, 1].field
+      # note: the `tree[root].typ` yields the object type, even if doesn't
+      # look that way
+      let typ = env.types[env.types.lookupField(tree[root].typ, field)].typ
+      dest = makeExpr typ:
+        c.genField(env, dest, field, bu)
+
     if tree[n, 1].kind != mnkNone:
       c.translateExpr(env, tree, tree.child(n, 1), dest, stmts)
     elif tree[n, 0].kind != mnkParam:
