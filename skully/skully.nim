@@ -20,6 +20,8 @@ import
     ast_query,
     idents,
     lineinfos,
+    report_enums,
+    reports_sem,
     types
   ],
   compiler/modules/[
@@ -42,7 +44,8 @@ import
     mirenv,
     mirgen,
     mirtrees,
-    mirtypes
+    mirtypes,
+    sourcemaps
   ],
   passes/[
     builders,
@@ -74,6 +77,8 @@ type
     nextLocal: uint32
     temps: seq[TypeId]
     active: bool
+
+    sources: SourceMap
 
   PartialProc = object
     body: MirBody
@@ -226,6 +231,13 @@ proc request(c: var ProcContext; label: LabelId): uint32 =
   else:
     result = c.newLabel()
     c.labelMap[label] = result
+
+proc warn(c; src: SourceId, msg: string) =
+  # we're not reporting a user-provided warning, but there's no other warning
+  # report kind that fits, nor is it possible to introduce one without forking
+  # the compiler
+  c.graph.config.localReport(c.prc.sources[src],
+    SemReport(kind: rsemUserWarning, str: msg))
 
 proc genExit(c; tree; n; bu) =
   case tree[n].kind
@@ -476,7 +488,7 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
       else:
         # TODO: implement
         recurse(tree.child(n, 0), wantValue)
-        echo "missing down-conversion"
+        warn(c, tree[n].info, "down-conversions are not implemented yet")
 
   of mnkStrLit, mnkAstLit:
     unreachable()
@@ -1342,7 +1354,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     discard
   else:
     # TODO: implement the remaining magics
-    echo "missing magic: ", tree[n, 1].magic
+    warn(c, tree[n].info, "magic not implemented: " & $tree[n, 1].magic)
 
 proc genCall(c; env: var MirEnv; tree; n; dest: Expr, stmts; withEnv = false) =
   ## Translates a MIR call to its IL equivalent. When `withEnv` is true, the
@@ -2027,7 +2039,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
     c.prc.active = false
   of mnkEmit, mnkAsm:
     # XXX: ignore these statements for now
-    echo "unsupported statement: ", tree[n].kind
+    warn(c, tree[n].info, "unsupported statement")
   else:
     unreachable()
 
@@ -2045,6 +2057,7 @@ proc reset(c: var ProcContext) =
   c.labelMap.clear()
   c.temps.shrink(0)
   c.indirectLocals.clear()
+  c.sources.reset()
 
 proc complete(c; env: MirEnv, typ: Node, prc: ProcContext, body: MirBody,
               content: seq[Node]): seq[Node] =
@@ -2163,6 +2176,7 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
     apply(body, env) # apply the additional MIR passes
 
     c.prc.reset()
+    c.prc.sources = move body.source
 
     var bias = 0
     for id, it in body.locals.pairs:
