@@ -2690,6 +2690,9 @@ proc main(args: openArray[string]) =
   if not isDefined(config, "StandaloneHeapSize"):
     defineSymbol(config, "StandaloneHeapSize", $(1024 * 1024 * 100)) # 100 MiB
 
+  # TODO: implement RTTI support and enable object checks
+  config.options = DefaultOptions - {optObjCheck}
+
   # replace some system modules:
   replaceModule(config, "pure/os", "os.nim")
 
