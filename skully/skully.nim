@@ -189,7 +189,8 @@ proc newGlobal(c; env: MirEnv, typ: TypeId): uint32 =
   # occupy the memory slot:
   c.globalsAddress += desc.size(env.types).uint32
 
-  result = c.globals.high.uint32
+  # offset the ID by one, so the that ID 0 stays reserved for internal use
+  result = c.globals.high.uint32 + 1
 
 proc newLabel(c: var ProcContext): uint32 =
   result = c.nextLabel
@@ -2669,6 +2670,11 @@ proc generateCode(graph: ModuleGraph) =
       bu.add it
 
   bu.subTree GlobalDefs:
+    # the global with ID 0 always stores the ID. The runner later reads the
+    # value in order to know where the stack should start
+    let stack = align(c.globalsAddress, 8) + AddressBias
+    bu.add node(IntVal, c.lit.pack(int64 stack))
+
     for it in c.globals.items:
       bu.add node(IntVal, c.lit.pack(it.address.int + AddressBias))
 
