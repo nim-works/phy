@@ -946,6 +946,28 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   of mIncl, mExcl, mLtSet, mLeSet, mEqSet, mMinusSet, mPlusSet, mMulSet,
      mInSet:
     c.genSetOp(env, tree, n, dest, stmts)
+  of mCard:
+    let a = tree.argument(n, 0)
+    let desc = env.types.headerFor(env.types.canonical(tree[a].typ), Lowered)
+    if desc.kind == tkArray:
+      wrapAsgn Call:
+        bu.add compilerProc(c, env, "cardSet")
+    elif desc.size(env.types) == 8:
+      wrapAsgn Call:
+        bu.add compilerProc(c, env, "countBits64")
+        value a
+    elif desc.size(env.types) == 4:
+      wrapAsgn Call:
+        bu.add compilerProc(c, env, "countBits32")
+        value a
+    else:
+      # also use countBits32, but widen the operand first
+      wrapAsgn Call:
+        bu.add compilerProc(c, env, "countBits32")
+        bu.subTree Conv:
+          bu.add node(UInt, 4)
+          bu.add typeRef(c, env, tree[a].typ)
+          value a
   of mDefault:
     c.genDefault(env, dest, tree[n].typ, stmts)
   of mMaxI, mMinI:
@@ -2594,6 +2616,7 @@ proc main(args: openArray[string]) =
   defineSymbol(config, "nimNoLibc")
   defineSymbol(config, "nimEmulateOverflowChecks")
   defineSymbol(config, "nimPreviewFloatRoundtrip")
+  defineSymbol(config, "noIntrinsicsBitOpts")
 
   config.astDiagToLegacyReport = cli_reporter.legacyReportBridge
   # XXX: only arc is support at the moment
