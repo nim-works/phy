@@ -1276,16 +1276,57 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         takeAddr tree.child(n, 0)
         bu.add node(IntVal, c.lit.pack(size))
     else:
+      template isUnsigned(id: TypeId): bool =
+        env.types.headerFor(id, Lowered).kind in
+          {tkPtr, tkPointer, tkRef, tkUInt, tkChar, tkBool}
+
       let a = env.types.headerFor(dst, Lowered).size(env.types)
       let b = env.types.headerFor(src, Lowered).size(env.types)
+      # for the implementation, keep in mind that Reinterp only supports
+      # operands of the same size. "Cutting off" bits only works with uint
+      # values, requiring the operand to first be bitcast into an uint value of
+      # the same size
+      # XXX: translation for casts will become easier once the IL has more fine
+      #      grained conversion operators
       if a == b: # same size, only reinterpret
         wrapAsgn Reinterp:
           bu.add typeRef(c, env, dst)
           bu.add typeRef(c, env, src)
           value tree.child(n, 0)
+      elif isUnsigned(dst):
+        if isUnsigned(src):
+          # a simple conversion (i.e., a zero extension) is enough
+          wrapAsgn Conv:
+            bu.add typeRef(c, env, dst)
+            bu.add typeRef(c, env, src)
+            value tree.child(n, 0)
+        else:
+          wrapAsgn Conv:
+            bu.add typeRef(c, env, dst)
+            bu.add node(UInt, b.uint32)
+            bu.subTree Reinterp:
+              bu.add node(UInt, b.uint32)
+              bu.add typeRef(c, env, src)
+              value tree.child(n, 0)
+      elif isUnsigned(src):
+        wrapAsgn Reinterp:
+          bu.add typeRef(c, env, dst)
+          bu.add node(UInt, a.uint32)
+          bu.subTree Conv:
+            bu.add node(UInt, a.uint32)
+            bu.add typeRef(c, env, src)
+            value tree.child(n, 0)
       else:
-        # TODO: needs to first reinterpret and then convert
-        echo "missing cast implementation"
+        wrapAsgn Reinterp:
+          bu.add typeRef(c, env, dst)
+          bu.add node(UInt, a.uint32)
+          bu.subTree Conv:
+            bu.add node(UInt, a.uint32)
+            bu.add node(UInt, b.uint32)
+            bu.subTree Reinterp:
+              bu.add node(UInt, b.uint32)
+              bu.add typeRef(c, env, src)
+              value tree.child(n, 0)
   else:
     unreachable()
 
