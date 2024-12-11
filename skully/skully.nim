@@ -587,6 +587,13 @@ proc genLength(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
       bu.subTree Field:
         c.translateValue(env, tree, n, false, bu)
         bu.add node(Immediate, 0)
+  of tkArray:
+    # XXX: the MIR array type length is always clamped to 1, which makes
+    #      it have no use for our case here, as we need to know about
+    #      empty arrays. `mirgen` should special-case empty arrays in
+    #      mSlice operations
+    let L = c.graph.config.lengthOrd(env.types[typ]).toInt
+    stmts.putInto dest, node(IntVal, c.lit.pack(L))
   of tkOpenArray:
     stmts.putInto dest, Copy:
       bu.subTree Field:
@@ -1567,59 +1574,124 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       inc i
 
   of mnkToMutSlice, mnkToSlice:
-    if tree[n].len == 1:
-      let typ = env.types.canonical(tree[n, 0].typ)
-      case env.types.headerFor(typ, Canonical).kind
-      of tkCstring:
-        # TODO: implement
-        echo "unsupported: cstring slice"
-      of tkArray:
-        stmts.addStmt Asgn:
-          bu.subTree Field:
-            bu.add dest.nodes
-            bu.add node(Immediate, 0)
-          takeAddr tree.child(n, 0)
-        stmts.addStmt Asgn:
-          bu.subTree Field:
-            bu.add dest.nodes
-            bu.add node(Immediate, 1)
-          # XXX: the MIR array type length is always clamped to 1, which makes
-          #      it have no use for our case here, as we need to know about
-          #      empty arrays. `mirgen` should special-case empty arrays in
-          #      mSlice operations
-          let L = c.graph.config.lengthOrd(env.types[typ]).toInt
-          bu.add node(IntVal, c.lit.pack(L))
-      of tkSeq:
-        stmts.addStmt Asgn:
-          bu.subTree Field:
-            bu.add dest.nodes
-            bu.add node(Immediate, 0)
-          # TODO: account for nil
-          bu.subTree Addr:
-            bu.subTree Field:
-              bu.subTree Deref:
-                bu.add typeRef(c, env, payloadType(env.types, tree[n, 0].typ))
-                bu.subTree Copy:
-                  bu.subTree Field:
-                    lvalue(tree.child(n, 0))
-                    bu.add node(Immediate, 1)
-              bu.add node(Immediate, 1)
-        stmts.addStmt Asgn:
-          bu.subTree Field:
-            bu.add dest.nodes
-            bu.add node(Immediate, 1)
-          bu.subTree Copy:
-            bu.subTree Field:
-              lvalue(tree.child(n, 0))
-              bu.add node(Immediate, 0)
-      of tkOpenArray:
-        # TODO: implement
-        echo "openArray slice support is missing"
+    let
+      typ  = env.types.canonical(tree[n, 0].typ)
+      els  = c.prc.newLabel()
+      then = c.prc.newLabel()
+      exit = c.prc.newLabel()
+
+    # emit the data pointer initialization:
+    let dataExpr = makeExpr PointerType:
+      bu.subTree Field:
+        bu.useLvalue dest
+        bu.add node(Immediate, 0)
+
+    let startExpr = makeExpr env.types.sizeType:
+      if tree[n].len == 1:
+        bu.add node(IntVal, c.lit.pack(0))
       else:
-        unreachable()
+        value tree.child(n, 1)
+
+    stmts.addStmt Branch:
+      bu.subTree Le:
+        bu.add typeRef(c, env, env.types.sizeType)
+        if tree[n].len == 1:
+          let tmp = c.newTemp(env.types.sizeType)
+          c.genLength(env, tree, tree.child(n, 0), tmp, stmts)
+
+          bu.add node(IntVal, c.lit.pack(0))
+          bu.use tmp
+        else:
+          value tree.child(n, 1)
+          value tree.child(n, 2)
+      bu.goto(els)
+      bu.goto(then)
+
+    stmts.join(then)
+
+    # emit the data pointer initialization:
+    case env.types.headerFor(typ, Canonical).kind
+    of tkCstring:
+      stmts.putInto dataExpr, Addr:
+        bu.subTree At:
+          bu.subTree Deref:
+            bu.add node(Type, c.genFlexArrayType(env.types, CharType))
+            value tree.child(n, 0)
+        bu.use startExpr
+    of tkPtr:
+      # can only be a pointer to an unchecked array
+      let arr  = env.types.headerFor(typ, Canonical).elem
+      stmts.putInto dataExpr, Addr:
+        bu.subTree At:
+          bu.subTree Deref:
+            bu.add c.typeRef(env, arr)
+            value tree.child(n, 0)
+        bu.use startExpr
+    of tkArray:
+      stmts.putInto dataExpr, Addr:
+        bu.subTree At:
+          lvalue tree.child(n, 0)
+          bu.use startExpr
+    of tkSeq, tkString:
+      stmts.putInto dataExpr, Addr:
+        bu.subTree At:
+          bu.subTree Field:
+            bu.subTree Deref:
+              bu.add typeRef(c, env, payloadType(env.types, typ))
+              bu.subTree Copy:
+                bu.subTree Field:
+                  lvalue tree.child(n, 0)
+                  bu.add node(Immediate, 1)
+            bu.add node(Immediate, 1)
+          bu.use startExpr
+    of tkOpenArray:
+      stmts.putInto dataExpr, Addr:
+        bu.subTree At:
+          bu.subTree Field:
+            lvalue tree.child(n, 0)
+            bu.add node(Immediate, 0)
+          bu.use startExpr
     else:
-      # TODO: implement
-      echo "toOpenArray implementation is missing"
+      unreachable()
+
+    # emit the length field initialization:
+    if tree[n].len == 1:
+      # the length is provided by the operand
+      let nDest = makeExpr env.types.sizeType:
+        bu.subTree Field:
+          bu.useLvalue dest
+          bu.add node(Immediate, 1)
+      let tmp = c.newTemp(env.types.sizeType)
+      c.genLength(env, tree, tree.child(n, 0), tmp, stmts)
+      genAsgn(nDest, tmp, stmts)
+    else:
+      stmts.addStmt Asgn:
+        bu.subTree Field:
+          bu.useLvalue dest
+          bu.add node(Immediate, 1)
+        bu.subTree Add:
+          bu.add typeRef(c, env, env.types.sizeType)
+          bu.subTree Sub:
+            bu.add typeRef(c, env, env.types.sizeType)
+            value tree.child(n, 2)
+            value tree.child(n, 1)
+          bu.add node(IntVal, c.lit.pack(1))
+
+    stmts.goto(exit)
+
+    stmts.join(els)
+    # if the requested length is zero, both fields are initialized to zero
+    stmts.addStmt Asgn:
+      bu.subTree Field:
+        bu.useLvalue dest
+        bu.add node(Immediate, 0)
+      bu.add node(IntVal, c.lit.pack(0))
+    stmts.addStmt Asgn:
+      bu.subTree Field:
+        bu.useLvalue dest
+        bu.add node(Immediate, 1)
+      bu.add node(IntVal, c.lit.pack(0))
+    stmts.join(exit)
   of mnkSetConstr:
     c.genDefault(env, dest, tree[n].typ, stmts)
 
