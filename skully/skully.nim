@@ -177,12 +177,12 @@ proc join(bu; label: uint32) =
     bu.add node(Immediate, label)
 
 proc newGlobal(c; env: MirEnv, typ: TypeId): uint32 =
-  let mask = uint32(env.types.headerFor(typ, Lowered).align - 1)
+  let desc = env.types.headerFor(typ, Lowered)
   # align the start address first:
-  c.globalsAddress = (c.globalsAddress + mask) and not mask
+  c.globalsAddress = align(c.globalsAddress, desc.align.uint32)
   c.globals.add (typ, c.globalsAddress)
   # occupy the memory slot:
-  c.globalsAddress += env.types.headerFor(typ, Lowered).size(env.types).uint32
+  c.globalsAddress += desc.size(env.types).uint32
 
   result = c.globals.high.uint32
 
