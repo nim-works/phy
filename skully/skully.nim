@@ -2130,10 +2130,24 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
             "no override for importc'ed procedure found"
         else:
           replaceProcAst(graph.config, prc, override.ast)
-          # the procedure is no longer an FFI procedure; update the flags
-          prc.flags.excl sfImportc
-          prc.extFlags.excl exfDynamicLib
-          prc.extFlags.excl exfNoDecl
+          # copy all data that is relevant to code generation from the
+          # override:
+          prc.info = override.info
+          prc.owner = override.owner
+          prc.flags = override.flags
+          prc.options = override.options
+          prc.extname = override.extname
+          prc.extFlags = override.extFlags
+          prc.annex = override.annex
+          prc.constraint = override.constraint
+
+      if sfImportc in prc.flags:
+        # the procedure is still imported, but now we know that it's deliberate
+        var bu = initBuilder[NodeKind]()
+        bu.subTree Foreign:
+          bu.add c.genProcType(env, env.types.add(prc.typ))
+          bu.add node(StringVal, c.lit.pack(prc.extname))
+        bodies[evt.entity.prc] = finish(bu)
 
     else:
       unreachable()
