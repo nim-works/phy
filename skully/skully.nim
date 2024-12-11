@@ -307,7 +307,7 @@ proc genField(c; env: MirEnv; e: Expr; pos: int32, bu) =
   else:
     unreachable()
 
-proc genProcType(c; env: MirEnv, typ: TypeId): Node
+proc genProcType(c; env: MirEnv, typ: TypeId, ignoreClosure = false): Node
 proc gen(c; env: MirEnv, tree; n; wantsValue: bool): Expr
 
 proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: bool, bu) =
@@ -1039,7 +1039,9 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     # TODO: implement the remaining magics
     echo "missing magic: ", tree[n, 1].magic
 
-proc genCall(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
+proc genCall(c; env: var MirEnv; tree; n; dest: Expr, stmts; withEnv = false) =
+  ## Translates a MIR call to its IL equivalent. When `withEnv` is true, the
+  ## environment stored in the invoked closure is passed to the procedure.
   let kind =
     if tree[n].kind == mnkCall:
       Call
@@ -1048,21 +1050,22 @@ proc genCall(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
     else:
       CheckedCallAsgn
 
-  proc genOperands(c; env: var MirEnv; tree; n; bu; stmts) {.nimcall.} =
-    var isClosure: bool
+  proc genOperands(c; env: var MirEnv; tree; n; bu; stmts;
+                   withEnv: bool) {.nimcall.} =
     var typ: TypeId ## type of the callee
 
     if tree[n, 1].kind == mnkProc:
       # a static call
       typ = env.types.add(env[tree[n, 1].prc].typ)
       bu.add node(Proc, tree[n, 1].prc.uint32)
-      isClosure = false
     else:
       # a dynamic call
       typ = env.types.canonical(tree[n, 1].typ)
-      isClosure = env.types.headerFor(typ, Canonical).kind == tkClosure
+      let isClosure = env.types.headerFor(typ, Canonical).kind == tkClosure
 
-      bu.add c.genProcType(env, typ)
+      # for closure invocations where the passing the env is omitted, the
+      # signature type needs to have no closure too
+      bu.add c.genProcType(env, typ, isClosure and not withEnv)
       if isClosure:
         bu.subTree Copy:
           bu.subTree Field:
@@ -1092,7 +1095,7 @@ proc genCall(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
 
       inc i
 
-    if isClosure:
+    if withEnv:
       # pass the environment to the procedure
       bu.subTree Copy:
         bu.subTree Field:
@@ -1107,15 +1110,15 @@ proc genCall(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
     let tmp = c.newTemp(tree[n].typ)
     stmts.addStmt CheckedCallAsgn:
       bu.useLvalue tmp
-      c.genOperands(env, tree, n, bu, stmts)
+      c.genOperands(env, tree, n, bu, stmts, withEnv)
 
     genAsgn(dest, tmp, stmts)
   elif tree[n].typ == VoidType:
     stmts.addStmt kind:
-      c.genOperands(env, tree, n, bu, stmts)
+      c.genOperands(env, tree, n, bu, stmts, withEnv)
   else:
     stmts.putInto dest, kind:
-      c.genOperands(env, tree, n, bu, stmts)
+      c.genOperands(env, tree, n, bu, stmts, withEnv)
 
 proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   template value(n: NodePosition) =
@@ -1151,10 +1154,38 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     wrapAsgn:
       value(tree.child(n, 0))
   of mnkCall, mnkCheckedCall:
-    if tree[n, 1].kind == mnkMagic:
+    let callee = tree.callee(n)
+    if tree[callee].kind == mnkMagic:
       c.genMagic(env, tree, n, dest, stmts)
     else:
-      c.genCall(env, tree, n, dest, stmts)
+      if tree[callee].kind == mnkProc:
+        c.genCall(env, tree, n, dest, stmts)
+      else:
+        # a dynamic call. Closures require special handling, as the dynamic
+        # callee might not have an env parameter. Whether it has one is
+        # indicated by the closure's env value being non-nil
+        if env.types.headerFor(tree[callee].typ, Canonical).kind == tkClosure:
+          let els  = c.prc.newLabel()
+          let then = c.prc.newLabel()
+          let exit = c.prc.newLabel()
+          stmts.addStmt Branch:
+            bu.subTree Eq:
+              bu.add typeRef(c, env, PointerType)
+              bu.subTree Copy:
+                bu.subTree Field:
+                  lvalue callee
+                  bu.add node(Immediate, 1)
+              bu.add node(IntVal, c.lit.pack(0))
+            bu.goto els
+            bu.goto then
+          stmts.join then
+          c.genCall(env, tree, n, dest, stmts, withEnv = false)
+          stmts.goto exit
+          stmts.join els
+          c.genCall(env, tree, n, dest, stmts, withEnv = true)
+          stmts.join exit
+        else:
+          c.genCall(env, tree, n, dest, stmts)
   of mnkAddr, mnkView, mnkMutView:
     wrapAsgn:
       takeAddr tree.child(n, 0)
@@ -1719,7 +1750,7 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
   else:
     discard
 
-proc translateProcType(c; env: TypeEnv, id: TypeId, bu) =
+proc translateProcType(c; env: TypeEnv, id: TypeId, ignoreClosure: bool, bu) =
   let desc = env.headerFor(id, Canonical)
   bu.subTree ProcTy:
     if desc.retType(env) == VoidType:
@@ -1735,7 +1766,7 @@ proc translateProcType(c; env: TypeEnv, id: TypeId, bu) =
         else:
           bu.add typeRef(c, env, typ)
 
-    if desc.callConv(env) == ccClosure:
+    if desc.callConv(env) == ccClosure and not ignoreClosure:
       bu.add typeRef(c, env, PointerType)
 
 proc translate(c; env: TypeEnv, id: TypeId, bu) =
@@ -1826,13 +1857,13 @@ proc translate(c; env: TypeEnv, id: TypeId, bu) =
   else:
     unreachable($desc.kind)
 
-proc genProcType(c; env: MirEnv, typ: TypeId): Node =
+proc genProcType(c; env: MirEnv, typ: TypeId, ignoreClosure = false): Node =
   let typ = env.types.canonical(typ)
   assert env.types.headerFor(typ, Canonical).kind in {tkProc, tkClosure}
 
   # XXX: the type is currently not cached
   var bu = initBuilder[NodeKind]()
-  c.translateProcType(env.types, typ, bu)
+  c.translateProcType(env.types, typ, ignoreClosure, bu)
   node(Type, c.types.mgetOrPut(finish(bu), c.types.len.uint32))
 
 proc genType(c; env: TypeEnv, typ: TypeId): uint32 =
