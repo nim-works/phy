@@ -828,6 +828,58 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       c.genField(env, tree, NodePosition tree.argument(n, 0), -1, bu)
       bu.subTree Copy:
         c.genField(env, tree, NodePosition tree.argument(n, 1), -1, bu)
+  of mArrToSeq:
+    let
+      seqType  = env.types.canonical(tree[n].typ)
+      arg      = env.types.canonical(tree[tree.argument(n, 0)].typ)
+      elem     = env.types.canonical(env.types.headerFor(arg, Canonical).elem)
+      elemDesc = env.types.headerFor(elem, Canonical)
+      len      = c.graph.config.lengthOrd(env.types[arg]).toInt
+    # emit the length initialization:
+    stmts.addStmt Asgn:
+      bu.subTree Field:
+        bu.useLvalue dest
+        bu.add node(Immediate, 0)
+      bu.add node(IntVal, c.lit.pack(len))
+    # emit the seq allocation:
+    stmts.addStmt Asgn:
+      bu.subTree Field:
+        bu.useLvalue dest
+        bu.add node(Immediate, 1)
+      bu.subTree Call:
+        bu.add compilerProc(c, env, "newSeqPayload")
+        bu.add node(IntVal, c.lit.pack len)
+        bu.add node(IntVal, c.lit.pack elemDesc.size(env.types))
+        bu.add node(IntVal, c.lit.pack elemDesc.align)
+
+    if len < 10:
+      for i in 0..<len:
+        stmts.addStmt Asgn:
+          bu.subTree At:
+            bu.subTree Field:
+              bu.subTree Deref:
+                bu.add typeRef(c, env, payloadType(env.types, seqType))
+                bu.use dest
+              bu.add node(Immediate, 1)
+            bu.add node(IntVal, c.lit.pack(i))
+          bu.subTree Copy:
+            bu.subTree At:
+              lvalue tree.argument(n, 0)
+              bu.add node(IntVal, c.lit.pack(i))
+    else:
+      # too many elements. Use a blit copy in order to not explode code size
+      stmts.addStmt Blit:
+        bu.subTree Addr:
+          bu.subTree Field:
+            bu.subTree Deref:
+              bu.add typeRef(c, env, payloadType(env.types, seqType))
+              bu.subTree Copy:
+                bu.subTree Field:
+                  bu.useLvalue dest
+                  bu.add node(Immediate, 1)
+            bu.add node(Immediate, 1)
+        takeAddr NodePosition(tree.argument(n, 0))
+        bu.add node(IntVal, c.lit.pack(len * elemDesc.size(env.types)))
   of mSamePayload:
     wrapAsgn Eq:
       bu.add typeRef(c, env, PointerType)
