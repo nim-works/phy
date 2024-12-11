@@ -616,6 +616,200 @@ proc genLength(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
   else:
     unreachable()
 
+proc genSetElem(c; env; tree; n; bu) =
+  ## Emits the expression for loading a value for use in a set-related
+  ## operation. This means making the type zero-based, if it isn't already.
+  proc aux(c; env; tree; n; bu) =
+    let first = c.graph.config.firstOrd(env.types[tree[n].typ])
+    if first != Zero:
+      bu.subTree Sub:
+        bu.add typeRef(c, env, tree[n].typ)
+        c.translateValue(env, tree, n, true, bu)
+        bu.add node(IntVal, c.lit.pack(first.toInt))
+    else:
+      c.translateValue(env, tree, n, true, bu)
+
+  let typ = env.types.canonical(tree[n].typ)
+  let desc = env.types.headerFor(typ, Lowered)
+  if desc.kind != tkUInt or desc.size(env.types) != 2:
+    # convert the result to a uint16 value. Sets cannot have more than 2^16
+    # elements, hence a uint16
+    bu.subTree Conv:
+      bu.add node(UInt, 2)
+      bu.add typeRef(c, env, typ)
+      aux(c, env, tree, n, bu)
+  else:
+    aux(c, env, tree, n, bu)
+
+proc genSetOp(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
+  ## Generates the IL code for a binary set operation.
+  let
+    a = NodePosition tree.argument(n, 0) # always a set
+    b = NodePosition tree.argument(n, 1)
+    # ^^ for some operations a set, for some not
+    m = tree[n, 1].magic
+    typ  = env.types.canonical(tree[a].typ)
+    desc = env.types.headerFor(typ, Lowered)
+
+  # sets with a number of elements <= 64 fit into unsigned integers. All
+  # other sets are implemented as an array of small sets (i.e., sets with
+  # 8 elements, fitting into a uint8)
+
+  template value(n: NodePosition) =
+    c.translateValue(env, tree, n, true, bu)
+
+  template takeAddr(n: NodePosition) =
+    takeAddr(c.gen(env, tree, n, false), bu)
+
+  template elem(n: NodePosition) =
+    c.genSetElem(env, tree, n, bu)
+
+  template lenValue() =
+    let L = env.types.headerFor(typ, Lowered).arrayLen(env.types)
+    bu.add node(IntVal, c.lit.pack(L))
+
+  if desc.kind == tkArray:
+    case m
+    of mMulSet, mPlusSet, mMinusSet:
+      const Ops = [mMulSet: "skullyMulSet",
+                   mPlusSet: "skullyPlusSet",
+                   mMinusSet: "skullMinusSet"]
+      stmts.addStmt Call:
+        bu.add compilerProc(c, env, Ops[m])
+        takeAddr(dest, bu)
+        takeAddr a
+        takeAddr b
+        lenValue()
+    of mEqSet:
+      stmts.putInto dest, Eq:
+        bu.add typeRef(c, env, BoolType)
+        bu.subTree Call:
+          bu.add compilerProc(c, env, "nimCmpMem")
+          takeAddr a
+          takeAddr b
+          lenValue()
+        bu.add node(IntVal, c.lit.pack(0))
+    of mLeSet, mLtSet:
+      const Ops = [mLeSet: "skullyLeSet", mLtSet: "skullyLtSet"]
+      stmts.putInto dest, Call:
+        bu.add compilerProc(c, env, Ops[m])
+        takeAddr a
+        takeAddr b
+        lenValue()
+    of mIncl, mExcl:
+      const Ops = [mIncl: "skullyIncl", mExcl: "skullyExcl"]
+      stmts.putInto dest, Call:
+        bu.add compilerProc(c, env, Ops[m])
+        takeAddr a
+        elem b
+    of mInSet:
+      stmts.putInto dest, Call:
+        bu.add compilerProc(c, env, "skullyInSet")
+        takeAddr a
+        elem b
+    else:
+      unreachable()
+  else:
+    case m
+    of mMulSet:
+      stmts.putInto dest, BitAnd:
+        bu.add typeRef(c, env, typ)
+        value a
+        value b
+    of mPlusSet:
+      stmts.putInto dest, BitOr:
+        bu.add typeRef(c, env, typ)
+        value a
+        value b
+    of mMinusSet:
+      stmts.putInto dest, BitAnd:
+        bu.add typeRef(c, env, typ)
+        value a
+        bu.subTree BitNot:
+          bu.add typeRef(c, env, typ)
+          value b
+    of mEqSet:
+      stmts.putInto dest, Eq:
+        bu.add typeRef(c, env, typ)
+        value a
+        value b
+    of mLtSet:
+      # generate ``((a and not b) == 0) and (a != b)``
+      let
+        els  = c.prc.newLabel()
+        then = c.prc.newLabel()
+        next = c.prc.newLabel()
+      stmts.addStmt Branch:
+        bu.subTree Eq:
+          bu.add typeRef(c, env, typ)
+          bu.subTree BitAnd:
+            bu.add typeRef(c, env, typ)
+            value a
+            bu.subTree BitNot:
+              bu.add typeRef(c, env, typ)
+              value b
+          bu.add node(IntVal, c.lit.pack(0))
+        bu.goto els
+        bu.goto then
+      stmts.join then
+      stmts.putInto dest, Not:
+        bu.subTree Eq:
+          bu.add typeRef(c, env, typ)
+          value a
+          value b
+      stmts.goto next
+      stmts.join els
+      stmts.putInto dest, node(IntVal, c.lit.pack(0))
+      stmts.join next
+    of mLeSet:
+      # generate ``(a and not b) == 0``
+      stmts.putInto dest, Eq:
+        bu.add typeRef(c, env, typ)
+        bu.subTree BitAnd:
+          bu.add typeRef(c, env, typ)
+          value a
+          bu.subTree BitNot:
+            bu.add typeRef(c, env, tree[b].typ)
+            value b
+        bu.add node(IntVal, c.lit.pack(0))
+    of mIncl:
+      # generate ``dest = dest or (1 shl elem)``
+      let dest = c.gen(env, tree, a, false)
+      stmts.putInto dest, BitOr:
+        bu.add typeRef(c, env, typ)
+        bu.use dest
+        bu.subTree Shl:
+          bu.add typeRef(c, env, typ)
+          bu.add node(IntVal, c.lit.pack(1))
+          elem b
+    of mExcl:
+      # generate ``dest = dest and not (1 shl elem)``
+      let dest = c.gen(env, tree, a, false)
+      stmts.putInto dest, BitAnd:
+        bu.add typeRef(c, env, typ)
+        bu.use dest
+        bu.subTree BitNot:
+          bu.add typeRef(c, env, typ)
+          bu.subTree Shl:
+            bu.add typeRef(c, env, typ)
+            bu.add node(IntVal, c.lit.pack(1))
+            elem b
+    of mInSet:
+      # generate ``(set bitand (1 shl elem)) != 0``
+      stmts.putInto dest, Not:
+        bu.subTree Eq:
+          bu.add typeRef(c, env, typ)
+          bu.subTree BitAnd:
+            bu.add typeRef(c, env, typ)
+            value a
+            bu.subTree Shl:
+              bu.add typeRef(c, env, typ)
+              bu.add node(IntVal, c.lit.pack(1))
+              elem b
+          bu.add node(IntVal, c.lit.pack(0))
+    else:
+      unreachable()
+
 proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   template value(n: NodePosition) =
     c.translateValue(env, tree, n, true, bu)
@@ -749,6 +943,9 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       bu.add typeRef(c, env, tree[n].typ)
       bu.add typeRef(c, env, tree[tree.argument(n, 0)].typ)
       value(tree.argument(n, 0))
+  of mIncl, mExcl, mLtSet, mLeSet, mEqSet, mMinusSet, mPlusSet, mMulSet,
+     mInSet:
+    c.genSetOp(env, tree, n, dest, stmts)
   of mDefault:
     c.genDefault(env, dest, tree[n].typ, stmts)
   of mMaxI, mMinI:
@@ -1402,8 +1599,64 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       # TODO: implement
       echo "toOpenArray implementation is missing"
   of mnkSetConstr:
-    # TODO: implement
-    echo "set constructors are not implemented"
+    c.genDefault(env, dest, tree[n].typ, stmts)
+
+    proc genIncl(c; env: var MirEnv; dest, elem: Expr, stmts) =
+      let desc = env.types.headerFor(dest.typ, Lowered)
+      if desc.kind == tkArray:
+        stmts.addStmt Call:
+          bu.add compilerProc(c, env, "skullyIncl")
+          takeAddr(dest, bu)
+          bu.use elem
+      else:
+        stmts.putInto dest, BitOr:
+          bu.add typeRef(c, env, dest.typ)
+          bu.use dest
+          bu.subTree Shl:
+            bu.add typeRef(c, env, dest.typ)
+            bu.add node(IntVal, c.lit.pack(1))
+            bu.use elem
+
+    for it in tree.items(n, 0, ^1):
+      if tree[it].kind == mnkRange:
+        # a range constructor. Include all elements part of it in the set
+        let
+          startLab = c.prc.newLabel()
+          exitLab = c.prc.newLabel()
+          bodyLab = c.prc.newLabel()
+          idx = c.newTemp(UInt16Type)
+
+        stmts.addStmt Asgn:
+          bu.useLvalue idx
+          c.genSetElem(env, tree, tree.child(it, 0), bu)
+
+        stmts.join(startLab)
+        stmts.addStmt Branch:
+          bu.subTree Le:
+            bu.add node(UInt, 2)
+            bu.use idx
+            c.genSetElem(env, tree, tree.child(it, 1), bu)
+          bu.goto(exitLab)
+          bu.goto(bodyLab)
+
+        stmts.join(bodyLab)
+        c.genIncl(env, dest, idx, stmts)
+
+        # increment the index:
+        stmts.addStmt Asgn:
+          bu.useLvalue(idx)
+          bu.subTree Add:
+            bu.add node(UInt, 8)
+            bu.use(idx)
+            bu.add node(IntVal, 1)
+
+        stmts.addStmt Loop:
+          bu.add node(Immediate, startLab)
+        stmts.join(exitLab)
+      else:
+        let e = makeExpr tree[it].typ:
+          c.genSetElem(env, tree, it, bu)
+        c.genIncl(env, dest, e, stmts)
   of mnkCast:
     let dst = env.types.canonical(tree[n].typ)
     let src = env.types.canonical(tree[n, 0].typ)
@@ -2354,7 +2607,7 @@ proc main(args: openArray[string]) =
   # needs for operation and/or code generation have to be compiled (after
   # the system module, of course)
   graph.compileSystemModule()
-  # needs for operation and/or code generation have to be compiled
+  discard graph.compileModule(findPatchFile(config, "setimpl.nim"), {})
   discard graph.compileModule(findPatchFile(config, "overrides.nim"), {})
 
   graph.compileProject(config.projectMainIdx)
