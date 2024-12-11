@@ -2731,6 +2731,7 @@ proc main(args: openArray[string]) =
   # the system module, of course)
   graph.compileSystemModule()
   discard graph.compileModule(findPatchFile(config, "setimpl.nim"), {})
+  discard graph.compileModule(findPatchFile(config, "io_helper.nim"), {})
   discard graph.compileModule(findPatchFile(config, "overrides.nim"), {})
 
   graph.compileProject(config.projectMainIdx)
