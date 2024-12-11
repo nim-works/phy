@@ -483,20 +483,35 @@ proc takeAddr(e: Expr, bu) =
     bu.subTree Addr:
       bu.add e.nodes
 
+proc use(bu; e: Expr) =
+  case e.nodes[0].kind
+  of Local, At, Field:
+    bu.subTree Copy:
+      bu.add e.nodes
+  of Deref:
+    bu.subTree Load:
+      bu.add e.nodes[1]
+      bu.add e.nodes.toOpenArray(2, e.nodes.high)
+  else:
+    bu.add e.nodes
+
+proc useLvalue(bu; e: Expr) =
+  bu.add e.nodes
+
 proc genAsgn(dest: Expr, src: Expr; bu) =
   if dest.nodes.len == 0:
     bu.subTree Drop:
-      bu.add src.nodes
+      bu.use src
   elif dest.nodes[0].kind == Deref:
     bu.subTree NodeKind.Store:
       bu.add dest.nodes[1]
       bu.add dest.nodes.toOpenArray(2, dest.nodes.high)
-      bu.add src.nodes
+      bu.use src
   else:
     assert dest.nodes[0].kind != Load
     bu.subTree Asgn:
       bu.add dest.nodes
-      bu.add src.nodes
+      bu.use src
 
 template addStmt(sub: var Builder[NodeKind], kind: NodeKind, body: untyped) =
   if true:
@@ -578,21 +593,6 @@ proc genLength(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
     stmts.join exit
   else:
     unreachable()
-
-proc use(bu; e: Expr) =
-  case e.nodes[0].kind
-  of Local, At, Field:
-    bu.subTree Copy:
-      bu.add e.nodes
-  of Deref:
-    bu.subTree Load:
-      bu.add e.nodes[1]
-      bu.add e.nodes.toOpenArray(2, e.nodes.high)
-  else:
-    bu.add e.nodes
-
-proc useLvalue(bu; e: Expr) =
-  bu.add e.nodes
 
 proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   template value(n: NodePosition) =
