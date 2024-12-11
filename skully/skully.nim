@@ -992,7 +992,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
                     lvalue(tree.argument(n, 0))
                     bu.add node(Immediate, 1)
               bu.add node(Immediate, 0)
-          bu.add node(IntVal, c.lit.pack(1'i64 shl 63))
+          bu.add node(IntVal, c.lit.pack(StrLitFlag))
         bu.add node(IntVal, 0)
       bu.goto els
       bu.goto then
@@ -1005,14 +1005,14 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         bu.subTree Copy:
           bu.subTree Field:
             lvalue(tree.argument(n, 0))
-            bu.add node(Immediate, 0)
+            bu.add node(Immediate, 1)
     of tkSeq:
       stmts.addStmt Call:
         bu.add compilerProc(c, env, "alignedDealloc")
         bu.subTree Copy:
           bu.subTree Field:
             lvalue(tree.argument(n, 0))
-            bu.add node(Immediate, 0)
+            bu.add node(Immediate, 1)
         bu.add node(IntVal, c.lit.pack(env.types.headerFor(typ, Canonical).align))
     else:
       unreachable("destroy was not lowered?")
