@@ -28,6 +28,7 @@ import
     magicsys
   ],
   compiler/utils/[
+    bitsets,
     containers,
     pathutils,
     platform
@@ -114,6 +115,12 @@ type
 const
   MagicsToKeep = {mNewSeq, mSetLengthSeq, mAppendSeqElem,
                   mEnumToStr, mDotDot, mEqCString, mAbsI}
+  StrLitFlag = 1'i64 shl 62
+    ## or'ed into the capacity of seqs and strings in order to mark the
+    ## data as being immutable
+  AddressBias = 4096
+    ## must be added to all raw address values, in order to undo the
+    ## offset applied to address value on memory access performed by the VM
 
 using
   bu: var Builder[NodeKind]
@@ -122,6 +129,11 @@ using
   stmts: var Builder[NodeKind]
   env: MirEnv
   c: var Context
+
+func align[T](val, to: T): T =
+  ## `to` must be a power-of-two.
+  let mask = to - 1
+  result = (val + mask) and not mask
 
 func payloadType(env: TypeEnv, typ: TypeId): TypeId =
   ## Returns the ID of a seq/string type's payload type.
@@ -529,6 +541,15 @@ template putInto(builder: Builder[NodeKind], dest: Expr, kind: NodeKind,
 
 proc putInto(bu; dest: Expr, node: Node) =
   genAsgn(dest, makeExpr(@[node], dest.typ), bu)
+
+template makeExpr(typ: TypeId, body: untyped): Expr =
+  if true:
+    let t = typ
+    var bu {.inject.} = initBuilder[NodeKind]()
+    body
+    makeExpr(bu.finish(), t)
+  else:
+    unreachable()
 
 proc genDefault(c; env: MirEnv; dest: Expr, typ: TypeId, bu) =
   let typ = env.types.canonical(typ)
@@ -1909,6 +1930,179 @@ proc replaceModule(config: ConfigRef, name: string, with: string) =
     other = findPatchFile(config, with)
   config.m.fileInfos[ord idx] = config.m.fileInfos[ord other]
 
+proc genConst(c; env; tree; n; dest: Expr, stmts) =
+  ## Emits the construction logic for the MIR constant expression `n`.
+  template putIntoDest(n: Node) =
+    stmts.putInto dest, n
+
+  iterator args(tree; n): (int, NodePosition) =
+    var i = 0
+    for it in tree.items(n, 0, ^1):
+      yield (i, tree.last(it))
+      inc i
+
+  let typ = env.types.canonical(tree[n].typ)
+
+  case tree[n].kind
+  of mnkIntLit, mnkUIntLit:
+    putIntoDest node(IntVal, c.lit.pack(env.getInt(tree[n].number)))
+  of mnkFloatLit:
+    putIntoDest node(FloatVal, c.lit.pack(env.getFloat(tree[n].number)))
+  of mnkProcVal:
+    putIntoDest node(ProcVal, tree[n].prc.uint32)
+  of mnkArrayConstr:
+    for i, it in tree.args(n):
+      let nDest = makeExpr tree[it].typ:
+        bu.subTree At:
+          bu.useLvalue dest
+          bu.add node(IntVal, c.lit.pack(i))
+      c.genConst(env, tree, it, nDest, stmts)
+  of mnkTupleConstr, mnkClosureConstr:
+    for i, it in tree.args(n):
+      let nDest = makeExpr tree[it].typ:
+        bu.subTree Field:
+          bu.useLvalue dest
+          bu.add node(Immediate, i.uint32)
+      c.genConst(env, tree, it, nDest, stmts)
+  of mnkObjConstr:
+    for it in tree.subNodes(n):
+      let val = tree.last(tree.child(it, 1))
+      let nDest = makeExpr tree[val].typ:
+        c.genField(env, dest, tree[it, 0].field, bu)
+      c.genConst(env, tree, val, nDest, stmts)
+  of mnkStrLit:
+    let str {.cursor.} = env[tree[n].strVal]
+
+    proc emitString(c; str: string, data: uint32, stmts) {.nimcall.} =
+      # there's no built-in support for strings in the ILs/VM, requiring
+      # the manual initialization of each character
+      for i, it in pairs(str):
+        stmts.addStmt NodeKind.Store:
+          bu.add node(UInt, 1)
+          bu.add node(IntVal, c.lit.pack(int64(data) + i))
+          bu.add node(IntVal, c.lit.pack(ord it))
+
+      # emit the NUL terminator:
+      stmts.addStmt NodeKind.Store:
+        bu.add node(UInt, 1)
+        bu.add node(IntVal, c.lit.pack(int64(data) + str.len))
+        bu.add node(IntVal, c.lit.pack(0))
+
+    case env.types.headerFor(typ, Canonical).kind
+    of tkCstring:
+      # a cstring is a pointer to a raw character sequence followed by a NUL
+      # terminator
+      let data = c.globalsAddress + AddressBias
+      c.globalsAddress += str.len.uint32 + 1
+      c.emitString(str, data, stmts)
+
+      putIntoDest node(IntVal, c.lit.pack(data.int64))
+    of tkString:
+      # it's a NimSkull string (a length + payload pointer)
+      let
+        intSize = c.graph.config.target.intSize.uint32
+        start   = align(c.globalsAddress, intSize)
+        data    = start + AddressBias
+      c.globalsAddress = start + intSize + str.len.uint32 + 1 # reserve space
+
+      # emit the capacity initialization:
+      stmts.addStmt NodeKind.Store:
+        bu.add typeRef(c, env, env.types.sizeType)
+        bu.add node(IntVal, c.lit.pack(data.int64))
+        bu.add node(IntVal, c.lit.pack(str.len or StrLitFlag))
+
+      c.emitString(str, data + 8, stmts)
+
+      stmts.addStmt Asgn:
+        bu.subTree Field:
+          bu.useLvalue dest
+          bu.add node(Immediate, 0)
+        bu.add node(IntVal, c.lit.pack(str.len))
+      stmts.addStmt Asgn:
+        bu.subTree Field:
+          bu.useLvalue dest
+          bu.add node(Immediate, 1)
+        bu.add node(IntVal, c.lit.pack(data.int64))
+    else:
+      unreachable()
+  of mnkSeqConstr:
+    let
+      intSize = c.graph.config.target.intSize.uint32
+      elem = env.types.headerFor(typ, Canonical).elem
+      size = env.types.headerFor(elem, Canonical).size(env.types)
+      alignment = env.types.headerFor(elem, Canonical).align.uint32
+
+    # the payload address must satisfy the alignment requirements of the
+    # element type
+    let
+      payload     = align(c.globalsAddress, alignment)
+      data        = align(payload + intSize, alignment)
+      payloadAddr = payload + AddressBias
+      dataAddr    = data + AddressBias
+    # reserve enough space for the whole payload:
+    c.globalsAddress = data + uint32(size * tree.len(n))
+
+    # emit the seq construction:
+    stmts.addStmt Asgn:
+      bu.subTree Field:
+        bu.useLvalue dest
+        bu.add node(Immediate, 0)
+      bu.add node(IntVal, c.lit.pack(tree.len(n)))
+
+    stmts.addStmt Asgn:
+      bu.subTree Field:
+        bu.useLvalue dest
+        bu.add node(Immediate, 1)
+      bu.add node(IntVal, c.lit.pack(payloadAddr.int64))
+
+    # emit the capacity initialization:
+    stmts.addStmt NodeKind.Store:
+      bu.add typeRef(c, env, env.types.sizeType)
+      bu.add node(IntVal, c.lit.pack(payloadAddr.int64))
+      bu.add node(IntVal, c.lit.pack(tree.len(n) or StrLitFlag))
+
+    # emit the payload data initialization:
+    for i, it in tree.args(n):
+      let nDest = makeExpr elem:
+        bu.subTree Deref:
+          bu.add typeRef(c, env, elem)
+          bu.add node(IntVal, c.lit.pack(dataAddr.int64 + size * i))
+
+      c.genConst(env, tree, it, nDest, stmts)
+  of mnkSetConstr:
+    let desc = env.types.headerFor(typ, Lowered)
+
+    # evaluate the constant set first:
+    var bitset: TBitSet
+    bitset.bitSetInit(desc.size(env.types).int)
+
+    for it in tree.items(n, 0, ^1):
+      if tree[it].kind == mnkRange:
+        bitSetInclRange(bitset,
+          env.getInt(tree[it, 0].number) .. env.getInt(tree[it, 1].number))
+      else:
+        bitSetIncl(bitset, env.getInt(tree[it].number))
+
+    if bitset.len > 8:
+      # the set is implemented as an array
+      for i, it in bitset.pairs:
+        # globals are zero-initialized by default, so some can be saved by
+        # omitting zero assignments
+        if it != 0:
+          stmts.addStmt Asgn:
+            bu.subTree At:
+              bu.add dest.nodes
+              bu.add node(IntVal, c.lit.pack(i))
+            bu.add node(IntVal, c.lit.pack(it.int))
+    else:
+      # the set fits into an integer
+      var value = 0'i64
+      for i, it in bitset.pairs:
+        value = value or (int64(it) shl (i * 8))
+      putIntoDest node(IntVal, c.lit.pack(value))
+  else:
+    unreachable()
+
 proc generateCodeForMain(c; env: var MirEnv; m: Module,
                          modules: ModuleList): (PSym, seq[Node]) =
   ## Generates the IL for the entry procedure, that is, the top-level procedure
@@ -1934,6 +2128,17 @@ proc generateCodeForMain(c; env: var MirEnv; m: Module,
     let data = env.dataFor(cnst)
     if data notin c.dataMap:
       c.dataMap[data] = c.newGlobal(env, env.types.add(env[cnst].typ))
+
+  # emit the initialization for all data globals:
+  for cnst, id in c.dataMap.pairs:
+    let typ = env[cnst][0].typ
+    let dest = makeExpr typ:
+      bu.subTree Deref:
+        bu.add typeRef(c, env, typ)
+        bu.subTree Copy:
+          bu.add node(Global, id)
+
+    c.genConst(env, env[cnst], NodePosition(0), dest, bu)
 
   # emit the initialization for constants. While not required by the
   # NimSkull specification, we give each constant its own unique location
