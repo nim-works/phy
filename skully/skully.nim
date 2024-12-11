@@ -39,6 +39,7 @@ import
   compiler/mir/[
     datatables,
     mirenv,
+    mirgen,
     mirtrees,
     mirtypes
   ],
@@ -1908,6 +1909,36 @@ proc replaceModule(config: ConfigRef, name: string, with: string) =
     other = findPatchFile(config, with)
   config.m.fileInfos[ord idx] = config.m.fileInfos[ord other]
 
+proc generateCodeForMain(c; env: var MirEnv; m: Module,
+                         modules: ModuleList): (PSym, seq[Node]) =
+  ## Generates the IL for the entry procedure, that is, the top-level procedure
+  ## representing the whole program.
+
+  # we use the compiler-provided main procedure generation here, but ignore
+  # the body, as we're only interested in the symbol
+  let prc = generateMainProcedure(c.graph, m.idgen, modules)
+
+  # we cannot use the standard MIR translation, because:
+  # * the ``process`` iterator is done already
+  # * we need to inject additional IL code at the start of the body
+  let body = generateCode(c.graph, env, prc, TranslationConfig(),
+                          prc.ast[bodyPos])
+  c.prc.reset()
+
+  # manually setup the mapping for the result variable
+  c.prc.localMap[LocalId(0)] = 0'u32
+
+  var bu = initBuilder(Stmts)
+
+  c.prc.active = true
+  genAll(env, body.code, bu, c)
+  bu.subTree Return:
+    bu.subTree Copy:
+      bu.add node(Local, 0)
+
+  let typ = c.genProcType(env, env.types.add(prc.typ))
+  result = (prc, c.complete(env, typ, c.prc, body, finish(bu)))
+
 proc compile(graph: ModuleGraph) =
   # --- run the semantic pass for the project
   registerPass graph, semPass
@@ -1948,6 +1979,11 @@ proc compile(graph: ModuleGraph) =
     # too, therefore its type can be used here
     let typ = c.genProcType(env, env.types.add(mlist.mainModule().init.typ))
     procs[id] = c.complete(env, typ, it.ctx, it.body, it.nodes)
+
+  # now that all live entities are known, emit the main procedure:
+  block:
+    let (id, body) = generateCodeForMain(c, env, mainModule(mlist), mlist)
+    procs[env.procedures.add(id)] = body
 
   # compute some statistics about the generated code:
   block:
