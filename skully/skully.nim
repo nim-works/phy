@@ -2218,12 +2218,7 @@ proc generateCodeForMain(c; env: var MirEnv; m: Module,
   let typ = c.genProcType(env, env.types.add(prc.typ))
   result = (prc, c.complete(env, typ, c.prc, body, finish(bu)))
 
-proc compile(graph: ModuleGraph) =
-  # --- run the semantic pass for the project
-  registerPass graph, semPass
-  registerPass graph, collectPass
-  compileProject(graph, graph.config.projectMainIdx)
-
+proc generateCode(graph: ModuleGraph) =
   block:
     # the ``TFrame`` system type must not be treated as an imported type (as
     # those are not supported by skully), so we have to "correct" the type
@@ -2340,11 +2335,6 @@ proc main(args: openArray[string]) =
   # replace some system modules:
   replaceModule(config, "pure/os", "os.nim")
 
-  # add the overrides module as an implicit import, so that the hook
-  # procedures part of it are added to the compilation
-  config.implicitImportsAdd:
-    config[findPatchFile(config, "overrides.nim")].fullPath.string
-
   # disable various C and platform specific code, in order to reduce the
   # amount of patching that's needed
   defineSymbol(config, "noSignalHandler") # disable default signal handlers
@@ -2356,7 +2346,20 @@ proc main(args: openArray[string]) =
   # XXX: only arc is support at the moment
   discard processSwitch("gc", "arc", passCmd2, config)
 
-  # now compile the input module:
-  compile(graph)
+  # ---- the main part of compilation
+  registerPass graph, semPass
+  registerPass graph, collectPass
+
+  # before compiling the main module, the various other modules skully
+  # needs for operation and/or code generation have to be compiled (after
+  # the system module, of course)
+  graph.compileSystemModule()
+  # needs for operation and/or code generation have to be compiled
+  discard graph.compileModule(findPatchFile(config, "overrides.nim"), {})
+
+  graph.compileProject(config.projectMainIdx)
+
+  # generate the IL code:
+  generateCode(graph)
 
 main(getExecArgs())

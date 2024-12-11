@@ -6,8 +6,6 @@
 ## All overrides are compilerprocs with a name of the form
 ## "hook_<original name>".
 
-{.used.} # prevent "unused import" warnings
-
 {.push checks: off, profiler: off, stacktrace: off.}
 
 proc hook_c_memcpy*(a, b: pointer, size: csize_t): pointer {.compilerproc.} =
