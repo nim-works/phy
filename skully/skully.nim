@@ -763,14 +763,16 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         value(tree.argument(n, 0))
         bu.add node(IntVal, 0)
   of mFinished:
-    wrapAsgn Eq:
+    # the status field is stored at the start of the env object, load it and
+    # test whether the value is < 0
+    wrapAsgn Lt:
       bu.add typeRef(c, env, env.types.sizeType)
       bu.subTree Load:
         bu.add typeRef(c, env, env.types.sizeType)
         bu.subTree Copy:
           bu.subTree Field:
             lvalue(tree.argument(n, 0))
-            bu.add node(Immediate, 0)
+            bu.add node(Immediate, 1)
 
       bu.add node(IntVal, 0)
   of mCopyInternal:
