@@ -616,12 +616,12 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   of mNot:
     wrapAsgn Not:
       value(tree.argument(n, 0))
-  of mLtI, mLtF64, mLtEnum, mLtU, mLtCh:
+  of mLtI, mLtF64, mLtEnum, mLtU, mLtCh, mLtPtr:
     wrapAsgn Lt:
       bu.add typeRef(c, env, tree[tree.argument(n, 0)].typ)
       value(tree.argument(n, 0))
       value(tree.argument(n, 1))
-  of mLeI, mLeF64, mLeEnum, mLeU, mLeCh:
+  of mLeI, mLeF64, mLeEnum, mLeU, mLeCh, mLePtr:
     wrapAsgn Le:
       bu.add typeRef(c, env, tree[tree.argument(n, 0)].typ)
       value(tree.argument(n, 0))
