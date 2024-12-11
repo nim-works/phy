@@ -2124,7 +2124,7 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
       let prc = env.procedures[evt.entity.prc]
       if sfImportc in prc.flags:
         # replace importc'ed procedures with their corresponding overrides
-        let override = graph.getCompilerProc("hook_" & prc.name.s)
+        let override = graph.getCompilerProc("hook_" & prc.extName)
         if override.isNil:
           graph.config.internalError(prc.info):
             "no override for importc'ed procedure found"

@@ -8,10 +8,10 @@
 
 {.push checks: off, profiler: off, stacktrace: off.}
 
-proc hook_c_memcpy*(a, b: pointer, size: csize_t): pointer {.compilerproc.} =
+proc hook_memcpy*(a, b: pointer, size: csize_t): pointer {.compilerproc.} =
   copyMem(a, b, size)
 
-proc hook_c_memmove(a, b: pointer, size: csize_t): pointer {.compilerproc.} =
+proc hook_memmove(a, b: pointer, size: csize_t): pointer {.compilerproc.} =
   if a < b:
     var a = cast[ptr UncheckedArray[byte]](a)
     var b = cast[ptr UncheckedArray[byte]](b)
@@ -49,8 +49,8 @@ proc hook_strcmp(a, b: cstring): int {.compilerproc.} =
       if result != 0:
         return
 
-proc hook_c_memchr(cstr: pointer, c: char, n: csize_t
-                  ): pointer {.compilerproc.} =
+proc hook_memchr(cstr: pointer, c: char, n: csize_t
+                ): pointer {.compilerproc.} =
   let arr = cast[ptr UncheckedArray[char]](cstr)
   for i in 0..<n:
     if arr[i] == c:
@@ -73,13 +73,13 @@ proc hook_nimModInt32(a, b: int32, p: ptr int32): bool {.compilerproc.} =
 proc hook_nimModInt64(a, b: int64, p: ptr int64): bool {.compilerproc.} =
   p[] = a mod b
 
-proc hook_likelyProc(a: bool): bool {.compilerproc.} =
+proc hook_NIM_LIKELY(a: bool): bool {.compilerproc.} =
   a
 
-proc hook_unlikelyProc(a: bool): bool {.compilerproc.} =
+proc hook_NIM_UNLIKELY(a: bool): bool {.compilerproc.} =
   a
 
-proc hook_c_fabs(a: float): float {.compilerproc.} =
+proc hook_fabs(a: float): float {.compilerproc.} =
   if a == 0.0:
     result = 0.0 # so that fabs(-0.0) == 0.0
   elif a < 0.0:
@@ -90,25 +90,25 @@ proc hook_c_fabs(a: float): float {.compilerproc.} =
 # TODO: the overrides below should not be needed. Instead, the procedures
 #       calling these I/O and formatting procedures need to be hooked
 
-proc hook_c_fflush(f: File): cint {.compilerproc.} =
+proc hook_fflush(f: File): cint {.compilerproc.} =
   discard
 
-proc hook_c_fwrite(buf: pointer, size, n: csize_t, f: File): cint {.compilerproc.} =
+proc hook_fwrite(buf: pointer, size, n: csize_t, f: File): cint {.compilerproc.} =
   discard
 
-proc hook_c_fgets(c: cstring, n: cint, f: File): cstring {.compilerproc.} =
+proc hook_fgets(c: cstring, n: cint, f: File): cstring {.compilerproc.} =
   discard
 
-proc hook_c_clearerr(f: File) {.compilerproc.} =
+proc hook_clearerr(f: File) {.compilerproc.} =
   discard
 
-proc hook_c_ferror(f: File): cint {.compilerproc.} =
+proc hook_ferror(f: File): cint {.compilerproc.} =
   discard
 
 proc hook_strerror(errnum: cint): cstring {.compilerproc.} =
   discard
 
-proc hook_c_strtod(buf: cstring, endptr: ptr cstring): float64 {.compilerproc.} =
+proc hook_strtod(buf: cstring, endptr: ptr cstring): float64 {.compilerproc.} =
   discard
 
 {.pop.}
