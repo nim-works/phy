@@ -344,7 +344,7 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
     bu.subTree (if wantValue: Load else: Deref):
       bu.add typeRef(c, env, tree[n].typ)
       bu.subTree Copy:
-        bu.add node(Global, tree[n].global.uint32)
+        bu.add node(Global, c.globalsMap[tree[n].global])
   of mnkNilLit:
     bu.add node(IntVal, 0)
   of mnkIntLit, mnkUIntLit:
