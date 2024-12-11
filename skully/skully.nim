@@ -2232,7 +2232,7 @@ proc compile(graph: ModuleGraph) =
 
   bu.subTree GlobalDefs:
     for it in c.globals.items:
-      bu.add node(IntVal, c.lit.pack(it.address.int))
+      bu.add node(IntVal, c.lit.pack(it.address.int + AddressBias))
 
   bu.subTree ProcDefs:
     for id, it in procs.pairs:
