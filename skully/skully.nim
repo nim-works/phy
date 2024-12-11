@@ -133,6 +133,8 @@ const
     ## must be added to all raw address values, in order to undo the
     ## offset applied to address value on memory access performed by the VM
 
+  Branch = SelectBool # XXX: for forward compatibility
+
 using
   bu: var Builder[NodeKind]
   tree: MirTree
