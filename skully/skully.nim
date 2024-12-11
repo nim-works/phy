@@ -177,10 +177,11 @@ proc newLabel(c: var ProcContext): uint32 =
   result = c.nextLabel
   inc c.nextLabel
 
-proc newTemp(c; typ: TypeId): uint32 =
+proc newTemp(c; typ: TypeId): Expr =
   assert typ != VoidType
-  result = c.prc.nextLocal + c.prc.temps.len.uint32
+  let id = c.prc.nextLocal + c.prc.temps.len.uint32
   c.prc.temps.add typ
+  result = makeExpr(@[node(Local, id)], typ)
 
 proc compilerProc(c; env: var MirEnv, name: string): Node =
   ## Requests the compilerproc with the given `name` and returns a reference
@@ -590,6 +591,9 @@ proc use(bu; e: Expr) =
   else:
     bu.add e.nodes
 
+proc useLvalue(bu; e: Expr) =
+  bu.add e.nodes
+
 proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   template value(n: NodePosition) =
     c.translateValue(env, tree, n, true, bu)
@@ -816,8 +820,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   of mLengthSeq, mLengthOpenArray, mLengthStr:
     c.genLength(env, tree, NodePosition tree.argument(n, 0), dest, stmts)
   of mHigh:
-    let tmp = makeExpr(@[node(Local, c.newTemp(env.types.sizeType))],
-                       env.types.sizeType)
+    let tmp = c.newTemp(env.types.sizeType)
     c.genLength(env, tree, NodePosition tree.argument(n, 0), tmp, stmts)
     wrapAsgn Sub:
       bu.add typeRef(c, env, env.types.sizeType)
@@ -898,7 +901,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       inc i
 
     stmts.addStmt Asgn:
-      bu.add node(Local, temp)
+      bu.useLvalue(temp)
       bu.subTree Call:
         bu.add compilerProc(c, env, "rawNewString")
         bu.add nodes # the length expression
@@ -909,18 +912,16 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         stmts.addStmt Call:
           bu.add compilerProc(c, env, "appendChar")
           bu.subTree Addr:
-            bu.add node(Local, temp)
+            bu.useLvalue(temp)
           value(it)
       else:
         stmts.addStmt Call:
           bu.add compilerProc(c, env, "appendString")
           bu.subTree Addr:
-            bu.add node(Local, temp)
+            bu.useLvalue(temp)
           value(it)
 
-    # assign to the destination:
-    wrapAsgn Copy:
-      bu.add node(Local, temp)
+    genAsgn(dest, temp, stmts)
   of mParseBiggestFloat:
     wrapAsgn Call:
       bu.add compilerProc(c, env, "nimParseBiggestFloat")
@@ -1004,7 +1005,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     for i in 1..<tree.numArgs(n):
       stmts.addStmt Asgn:
         bu.subTree At:
-          bu.add node(Local, tmp)
+          bu.useLvalue(tmp)
           bu.add node(IntVal, c.lit.pack(i - 1))
         value(tree.argument(n, i))
 
@@ -1015,20 +1016,19 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
 
     stmts.addStmt Asgn:
       bu.subTree Field:
-        bu.add node(Local, oa)
+        bu.useLvalue oa
         bu.add node(Immediate, 0)
       bu.subTree Addr:
-        bu.add node(Local, tmp)
+        bu.useLvalue tmp
     stmts.addStmt Asgn:
       bu.subTree Field:
-        bu.add node(Local, oa)
+        bu.useLvalue oa
         bu.add node(Immediate, 1)
       bu.add node(IntVal, c.lit.pack(tree.numArgs(n) - 1))
 
     stmts.addStmt Call:
       bu.add compilerProc(c, env, "echoBinSafe")
-      bu.subTree Copy:
-        bu.add node(Local, oa)
+      bu.use oa
   of mOf:
     wrapAsgn:
       c.genOf(env, tree,
@@ -1120,10 +1120,10 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
                 # the expression doesn't have an address; introduce a temporary
                 let tmp = c.newTemp(tree[it].typ)
                 stmts.addStmt Asgn:
-                  bu.add node(Local, tmp)
+                  bu.useLvalue tmp
                   value(it)
                 bu.subTree Addr:
-                  bu.add node(Local, tmp)
+                  bu.useLvalue tmp
               else:
                 takeAddr NodePosition(it)
             else:
@@ -1145,11 +1145,10 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         # go through a temporary
         let tmp = c.newTemp(tree[n].typ)
         stmts.addStmt CheckedCallAsgn:
-          bu.add node(Local, tmp)
+          bu.useLvalue tmp
           c.genOperands(env, tree, n, bu, stmts)
 
-        wrapAsgn Copy:
-          bu.add node(Local, tmp)
+        genAsgn(dest, tmp, stmts)
       elif tree[n].typ == VoidType:
         stmts.addStmt kind:
           c.genOperands(env, tree, n, bu, stmts)
@@ -1440,7 +1439,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
     # translate to a chain of If statements
     let tmp = c.newTemp(tree[n, 0].typ)
     stmts.addStmt Asgn:
-      bu.add node(Local, tmp.uint32)
+      bu.useLvalue tmp
       c.translateValue(env, tree, tree.child(n, 0), true, bu)
 
     var next = c.prc.newLabel()
@@ -1456,16 +1455,14 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
             bu.subTree Le:
               bu.add typeRef(c, env, tree[n, 0].typ)
               c.translateValue(env, tree, tree.child(it, 0), true, bu)
-              bu.subTree Copy:
-                bu.add node(Local, tmp.uint32)
+              bu.use tmp
             bu.goto(next)
             bu.goto(other)
           stmts.join other
           stmts.addStmt SelectBool:
             bu.subTree Le:
               bu.add typeRef(c, env, tree[n, 0].typ)
-              bu.subTree Copy:
-                bu.add node(Local, tmp.uint32)
+              bu.use tmp
               c.translateValue(env, tree, tree.child(it, 1), true, bu)
             bu.goto(next) # continue with the next check
             bu.goto(then) # jump to the body of the branch
@@ -1473,8 +1470,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
           stmts.addStmt SelectBool:
             bu.subTree Eq:
               bu.add typeRef(c, env, tree[n, 0].typ)
-              bu.subTree Copy:
-                bu.add node(Local, tmp.uint32)
+              bu.use tmp
               c.translateValue(env, tree, it, true, bu)
             bu.goto(next)
             bu.goto(then)
@@ -1499,7 +1495,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
     let temp = c.newTemp(PointerType)
     stmts.addStmt Except:
       bu.add node(Immediate, label)
-      bu.add node(Local, temp)
+      bu.add temp.nodes
     if tree[n].len > 1:
       # it's not a catch-all branch. The exception's dynamic type needs to be
       # compared against the expected types
@@ -1507,13 +1503,13 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
       var els = c.prc.newLabel()
 
       let
-        ex = makeExpr(@[node(Local, c.newTemp(PointerType))], PointerType)
+        # XXX: this looks like it's nonsense? `ex` is never initialized...
+        ex = c.newTemp(PointerType)
         excType = env.types.add(c.graph.getCompilerProc("Exception").typ)
         expr = buildExpr excType:
           bu.subTree Deref:
             bu.add typeRef(c, env, excType)
-            bu.subTree Copy:
-              bu.add ex.nodes
+            bu.use ex
 
       stmts.putInto ex, Call:
         bu.add compilerProc(c, env, "nimBorrowCurrentException")
@@ -1529,8 +1525,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
       stmts.join(els)
       # the exception needs to be re-raised if none of the types match
       stmts.addStmt Raise:
-        bu.subTree Copy:
-          bu.add node(Local, temp)
+        bu.use temp
         c.genExit(tree, tree.last(n), bu)
       stmts.join(then)
 
@@ -1541,7 +1536,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
       let temp = c.newTemp(PointerType)
       stmts.addStmt Except:
         bu.add node(Immediate, label)
-        bu.add node(Local, temp)
+        bu.add temp.nodes
       c.prc.active = true
   of mnkContinue:
     guardActive()
