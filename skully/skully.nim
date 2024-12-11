@@ -58,6 +58,12 @@ import
     pass25,
     spec,
     trees
+  ],
+  skully/[
+    runner
+  ],
+  vm/[
+    vmmodules
   ]
 
 from compiler/mir/mirbodies import MirBody, `[]`
@@ -2605,7 +2611,7 @@ proc generateCodeForMain(c; env: var MirEnv; m: Module,
   let typ = c.genProcType(env, env.types.add(prc.typ))
   result = (prc, c.complete(env, typ, c.prc, body, finish(bu)))
 
-proc generateCode(graph: ModuleGraph) =
+proc generateCode(graph: ModuleGraph): VmModule =
   block:
     # the ``TFrame`` system type must not be treated as an imported type (as
     # those are not supported by skully), so we have to "correct" the type
@@ -2688,6 +2694,8 @@ proc generateCode(graph: ModuleGraph) =
   measure "pass3": tree = tree.apply(pass3.lower(tree, 8))
   measure "pass1": tree = tree.apply(pass1.lower(tree, 8))
 
+  result = pass0.translate(tree)
+
 proc main(args: openArray[string]) =
   let config = newConfigRef(cli_reporter.reportHook)
   config.writelnHook = proc(r: ConfigRef, output: string, flags: MsgFlags) =
@@ -2757,6 +2765,9 @@ proc main(args: openArray[string]) =
   graph.compileProject(config.projectMainIdx)
 
   # generate the IL code:
-  generateCode(graph)
+  let m = generateCode(graph)
+
+  # TODO: separate compilation from running the result
+  programResult = linkAndRun(m, 1024 * 1024 * 8) # 2 MiB stack
 
 main(getExecArgs())
