@@ -521,8 +521,12 @@ proc genDefault(c; env: MirEnv; dest: Expr, typ: TypeId, bu) =
   of tkFloat:
     genAsgn(dest, makeExpr(@[node(FloatVal, c.lit.pack(0.0))], typ), bu)
   else:
-    # TODO: implement
-    discard
+    # TODO: the type field needs to be initialized too. RTTI is currently
+    #       still missing
+    let size = env.types.headerFor(typ, Lowered).size(env.types)
+    bu.subTree Clear:
+      takeAddr(dest, bu)
+      bu.add node(IntVal, c.lit.pack(size))
 
 proc genField(c; env: MirEnv; tree; n; pos: int32, bu) =
   c.genField(env, c.gen(env, tree, n, false), pos, bu)
