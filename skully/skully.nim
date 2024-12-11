@@ -1304,7 +1304,8 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
     let dest = c.gen(env, tree, tree.child(n, 0), false)
     if tree[n, 1].kind != mnkNone:
       c.translateExpr(env, tree, tree.child(n, 1), dest, stmts)
-    else:
+    elif tree[n, 0].kind != mnkParam:
+      # ignore param defs; they only mark sink parameters as going live
       c.genDefault(env, dest, tree[n, 0].typ, stmts)
   of mnkBind, mnkBindMut:
     guardActive()
