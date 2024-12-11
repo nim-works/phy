@@ -1172,6 +1172,11 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         value(tree.last(it))
       inc i
   of mnkSeqConstr:
+    let
+      typ  = env.types.canonical(tree[n].typ)
+      elem = env.types.headerFor(env.types.headerFor(typ, Canonical).elem(),
+                                 Canonical)
+
     # emit the length initialization
     stmts.addStmt Asgn:
       bu.subTree Field:
@@ -1187,8 +1192,8 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       bu.subTree Call:
         bu.add c.compilerProc(env, "newSeqPayload")
         bu.add node(IntVal, c.lit.pack(tree.len(n)))
-        bu.add node(IntVal, c.lit.pack(0)) # TODO: size
-        bu.add node(IntVal, c.lit.pack(0)) # TODO: align
+        bu.add node(IntVal, c.lit.pack(size(elem, env.types)))
+        bu.add node(IntVal, c.lit.pack(elem.align))
 
     var i = 0
     for it in tree.items(n, 0, ^1):
@@ -1196,7 +1201,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         bu.subTree At:
           bu.subTree Field:
             bu.subTree Deref:
-              bu.add typeRef(c, env, payloadType(env.types, tree[n].typ))
+              bu.add typeRef(c, env, payloadType(env.types, typ))
               bu.subTree Copy:
                 bu.subTree Field:
                   bu.add dest.nodes
