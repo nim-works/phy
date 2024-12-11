@@ -642,8 +642,29 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     else:
       # both the procedure pointer and environment pointer need to be
       # compared (shallow equality)
-      # TODO: implement
-      discard
+      # TODO: use a proper short-circuiting and, not a bitand
+      wrapAsgn BitAnd:
+        bu.add typeRef(c, env, PointerType)
+        wrapAsgn Eq:
+          bu.add typeRef(c, env, PointerType)
+          bu.subTree Copy:
+            bu.subTree Field:
+              lvalue tree.argument(n, 0)
+              bu.add node(Immediate, 0)
+          bu.subTree Copy:
+            bu.subTree Field:
+              lvalue tree.argument(n, 1)
+              bu.add node(Immediate, 0)
+        wrapAsgn Eq:
+          bu.add typeRef(c, env, PointerType)
+          bu.subTree Copy:
+            bu.subTree Field:
+              lvalue tree.argument(n, 0)
+              bu.add node(Immediate, 1)
+          bu.subTree Copy:
+            bu.subTree Field:
+              lvalue tree.argument(n, 1)
+              bu.add node(Immediate, 1)
   of mIsNil:
     wrapAsgn Eq:
       let arg = tree.argument(n, 0)
