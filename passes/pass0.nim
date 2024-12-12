@@ -179,7 +179,8 @@ proc genCall(c; tree; call: NodeIndex,
 
     # the proc value is pushed to the stack last
     c.genExpr(tree, tree.child(call, start + 1))
-    c.instr(opcIndCall, int32 c.signatures[][tree[call, 0].typ], numArgs(1))
+    c.instr(opcIndCall, int32 c.signatures[][tree[call, start].typ],
+            numArgs(1))
 
 proc signExtend(c; typ: Type0) =
   if typ.size < 8:
