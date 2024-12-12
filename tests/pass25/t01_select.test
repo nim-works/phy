@@ -6,7 +6,7 @@ discard """
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1) (Locals)
+  (ProcDef (Type 1) (Params) (Locals)
     (Stmts
       (Select (Type 0) (IntVal 1)
         (Choice (IntVal 1)

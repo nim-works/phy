@@ -2,6 +2,6 @@
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 0) (Locals)
+  (ProcDef (Type 0) (Params) (Locals)
     (Stmts
       (Return))))

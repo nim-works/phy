@@ -3,10 +3,10 @@
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1) (Locals)
+  (ProcDef (Type 1) (Params) (Locals)
     (Stmts
       (Return)))
-  (ProcDef (Type 1) (Locals)
+  (ProcDef (Type 1) (Params) (Locals)
     (Stmts
       (CheckedCall (Proc 0) (Unwind))
       (Return))))
