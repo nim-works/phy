@@ -490,7 +490,7 @@ proc genExit(c; tree; exit: NodeIndex) =
   of CheckedCallAsgn:
     c.genCall(tree, exit, 1, ^3)
     c.genEh(tree, tree.last(exit))
-    c.instr(opcPopLocal, tree[exit, 1].id)
+    c.instr(opcPopLocal, tree[exit, 0].id)
     c.exit(tree[tree.child(exit, ^2), 0].imm)
   of Unreachable:
     c.instr(opcUnreachable)
