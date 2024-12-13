@@ -1,50 +1,40 @@
 ## L3 Language
 
 ```grammar
-.extends lang1
+.extends lang2
 ```
 
-There's no more unstructured `Blob` type:
+`Blob` types are replaced with structured aggregate types. A `Record` is a
+structure with sequentially layed out fields, a `Union` is a structure where
+all fields use the same memory region, and an `Array` is a homogenous sequence
+with a static number of elements.
 
 ```grammar
-typedesc -= (Blob <int>)
+typedesc -= (Blob <int> <int>)
+typedesc += (Record size:<int> align:<int> (Field <int> <type>)+)
+          | (Union  size:<int> align:<int> <type>+)
+          | (Array  size:<int> align:<int> count:<int> <type>)
+
+type -= (Blob <int> <int>)
 ```
 
-It's replaced with structured types:
+Aggregate types have a *derived* size and alignment. The derived size must
+match the explicitly size specified on the type (which is there to speed up
+processing), while the explicitly specified alignment may be a multiple of
+the derived one.
+
+Elements of aggregate values are addressed via `Path` expressions.
 
 ```grammar
-field ::= (Field offset:<int> <type>)
-
-typedesc += (Record size:<Int> <field>+)
-         |  (Array size:<Int> count:<int> <type>)
+path_idx ::= <int> | <expr>
+path     ::= (Path <type> <local> <path_idx>+)
+          |  (Path <type> (Deref <type> <expr>) <path_idx>+)
 ```
 
-As long as fields stay within the bounds of the record, they can use any
-offset they want.
-
-Both types can only be used as the type of:
-* locals
-* array elements
-* record fields
-
-The content of locations of such types is accessed with *path expressions*:
+`Path` expressions function as l-value expressions.
 
 ```grammar
-path ::= (At    <path_elem> elem:<value>)
-      |  (Field <path_elem> field:<int>)
-
-path_elem ::= (Deref <type> <value>)
-           |  <local>
-           |  <path>
+expr += (Addr <path>)
+      | (Copy <path>)
+stmt += (Asgn <path> <expr>)
 ```
-
-Path expressions are only allowed in a restricted set of contexts:
-
-```grammar
-rvalue += (Addr <path>)
-value += (Copy <path>)
-stmt += (Asgn <path> <value>)
-```
-
-Discarding an aggregate value (e.g., via `(Drop (Copy (Local 0)))`) is not
-supported at this level.

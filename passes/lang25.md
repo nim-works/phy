@@ -1,46 +1,36 @@
 ## L25 Language
 
 ```grammar
-.extends lang4
+.extends lang5
 ```
 
-Procedures are no subdivided into continuations, but instead consist of a list
-of statements:
+Procedure bodies are not subdivided into basic-blocks, but instead consist of
+a list of statements:
 
 ```grammar
-procdef -= (ProcDef <type_id> (Continuations <continuation>+))
+procdef -= (ProcDef <type_id> (Locals <type>*) (List <bblock>+))
 procdef += (ProcDef <type_id> (Params <local>*) (Locals <type>*) (Stmts <stmt>+))
 ```
 
 ### Control Flow
 
-Control-flow statements can now appear in normal statement contexts:
+Control-flow statements can now appear in a normal statement context:
 
 ```grammar
-exit -= (Continue <cont_name> <value> (List <cont_arg>*))
-      | (Loop <cont_name> (List <cont_arg>*))
-      | (Raise <value> <err_goto>)
-      | (CheckedCall <proc> <value>* <goto> <err_goto>)
-      | (CheckedCall <type> <value>+ <goto> <err_goto>)
+exit -= (CheckedCall <proc> <expr>* <goto> <err_goto>)
+      | (CheckedCall <type_id> <expr>+ <goto> <err_goto>)
 
-exit += (Continue <cont_name> <value>)
-      | (Loop <cont_name>)
-      | (Return <value>?)
-      | (Raise <value> <err_goto>)
-      | (CheckedCall <proc> <value>* <err_goto>)
-      | (CheckedCall <type> <value>+ <err_goto>)
-      | (CheckedCallAsgn <local> <proc> <value>* <err_goto>)
-      | (CheckedCallAsgn <local> <type> <value>+ <err_goto>)
-
-goto -= (Continue <cont_name> (List <cont_arg>*))
-goto += (Continue <cont_name>)
+exit += (CheckedCall <proc> <expr>* <err_goto>)
+      | (CheckedCall <type_id> <expr>+ <err_goto>)
+      | (CheckedCallAsgn <local> <proc> <expr>* <err_goto>)
+      | (CheckedCallAsgn <local> <type_id> <expr>+ <err_goto>)
 
 stmt += <goto>
       | <exit>
 ```
 
 ```grammar
-stmt += (Join label:<cont_name>)
+stmt += (Join label:<block_name>)
 ```
 
 A `Join` statement represents the destination of a non-exceptional control-
@@ -48,7 +38,7 @@ flow statement. Control-flow is allowed to reach a `Join` statement without a
 jump. Labels can be arbitrary numbers.
 
 ```grammar
-stmt += (Except label:<cont_name> <local>)
+stmt += (Except label:<block_name> <local>)
 ```
 
 An `Except` statement represents the jump target for exceptional control-flow.
