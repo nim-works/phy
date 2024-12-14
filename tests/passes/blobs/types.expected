@@ -1,0 +1,11 @@
+;$sexp
+(TypeDefs
+  (Blob 12 8)
+  (Blob 4 4)
+  (Blob 64 1)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 3) (Locals)
+    (List
+      (Block (Params) (Return)))))

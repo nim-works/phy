@@ -1,0 +1,76 @@
+;$sexp
+(TypeDefs
+  (Blob 8 4)
+  (Blob 16 4)
+  (Blob 8 4)
+  (Blob 16 4)
+  (Blob 20 4)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 5)
+    (Locals (Type 0) (Type 1) (Type 2) (Type 3) (Type 4) (Int 4))
+    (List
+      (Block (Params)
+        (Drop
+          (Addr (Local 0)))
+        (Drop
+          (Add (UInt 8)
+            (Addr (Local 0))
+            (IntVal 4)))
+        (Drop
+          (Add (UInt 8)
+            (Addr (Local 0))
+            (IntVal 4)))
+        (Drop
+          (Addr (Local 2)))
+        (Drop
+          (Addr (Local 2)))
+        (Drop
+          (Addr (Local 3)))
+        (Drop
+          (Addr (Local 3)))
+        (Drop
+          (Add (UInt 8)
+            (Addr (Local 3))
+            (IntVal 8)))
+        (Drop
+          (Add (UInt 8)
+            (Addr (Local 3))
+            (IntVal 16)))
+        (Drop
+          (Add (UInt 8)
+            (Addr (Local 3))
+            (Mul (UInt 8)
+              (Copy (Local 5))
+              (IntVal 8))))
+        (Drop
+          (Add (UInt 8)
+            (Addr (Local 3))
+            (IntVal 12)))
+        (Drop
+          (Add (UInt 8)
+            (Add (UInt 8)
+              (Addr (Local 3))
+              (Mul (UInt 8)
+                (Copy (Local 5))
+                (IntVal 8)))
+            (IntVal 4)))
+        (Drop
+          (Add (UInt 8)
+            (Add (UInt 8)
+              (Add (UInt 8)
+                (Addr (Local 4))
+                (IntVal 4))
+              (Mul (UInt 8)
+                (Copy (Local 5))
+                (IntVal 8)))
+            (IntVal 4)))
+        (Drop
+          (Add (UInt 8)
+            (Addr (Local 3))
+            (Mul (UInt 8)
+              (Load (Int 4)
+                (Addr (Local 0)))
+              (IntVal 8))))
+        (Return)))))

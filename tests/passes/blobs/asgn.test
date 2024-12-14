@@ -1,0 +1,44 @@
+discard """
+  description: "
+    Ensure that assignments with path operands are transformed properly and
+    that stores/loads are collapsed into blits
+  "
+  output: "(Done)"
+"""
+(TypeDefs
+  (Record 8 4
+    (Field 0 (Int 4))
+    (Field 4 (Int 4)))
+  (Record 16 4
+    (Field 0 (Type 0)))
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 2)
+    (Locals (Type 0) (Type 0) (Type 1) (Int 4))
+    (List
+      (Block (Params)
+        (Asgn
+          (Path (Int 4) (Local 0) 0)
+          (IntVal 0))
+
+        (Asgn (Local 1)
+          (Copy (Local 0)))
+
+        (Asgn (Local 1)
+          (Load (Type 0)
+            (Addr (Local 0))))
+
+        (Asgn
+          (Path (Type 0) (Local 2) 0)
+          (Load (Type 0)
+            (Addr (Local 0))))
+
+        (Store (Type 0)
+          (Addr (Local 0))
+          (Load (Type 0)
+            (Addr (Local 1))))
+
+        (Asgn (Local 3) (IntVal 0))
+
+        (Return)))))
