@@ -22,7 +22,7 @@ type
     Asgn, Drop, Clear, Blit
 
     Load, Store, Addr, Call
-    Deref, Field, At
+    Deref, Field, At, Path
     Copy
 
     Neg, Add, Sub, Mul, Div, Mod
