@@ -1,0 +1,63 @@
+discard """
+  description: "
+    Ensure that `Path` operands, as well as expressions within deref roots, are
+    materialized into temporaries where needed
+  "
+  output: "(Done)"
+"""
+(TypeDefs
+  (Record 4 4
+    (Field 0 (Int 4)))
+  (Array 4 4 1 (Int 4))
+  (Array 4 4 1 (Type 0))
+  (ProcTy (Int 4) (Type 0))
+  (ProcTy (Void)  (Int 8) (Type 0))
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 3)
+    (Locals (Type 0))
+    (List
+      (Block
+        (Params (Local 0))
+        (Return (IntVal 0)))))
+
+  (ProcDef (Type 4)
+    (Locals (Int 8) (Type 0))
+    (List
+      (Block
+        (Params (Local 0) (Local 1))
+        (Return))))
+
+  (ProcDef (Type 5)
+    (Locals (Type 0) (Type 1) (Type 2) (Int 4))
+    (List
+      (Block (Params)
+        (Asgn
+          (Path (Int 4) (Local 1)
+            (Copy (Local 3)))
+          (Call (Proc 0)
+            (Copy (Local 0))))
+
+        (Asgn
+          (Path (Int 4)
+            (Deref (Type 0)
+              (Addr
+                (Path (Type 0) (Local 2)
+                  (Copy (Local 3)))))
+            0)
+          (Call (Proc 0)
+            (Copy (Local 0))))
+
+        (Store (Int 4)
+          (Addr
+            (Path (Int 4) (Local 1)
+              (Copy (Local 3))))
+          (Call (Proc 0) (Copy (Local 0))))
+
+        (Call (Proc 1)
+          (Addr
+            (Path (Int 4) (Local 1)
+              (Copy (Local 3))))
+          (Copy (Local 0)))
+        (Return)))))
