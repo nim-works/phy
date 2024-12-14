@@ -12,7 +12,8 @@ procdef += (ProcDef <type_id> (Locals <type>*) (List <bblock>+))
 ```
 
 In addition, locals may be of `Blob` type. Blob locals may also have
-their address taken (locals of numeric type must not).
+their address taken (locals of numeric type must not). Parameters
+and return values must not be of `Blob` type.
 
 ```grammar
 expr += (Addr <local>)
