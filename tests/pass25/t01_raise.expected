@@ -4,7 +4,7 @@
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1)
-    (Continuations
-      (Continuation (Params) (Locals)
+  (ProcDef (Type 1) (Locals)
+    (List
+      (Block (Params)
         (Raise (IntVal 100) (Unwind))))))
