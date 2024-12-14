@@ -1,5 +1,5 @@
 discard """
-  output: "(Done 1)"
+  output: "(Done 2)"
 """
 (TypeDefs
   (ProcTy (Int 8))
@@ -8,9 +8,7 @@ discard """
 (ProcDefs
   (ProcDef (Type 0) 0 (Locals) (List
     (Block (Params)
-      (Select (Float 8) (FloatVal 20.0)
-        (Choice (FloatVal 15.0) (FloatVal 25.0) (Goto 1))
-        (Choice (FloatVal 10.0) (Goto 2)))
+      (Branch (IntVal 1) (Goto 1) (Goto 2))
     )
     (Block (Params)
       (Return (IntVal 1))
