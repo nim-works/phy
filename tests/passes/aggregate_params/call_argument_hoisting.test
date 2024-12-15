@@ -40,4 +40,11 @@ discard """
           (Copy (Local 0))
           (IntVal 100))
 
+        (CheckedCall (Proc 0)
+          (Copy (Local 1))
+          (Copy (Local 0))
+          (Copy (Local 1))
+          (Goto 1) (Unwind)))
+
+      (Block (Params)
         (Return)))))

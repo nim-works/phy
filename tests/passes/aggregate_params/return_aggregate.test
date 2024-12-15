@@ -40,4 +40,7 @@ discard """
         (Store (Type 0)
           (Addr (Local 0))
           (Call (Proc 0) (IntVal 100)))
+        (CheckedCallAsgn (Local 0) (Proc 0) (IntVal 100)
+          (Goto 1) (Unwind)))
+      (Block (Params)
         (Return)))))
