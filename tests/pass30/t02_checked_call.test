@@ -2,9 +2,9 @@
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 0) (Locals)
+  (ProcDef (Type 0) (Params) (Locals)
     (Return))
-  (ProcDef (Type 0) (Locals)
+  (ProcDef (Type 0) (Params) (Locals)
     (Stmts
       (CheckedCall (Proc 0))
       (Return))))

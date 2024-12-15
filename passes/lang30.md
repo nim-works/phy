@@ -8,8 +8,8 @@ Instead of one flat list of statements, statements in a procedure can now be
 nested:
 
 ```grammar
-procdef -= (ProcDef <type_id> (Locals <type>*) (Stmts <stmt>+))
-procdef += (ProcDef <type_id> (Locals <type>*) <single_stmt>)
+procdef -= (ProcDef <type_id> (Params <local>*) (Locals <type>*) (Stmts <stmt>+))
+procdef += (ProcDef <type_id> (Params <local>*) (Locals <type>*) <single_stmt>)
 ```
 
 The goto-based control-flow constructs are replaced with structured equivalents.
