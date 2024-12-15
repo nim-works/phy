@@ -5,11 +5,14 @@
 (GlobalDefs)
 (ProcDefs
   (ProcDef (Type 1)
+    (Params (Local 1) (Local 0))
     (Locals (Type 0) (Type 0))
     (Stmts
+      (Drop (Copy (Local 1)))
+      (Drop (Copy (Local 0)))
       (Return)))
 
-  (ProcDef (Type 2) (Locals)
+  (ProcDef (Type 2) (Params) (Locals)
     (Stmts
       (Call (Proc 0) (IntVal 100) (IntVal 200))
       (Return))))

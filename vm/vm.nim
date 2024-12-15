@@ -395,6 +395,7 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
         check tmp > 0 and tmp < c.procs.len.uint64, ecIllegalProc
         prc = ProcIndex(tmp - 1)
         check TypeId(idx) == c[prc].typ, ecTypeError
+        bias = 1 # the callee operand needs to be popped too
       else:
         unreachable()
 

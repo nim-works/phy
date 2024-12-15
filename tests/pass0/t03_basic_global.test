@@ -6,7 +6,7 @@ discard """
   (ProcTy (Type 0))
 )
 (GlobalDefs
-  (IntVal 1)
+  (GlobalDef (Int 8) (IntVal 1))
 )
 (ProcDefs
   (ProcDef (Type 1) (Locals) (Continuations
