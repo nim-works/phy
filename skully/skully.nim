@@ -77,6 +77,7 @@ type
   ProcContext = object
     localMap: Table[LocalId, uint32]
     labelMap: Table[LabelId, uint32]
+    params: seq[uint32]
     indirectLocals: PackedSet[LocalId]
       ## all locals that are references and not locals with storage
     nextLabel: uint32
@@ -2065,6 +2066,7 @@ proc reset(c: var ProcContext) =
   c.localMap.clear()
   c.labelMap.clear()
   c.temps.shrink(0)
+  c.params.shrink(0)
   c.indirectLocals.clear()
   c.sources.reset()
 
@@ -2075,6 +2077,9 @@ proc complete(c; env: MirEnv, typ: Node, prc: ProcContext, body: MirBody,
   ## context, and `content` is the statement list that makes up the body.
   var bu = initBuilder[NodeKind](ProcDef)
   bu.add typ
+  bu.subTree Params:
+    for it in prc.params.items:
+      bu.add node(Local, it)
   bu.subTree Locals:
     for id, it in body.locals.pairs:
       if env.types.canonical(it.typ) != VoidType:
@@ -2194,11 +2199,20 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
       else:
         c.prc.localMap[id] = uint32(id.ord - bias)
 
-    let procType = env.types.add(evt.sym.typ)
-    # gather the parameters that use pass-by-reference
-    for (i, _, flags) in env.types.params(env.types.headerFor(procType, Canonical)):
-      if pfByRef in flags:
-        c.prc.indirectLocals.incl LocalId(i + 1)
+    let
+      procType = env.types.add(evt.sym.typ)
+      procTypeDesc = env.types.headerFor(procType, Canonical)
+
+    # gather the list of IL parameters
+    for (i, typ, flags) in env.types.params(procTypeDesc):
+      if env.types.canonical(typ) != VoidType:
+        c.prc.params.add c.prc.localMap[LocalId(i + 1)]
+        if pfByRef in flags:
+          c.prc.indirectLocals.incl LocalId(i + 1)
+
+    if procTypeDesc.kind == tkClosure:
+      # register the environment parameter
+      c.prc.params.add c.prc.localMap[LocalId(procTypeDesc.numParams() + 1)]
 
     c.prc.nextLabel = body.nextLabel.uint32
     c.prc.nextLocal = uint32(body.locals.nextId.ord - bias)
