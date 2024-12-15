@@ -55,6 +55,10 @@ using
   n: NodeIndex
   bu: var ChangeSet[NodeKind]
 
+proc imm(n: Node): uint32 {.inline.} =
+  assert n.kind == Immediate
+  n.val
+
 proc local(n: Node): LocalId =
   assert n.kind == Local
   LocalId(n.val)
@@ -307,7 +311,7 @@ proc lowerTerminator(c; tree; n; bu) =
         bu.insert m, target, bu.newAddrExpr(local)
       # the temporary is copied to the actual destination on entry of
       # the non-error BB
-      c.delayed[tree[target].val] = bu.buildTree:
+      c.delayed[tree[target, 0].imm] = bu.buildTree:
         tree(Asgn, node(tree[dest]), tree(Copy, node(local)))
     else:
       c.lowerCallArgs(tree, n, 1, ^3, bu)
@@ -384,6 +388,9 @@ proc lowerProc(c; tree; n; sig: NodeIndex, bu) =
 
       c.lowerTerminator(tree, tree.last(blk), bu)
       c.addStmts(tree, stmts, tree.last(blk), bu)
+
+  # all delayed assignments must have been popped from the table
+  assert c.delayed.len == 0
 
   if c.temps.len > 0 or c.params.len > 0:
     bu.modifyTree tree, c.locals, list:
