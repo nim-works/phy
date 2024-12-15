@@ -2681,10 +2681,14 @@ proc generateCode(graph: ModuleGraph): VmModule =
     # the global with ID 0 always stores the ID. The runner later reads the
     # value in order to know where the stack should start
     let stack = align(c.globalsAddress, 8) + AddressBias
-    bu.add node(IntVal, c.lit.pack(int64 stack))
+    bu.subTree GlobalDef:
+      bu.add node(UInt, 8)
+      bu.add node(IntVal, c.lit.pack(int64 stack))
 
     for it in c.globals.items:
-      bu.add node(IntVal, c.lit.pack(it.address.int + AddressBias))
+      bu.subTree GlobalDef:
+        bu.add node(UInt, 8)
+        bu.add node(IntVal, c.lit.pack(it.address.int + AddressBias))
 
   bu.subTree ProcDefs:
     for id, it in procs.pairs:
