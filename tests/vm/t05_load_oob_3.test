@@ -1,0 +1,10 @@
+discard """
+  description: "Edge case where the access 'wraps around'"
+  output: "(Error ecIllegalAccess)"
+"""
+.type P1 () -> int
+.start P1 main
+LdImmInt -1 # wraps around to be the highest possible address value
+LdInt64 0
+Ret
+.end
