@@ -10,6 +10,8 @@
       (Continuation
         (Params (Type 0) (Type 0))
         (Locals)
+        (Drop (Copy (Local 0)))
+        (Drop (Copy (Local 1)))
         (Continue 1 (List)))
       (Continuation (Params))))
   (ProcDef (Type 2)

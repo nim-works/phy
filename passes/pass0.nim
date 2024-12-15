@@ -179,7 +179,8 @@ proc genCall(c; tree; call: NodeIndex,
 
     # the proc value is pushed to the stack last
     c.genExpr(tree, tree.child(call, start + 1))
-    c.instr(opcIndCall, int32 c.signatures[][tree[call, 0].typ], numArgs(1))
+    c.instr(opcIndCall, int32 c.signatures[][tree[call, start].typ],
+            numArgs(1))
 
 proc signExtend(c; typ: Type0) =
   if typ.size < 8:
@@ -489,7 +490,7 @@ proc genExit(c; tree; exit: NodeIndex) =
   of CheckedCallAsgn:
     c.genCall(tree, exit, 1, ^3)
     c.genEh(tree, tree.last(exit))
-    c.instr(opcPopLocal, tree[exit, 1].id)
+    c.instr(opcPopLocal, tree[exit, 0].id)
     c.exit(tree[tree.child(exit, ^2), 0].imm)
   of Unreachable:
     c.instr(opcUnreachable)
