@@ -1,0 +1,14 @@
+discard """
+  description: "Indirect call with no parameters or return value"
+  output: "(Done)"
+"""
+.type P1 () -> void
+.start P1 empty
+Ret
+.end
+
+.start P1 main
+LdImmInt 1
+IndCall P1 0
+Ret
+.end

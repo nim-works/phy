@@ -8,7 +8,7 @@
 
 import
   std/[algorithm, sequtils, tables],
-  passes/[builders, spec, trees],
+  passes/[builders, ir, spec, trees],
   phy/[reporting, types],
   vm/[utils]
 
@@ -20,7 +20,6 @@ type
   SourceKind = spec_source.NodeKind
   InTree     = PackedTree[SourceKind]
   Node       = TreeNode[NodeKind]
-  NodeSeq    = seq[Node]
 
   EntityKind = enum
     ekNone        ## signals "non-existent"
@@ -91,8 +90,8 @@ type
     # XXX: the target IL doesn't support expression lists (yet), so we have
     #      to apply the necessary lowering here, for now. Efficiency doesn't
     #      matter
-    stmts: seq[NodeSeq] # can be empty
-    expr: NodeSeq
+    stmts: seq[IrNode] # can be empty
+    expr: IrNode
     typ: SemType
     attribs: set[ExprFlag]
 
@@ -111,9 +110,9 @@ const
     "false": ekBuiltinVal
   }.toTable
 
-  UnitNode = Node(kind: IntVal)
+  UnitNode = IrNode(kind: IntVal, intVal: 0)
     ## the node representing the unitary value
-  unitExpr = Expr(expr: @[UnitNode], typ: prim(tkUnit))
+  unitExpr = Expr(expr: UnitNode, typ: prim(tkUnit))
     ## the expression evaluating to the unitary value
 
   pointerType = prim(tkInt)
@@ -124,7 +123,8 @@ using
   c: var ModuleCtx
   t: InTree
   bu: var Builder[NodeKind]
-  stmts: var seq[NodeSeq]
+  expr: var IrNode
+  stmts: var seq[IrNode]
 
 template `+`(t: SemType, a: set[ExprFlag]): ExprType =
   ## Convenience shortcut for creating an ``ExprType``.
@@ -162,12 +162,6 @@ func openScope(c) =
 func closeScope(c) =
   ## Closes the current scope and makes its parent the current one.
   c.scopes.shrink(c.scopes.len - 1)
-
-func add(bu; trees: openArray[NodeSeq]) =
-  ## Appends all `trees` to the current sub-tree. The trees must each either
-  ## represent a single atomic node, or a complete subtree.
-  for t in trees.items:
-    bu.add t
 
 template addType(c; kind: NodeKind, body: untyped): uint32 =
   c.types.subTree kind:
@@ -328,6 +322,12 @@ proc typeToIL(c; typ: SemType): uint32 =
         c.types.add Node(kind: Immediate, val: 8)
         c.types.add Node(kind: Type, val: pointerType)
 
+func numILParams(typ: SemType): int =
+  ## Returns the number of parameters the IL signature type generated from
+  ## `typ` is going to have.
+  assert typ.kind == tkProc
+  typ.elems.len - 1 + ord(typ.elems[0].kind in AggregateTypes)
+
 proc rawGenProcType(c; typ: SemType): uint32 =
   ## Generates the IL representation for the procedure signature type `typ`
   ## and adds it to `c`.
@@ -399,93 +399,37 @@ proc genPayloadType(c; typ: SemType): uint32 =
       c.types.add Node(kind: Immediate, val: 8)
       c.types.add Node(kind: Type, val: arrayType)
 
-template buildTree(kind: NodeKind, body: untyped): NodeSeq =
-  ## Makes a builder available to `body`, evaluates `body`, and returns the
-  ## generated tree.
-  var res: NodeSeq
-  if true: # open a new scope
-    var bu {.inject.} = initBuilder[NodeKind](kind)
-    body
-    res = finish(bu)
-  res
-
-template addStmt(stmts: var seq[NodeSeq], body: untyped) =
-  if true: # open a new scope
-    var bu {.inject.} = initBuilder[NodeKind]()
-    body
-    stmts.add finish(bu)
-
-template addStmt(stmts: var seq[NodeSeq], kind: NodeKind, body: untyped) =
-  stmts.add buildTree(kind, body)
-
 proc resetProcContext(c) =
   c.locals.setLen(0) # re-use the memory
 
-proc newTemp(c; typ: SemType): uint32 =
+proc newTemp(c; typ: SemType): IrNode =
   ## Allocates a new temporary of `typ` type.
   case typ.kind
-  of tkVoid: discard "do not create a temp for void"
+  of tkVoid:
+    # do not create a temp for void
+    result = IrNode(kind: None)
   else:
-    result = c.locals.len.uint32
+    result = newLocal(c.locals.len.uint32)
     c.locals.add typ
 
-proc genLocal(val: uint32, typ: SemType, bu) =
-  ## Emits a ``Local val`` to `bu`, so long as `typ` is not `tkVoid`.
-  case typ.kind
-  of tkVoid: discard "nothing to generate"
-  else: bu.add Node(kind: Local, val: val)
+proc wrap(e: sink Expr, dest: IrNode): IrNode =
+  ## Turns `e` into a statement list. The expression part is turned into an
+  ## assignment to `dest`, but only if not a void expression.
+  result = IrNode(kind: Stmts, children: e.stmts)
+  if e.typ.kind != tkVoid:
+    result.add newAsgn(dest, e.expr)
 
-proc genUse(a: Node|NodeSeq, bu) =
-  ## Emits `a` to `bu`, wrapping the expression in a ``Copy`` operation when
-  ## it's an lvalue expression.
-  case (when a is Node: a.kind else: a[0].kind)
-  of Field, At, Local:
-    bu.subTree Copy:
-      bu.add a
-  of Deref:
-    when a is NodeSeq:
-      # ``(Deref typ x)`` -> ``(Load typ x)``
-      bu.subTree Load:
-        bu.add a[1]
-        bu.add a.toOpenArray(2, a.high)
-    else:
-      unreachable()
-  else:
-    bu.add a
-
-proc genUse(e: Expr, bu; stmts) =
-  ## Emits a usage of expression `e` to `bu` and `stmts`.
+proc inline(e: sink Expr, stmts): IrNode =
+  ## Adds the statement part of `e` to `stmts` and returns the expression part.
   stmts.add e.stmts
-  genUse(e.expr, bu)
+  e.expr
 
-proc genAsgn(c; a: Node|NodeSeq, b: NodeSeq, typ: SemType, bu) =
-  ## Emits an ``a = b`` assignment to `bu`. For convenience, if `typ` is a
-  ## ``tkVoid``, no assignment is emitted.
-  if typ.kind != tkVoid:
-    bu.subTree Asgn:
-      bu.add a
-      genUse(b, bu)
-
-proc genDrop(a: Node|NodeSeq, typ: SemType, bu) =
-  ## Emits a ``Drop a`` to `bu`, so long as `typ` is not `void`.
-  if typ.kind != tkVoid:
-    bu.subTree Drop:
-      genUse(a, bu)
-
-proc inline(bu; e: sink Expr; stmts) =
-  ## Appends the trailing expression directly to `bu`.
-  stmts.add e.stmts
-  bu.add e.expr
-
-proc capture(c; e: sink Expr; stmts): Node =
+proc capture(c; e: sink Expr; stmts): IrNode =
   ## Commits expression `e` to a fresh temporary. This is part of the
   ## expression-list lowering machinery.
-  let tmp = c.newTemp(e.typ)
-  result = Node(kind: Local, val: tmp)
-
+  result = c.newTemp(e.typ)
   stmts.add e.stmts
-  stmts.addStmt:
-    c.genAsgn(result, e.expr, e.typ, bu)
+  stmts.add newAsgn(result, e.expr)
 
 proc fitExpr(c; e: sink Expr, target: SemType): Expr =
   ## Makes sure `e` fits into the `target` type, returning the expression
@@ -509,22 +453,13 @@ proc fitExpr(c; e: sink Expr, target: SemType): Expr =
         # error occurred during union construction
 
         # emit the tag assignment:
-        result.stmts.addStmt Asgn:
-          bu.subTree Field:
-            bu.add Node(kind: Local, val: tmp)
-            bu.add Node(kind: Immediate, val: 0)
-          bu.add Node(kind: IntVal, val: c.literals.pack(idx))
-
+        result.stmts.add:
+          newAsgn(newFieldExpr(tmp, 0), newIntVal(idx))
         # emit the value assignment:
-        result.stmts.addStmt Asgn:
-          bu.subTree Field:
-            bu.subTree Field:
-              bu.add Node(kind: Local, val: tmp)
-              bu.add Node(kind: Immediate, val: 1)
-            bu.add Node(kind: Immediate, val: idx.uint32)
-          genUse(e.expr, bu)
+        result.stmts.add:
+          newAsgn(newFieldExpr(newFieldExpr(tmp, 1), idx), e.expr)
 
-        result.expr = @[Node(kind: Local, val: tmp)]
+        result.expr = tmp
       of tkError:
         # error correction: keep the original expression as is when fitting
         # to the error type
@@ -535,8 +470,7 @@ proc fitExpr(c; e: sink Expr, target: SemType): Expr =
   else:
     # TODO: this needs a better error message
     c.error("type mismatch")
-    result = Expr(stmts: e.stmts, expr: @[Node(kind: IntVal)],
-                  typ: errorType())
+    result = Expr(stmts: e.stmts, typ: errorType())
 
 proc fitExprStrict(c; e: sink Expr, typ: SemType): Expr =
   ## Makes sure expression `e` fits `typ` exactly, reporting an error and
@@ -547,19 +481,17 @@ proc fitExprStrict(c; e: sink Expr, typ: SemType): Expr =
     c.error("expected expression of type $1 but got type $2" %
             [$typ.kind, $e.typ.kind])
     # turn into an error expression:
-    result = Expr(stmts: e.stmts, expr: @[Node(kind: IntVal)],
-                  typ: errorType())
+    result = Expr(stmts: e.stmts, typ: errorType())
 
-proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType
+proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType
 
 proc exprToIL(c; t: InTree, n: NodeIndex): Expr =
-  var bu = initBuilder[NodeKind]()
-  (result.typ, result.attribs) = exprToIL(c, t, n, bu, result.stmts)
-  result.expr = finish(bu)
+  result.expr = IrNode(kind: None)
+  (result.typ, result.attribs) = exprToIL(c, t, n, result.expr, result.stmts)
   # verify some postconditions:
-  assert result.typ.kind != tkVoid or result.expr.len == 0,
+  assert result.typ.kind != tkVoid or result.expr.kind == None,
          "void `Expr` cannot have a trailing expression"
-  assert result.typ.kind in {tkVoid, tkError} or result.expr.len > 0,
+  assert result.typ.kind in {tkVoid, tkError} or result.expr.kind != None,
          "non-void `Expr` must have a trailing expression"
 
 proc scopedExprToIL(c; t; n: NodeIndex): Expr =
@@ -569,17 +501,16 @@ proc scopedExprToIL(c; t; n: NodeIndex): Expr =
   result = c.exprToIL(t, n)
   c.closeScope()
 
-template lenCheck(t; n: NodeIndex, bu; expected: int) =
+template lenCheck(t; n: NodeIndex, expected: int) =
   ## Exits the current analysis procedure with an error, if `n` doesn't have
   ## `expected` children.
   if t.len(n) != expected:
     c.error("expected " & $expected & " arguments, but got " & $t.len(n))
-    bu.add Node(kind: IntVal)
     return errorType()
 
-proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu, stmts): SemType =
+proc binaryArithToIL(c; t; n: NodeIndex, name: string, expr, stmts): SemType =
   ## Analyzes and emits the IL for a binary arithmetic operation.
-  lenCheck(t, n, bu, 3)
+  lenCheck(t, n, 3)
 
   let
     (_, a, b)  = t.triplet(n)
@@ -601,18 +532,14 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, bu, stmts): SemType =
     c.error("arguments must be of 'int' or 'float' type")
     result = errorType()
   else:
-    bu.subTree op:
-      bu.add Node(kind: Type, val: c.typeToIL(eA.typ))
-      bu.subTree Copy:
-        bu.add c.capture(eA, stmts)
-      bu.subTree Copy:
-        bu.add c.capture(eB, stmts)
-
+    expr = newBinaryOp(op, c.typeToIL(eA.typ),
+                       c.capture(eA, stmts),
+                       c.capture(eB, stmts))
     result = eA.typ
 
-proc relToIL(c; t; n: NodeIndex, name: string, bu; stmts): SemType =
+proc relToIL(c; t; n: NodeIndex, name: string, expr; stmts): SemType =
   ## Analyzes and emits the IL for a relational operation.
-  lenCheck(t, n, bu, 3)
+  lenCheck(t, n, 3)
 
   let
     (_, a, b)  = t.triplet(n)
@@ -627,52 +554,37 @@ proc relToIL(c; t; n: NodeIndex, name: string, bu; stmts): SemType =
     else:   unreachable()
 
   if eA.typ == eB.typ and eA.typ.kind in valid:
-    bu.subTree op:
-      bu.add Node(kind: Type, val: c.typeToIL(eA.typ))
-      bu.subTree Copy:
-        bu.add c.capture(eA, stmts)
-      bu.subTree Copy:
-        bu.add c.capture(eB, stmts)
-
+    expr = newBinaryOp(op, c.typeToIL(eA.typ),
+                       c.capture(eA, stmts),
+                       c.capture(eB, stmts))
     result = prim(tkBool)
   elif tkError in {eA.typ.kind, eB.typ.kind}:
     result = errorType()
   else:
     c.error("arguments have mismatching types")
-    bu.add Node(kind: IntVal)
     result = errorType()
 
-proc notToIL(c; t; n: NodeIndex, bu; stmts): SemType =
-  lenCheck(t, n, bu, 2)
+proc notToIL(c; t; n: NodeIndex, expr; stmts): SemType =
+  lenCheck(t, n, 2)
 
   let arg = exprToIL(c, t, t.child(n, 1))
 
   if arg.typ.kind == tkBool:
     # a single argument, so no capture is necessary
-    bu.subTree Not:
-      genUse(arg, bu, stmts)
+    expr = newNot(inline(arg, stmts))
     result = prim(tkBool)
   else:
     c.error("expected 'bool' expression")
-    bu.add Node(kind: IntVal)
     result = errorType()
 
-proc userCallToIL(c; t; n: NodeIndex, bu; stmts): SemType =
+proc userCallToIL(c; t; n: NodeIndex, expr; stmts): SemType =
   ## Analyzes a non-built-in call expression and translates it to its IL
   ## representation.
   let callee = c.exprToIL(t, t.child(n, 0))
 
   if callee.typ.kind == tkProc:
-    proc useCallee(c; e: sink Expr, bu; stmts) =
-      stmts.add e.stmts
-      if e.expr[0].kind == ProcVal:
-        # the callee is a statically-known procedure; it's a static call
-        bu.add Node(kind: Proc, val: e.expr[0].val)
-      else:
-        bu.add Node(kind: Type, val: c.genProcType(e.typ))
-        genUse(e.expr, bu)
-
-    proc argsToIL(c; t; n: NodeIndex; prc: SemType, bu; stmts) {.nimcall.} =
+    proc addArgs(call: var IrNode, c; t; n: NodeIndex; prc: SemType; stmts
+                ) {.nimcall.} =
       var i = 1 # 1 means argument 0
       for it in t.items(n, 1):
         # only try fitting the argument if there's a corresponding parameter
@@ -688,10 +600,9 @@ proc userCallToIL(c; t; n: NodeIndex, bu; stmts): SemType =
         if arg.typ.kind in AggregateTypes:
           # XXX: due to lack of support in the IL, aggregate values need to be
           #      passed by address at the moment
-          bu.subTree Addr:
-            bu.add tmp
+          call.add newAddr(tmp)
         else:
-          genUse(tmp, bu)
+          call.add tmp
 
         inc i
 
@@ -700,31 +611,34 @@ proc userCallToIL(c; t; n: NodeIndex, bu; stmts): SemType =
         c.error("expected $1 arguments but got $2" %
                 [$(prc.elems.len - 1), $(i - 1)])
 
+    stmts.add callee.stmts
+
+    var call = IrNode(kind: Call)
+    if callee.expr.kind == Proc:
+      # the callee is a statically-known procedure; it's a static call
+      call.add callee.expr
+    else:
+      call.add IrNode(kind: Type, id: c.genProcType(callee.typ))
+      call.add callee.expr
+
+    call.addArgs(c, t, n, callee.typ, stmts)
+
     # some return types need special handling
     case callee.typ.elems[0].kind
     of tkVoid:
-      stmts.addStmt Call:
-        c.useCallee(callee, bu, stmts)
-        c.argsToIL(t, n, callee.typ, bu, stmts)
+      stmts.add call
       # mark the non-exceptional call exit as unreachable:
-      stmts.addStmt Unreachable:
-        discard
+      stmts.add newUnreachable()
     of AggregateTypes:
       # the value is not returned normally, but passed via an out parameter
       let tmp = c.newTemp(callee.typ.elems[0])
-      stmts.addStmt Drop:
-        bu.subTree Call:
-          c.useCallee(callee, bu, stmts)
-          c.argsToIL(t, n, callee.typ, bu, stmts)
-          bu.subTree Addr:
-            bu.add Node(kind: Local, val: tmp)
+      call.add newAddr(tmp)
+      stmts.add newDrop(call)
 
       # return the temporary as the expression
-      bu.add Node(kind: Local, val: tmp)
+      expr = tmp
     else:
-      bu.subTree Call:
-        c.useCallee(callee, bu, stmts)
-        c.argsToIL(t, n, callee.typ, bu, stmts)
+      expr = call
 
     result = callee.typ.elems[0]
   else:
@@ -736,10 +650,9 @@ proc userCallToIL(c; t; n: NodeIndex, bu; stmts): SemType =
       discard c.exprToIL(t, it)
 
     # return an error
-    bu.add Node(kind: IntVal)
     result = errorType()
 
-proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
+proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
   # first check whether its call to a built-in procedure (those take
   # precedence)
   let callee = t.child(n, 0)
@@ -751,11 +664,11 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
     if ent.kind == ekBuiltinProc:
       case name
       of "+", "-":
-        result = binaryArithToIL(c, t, n, name, bu, stmts)
+        result = binaryArithToIL(c, t, n, name, expr, stmts)
       of "==", "<", "<=":
-        result = relToIL(c, t, n, name, bu, stmts)
+        result = relToIL(c, t, n, name, expr, stmts)
       of "not":
-        result = notToIL(c, t, n, bu, stmts)
+        result = notToIL(c, t, n, expr, stmts)
       of "len":
         lenCheck(t, n, bu, 1)
         let e = c.exprToIL(t, t.child(n, 1))
@@ -815,9 +728,9 @@ proc callToIL(c; t; n: NodeIndex, bu; stmts): SemType =
       return
 
   # it must be a call to a user-defined procedure (or an error)
-  result = userCallToIL(c, t, n, bu, stmts)
+  result = userCallToIL(c, t, n, expr, stmts)
 
-proc localDeclToIL(c; t; n: NodeIndex, bu, stmts) =
+proc localDeclToIL(c; t; n: NodeIndex, stmts) =
   ## Translates a procedure-local declaration to the target IL.
   let
     (npos, init) = t.pair(n)
@@ -828,12 +741,10 @@ proc localDeclToIL(c; t; n: NodeIndex, bu, stmts) =
     c.error("cannot initialize local with `void` expression")
     # turn into an error expression:
     e.typ = errorType()
-    e.expr = @[Node(kind: IntVal)]
+    e.expr = IrNode(kind: None)
 
   let local = c.newTemp(e.typ)
-  stmts.add e.stmts
-  stmts.addStmt:
-    c.genAsgn(Node(kind: Local, val: local), e.expr, e.typ, bu)
+  stmts.add newAsgn(local, inline(e, stmts))
 
   # verify that the name isn't in use already *after* analyzing the
   # initializer; the expression could introduce an entity with the same name
@@ -843,15 +754,15 @@ proc localDeclToIL(c; t; n: NodeIndex, bu, stmts) =
     # correction
 
   # register the declaration *after* analyzing the expression
-  c.addDecl(name, Entity(kind: ekLocal, id: local.int))
+  c.addDecl(name, Entity(kind: ekLocal, id: local.id.int))
 
-proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
+proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
   case t[n].kind
   of SourceKind.IntVal:
-    bu.add Node(kind: IntVal, val: c.literals.pack(t.getInt(n)))
+    expr = newIntVal(t.getInt(n))
     result = prim(tkInt) + {}
   of SourceKind.FloatVal:
-    bu.add Node(kind: FloatVal, val: c.literals.pack(t.getFloat(n)))
+    expr = newFloatVal(t.getFloat(n))
     result = prim(tkFloat) + {}
   of SourceKind.Ident:
     let
@@ -861,36 +772,32 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
     of ekBuiltinVal:
       case name
       of "false":
-        bu.add Node(kind: IntVal, val: 0)
+        expr = newIntVal(0)
         result = prim(tkBool) + {}
       of "true":
-        bu.add Node(kind: IntVal, val: 1)
+        expr = newIntVal(1)
         result = prim(tkBool) + {}
     of ekLocal:
-      bu.add Node(kind: Local, val: ent.id.uint32)
+      expr = newLocal(ent.id.uint32)
       result = c.locals[ent.id] + {Lvalue, Mutable}
     of ekParam:
       if c.params[ent.id].typ.kind in AggregateTypes:
         # aggregate parameters use pass-by-address
-        bu.subTree Deref:
-          bu.add Node(kind: Type, val: c.typeToIL(c.params[ent.id].typ))
-          bu.subTree Copy:
-            bu.add Node(kind: Local, val: c.params[ent.id].local)
+        expr = newDeref(c.typeToIL(c.params[ent.id].typ),
+                        newLocal(c.params[ent.id].local))
       else:
-        bu.add Node(kind: Local, val: c.params[ent.id].local)
+        expr = newLocal(c.params[ent.id].local)
       result = c.params[ent.id].typ + {Lvalue}
     of ekProc:
       # expand to a procedure address (`ProcVal`), which is always correct;
       # the callsite can turn it into a static reference (`Proc`) as needed
-      bu.add Node(kind: ProcVal, val: ent.id.uint32)
+      expr = IrNode(kind: Proc, id: ent.id.uint32)
       result = c.procList[ent.id].typ + {}
     of ekNone:
       c.error("undeclared identifier: " & t.getString(n))
-      bu.add Node(kind: IntVal)
       result = prim(tkError) + {}
     else:
       c.error("'" & name & "' cannot be used in this context")
-      bu.add Node(kind: IntVal)
       result = prim(tkError) + {}
   of SourceKind.And, SourceKind.Or:
     let
@@ -903,31 +810,17 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
 
     if t[n].kind == SourceKind.And:
       # (And a b) -> (If a b False)
-      stmts.addStmt If:
-        genUse(ea, bu, stmts)
-        bu.subTree Stmts: # then branch
-          bu.add eb.stmts
-          bu.subTree Asgn:
-            bu.add Node(kind: Local, val: tmp)
-            genUse(eb.expr, bu)
-        bu.subTree Asgn: # else branch
-          bu.add Node(kind: Local, val: tmp)
-          bu.add Node(kind: IntVal, val: c.literals.pack(0))
+      stmts.add newIf(inline(ea, stmts),
+                      wrap(eb, tmp),
+                      newAsgn(tmp, newIntVal(0)))
 
     else:
       # (Or a b) -> (If a True b)
-      stmts.addStmt If:
-        genUse(ea, bu, stmts)
-        bu.subTree Asgn: # then branch
-          bu.add Node(kind: Local, val: tmp)
-          bu.add Node(kind: IntVal, val: c.literals.pack(1))
-        bu.subTree Stmts: # else branch
-          bu.add eb.stmts
-          bu.subTree Asgn:
-            bu.add Node(kind: Local, val: tmp)
-            genUse(eb.expr, bu)
+      stmts.add newIf(inline(ea, stmts),
+                      newAsgn(tmp, newIntVal(1)),
+                      wrap(eb, tmp))
 
-    bu.add Node(kind: Local, val: tmp)
+    expr = tmp
     result = prim(tkBool) + {}
   of SourceKind.If:
     let
@@ -951,15 +844,8 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
           (c.fitExpr(body, typ), c.fitExpr(els, typ))
       tmp = c.newTemp(typ)
 
-    stmts.addStmt If:
-      genUse(cond, bu, stmts)
-      bu.subTree Stmts:
-        bu.add fb.stmts
-        c.genAsgn(Node(kind: Local, val: tmp), fb.expr, fb.typ, bu)
-      bu.subTree Stmts:
-        bu.add fe.stmts
-        c.genAsgn(Node(kind: Local, val: tmp), fe.expr, fe.typ, bu)
-    genLocal(tmp, typ, bu)
+    stmts.add newIf(inline(cond, stmts), wrap(fb, tmp), wrap(fe, tmp))
+    expr = tmp
     result = typ + {}
   of SourceKind.While:
     let (a, b) = t.pair(n)
@@ -976,34 +862,30 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
     if body.typ.kind notin {tkUnit, tkVoid}:
       c.error("`While` body must be a unit or void expression")
 
-    stmts.addStmt Loop:
-      bu.subTree Stmts:
-        bu.add cond.stmts
-        bu.subTree If:
-          bu.subTree Not:
-            genUse(cond.expr, bu)
-          bu.subTree Break:
-            bu.add Node(kind: Immediate, val: 1)
+    var sub = IrNode(kind: Stmts)
+    sub.add cond.stmts
+    sub.add newIf(newNot(cond.expr), newBreak(1))
+    sub.add body.stmts
+    if body.typ.kind != tkVoid:
+      sub.add newDrop(body.expr)
 
-        bu.add body.stmts
-        genDrop(body.expr, body.typ, bu)
+    stmts.add IrNode(kind: Loop, children: @[sub])
 
     if t[a].kind == SourceKind.Ident and t.getString(a) == "true":
       # it's a loop that doesn't exit via non-exception control-flow
-      stmts.addStmt Unreachable:
-        discard
+      stmts.add newUnreachable()
       result = prim(tkVoid) + {}
     else:
-      bu.add UnitNode
+      expr = UnitNode
       result = prim(tkUnit) + {}
   of SourceKind.Call:
-    result = callToIL(c, t, n, bu, stmts) + {}
+    result = callToIL(c, t, n, expr, stmts) + {}
   of SourceKind.TupleCons:
     if t.len(n) > 0:
       var elems = newSeq[SemType](t.len(n))
       # there are no tuple constructors in the target IL; all elements are
       # assigned individually
-      let tmp = Node(kind: Local, val: c.newTemp(errorType()))
+      let tmp = c.newTemp(errorType())
       for i, it in t.pairs(n):
         let e = c.exprToIL(t, it)
         elems[i] = e.typ
@@ -1016,20 +898,16 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
 
         stmts.add e.stmts
         # add an assignment for the field:
-        stmts.addStmt:
-          let dest = buildTree Field:
-            bu.add tmp
-            bu.add Node(kind: Immediate, val: i.uint32)
-          c.genAsgn(dest, e.expr, e.typ, bu)
+        stmts.add newAsgn(newFieldExpr(tmp, i), e.expr)
 
       # now that we know the type, correct it:
-      c.locals[tmp.val] = SemType(kind: tkTuple, elems: elems)
+      c.locals[tmp.id] = SemType(kind: tkTuple, elems: elems)
 
-      bu.add tmp
-      result = c.locals[tmp.val] + {}
+      expr = tmp
+      result = c.locals[tmp.id] + {}
     else:
       # it's the unit value
-      bu.add UnitNode
+      expr = UnitNode
       result = prim(tkUnit) + {}
   of SourceKind.Seq:
     let
@@ -1113,9 +991,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
       let idx = t.getInt(b)
       if idx >= 0 and idx < tup.typ.elems.len:
         result = tup.typ.elems[idx] + tup.attribs
-        bu.subTree Field:
-          bu.inline(tup, stmts)
-          bu.add Node(kind: Immediate, val: idx.uint32)
+        expr = newFieldExpr(inline(tup, stmts), idx.int)
       else:
         c.error("tuple has no element with index " & $idx)
         result = errorType() + {Lvalue, Mutable}
@@ -1126,54 +1002,45 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
       result = errorType() + {}
   of SourceKind.Asgn:
     let (a, b) = t.pair(n)
-    stmts.addStmt Asgn:
-      # emit the destination expression in-place
-      let dst = c.exprToIL(t, a, bu, stmts)
-      if {Lvalue, Mutable} * dst.attribs < {Lvalue, Mutable}:
-        c.error("LHS expression must be a mutable l-value expression")
+    var dst = c.exprToIL(t, a)
+    if {Lvalue, Mutable} * dst.attribs < {Lvalue, Mutable}:
+      c.error("LHS expression must be a mutable l-value expression")
+      dst.expr = IrNode(kind: None)
 
-      let src = c.fitExpr(c.exprToIL(t, b), dst.typ)
-      stmts.add src.stmts
-      genUse(src.expr, bu)
+    let src = c.fitExpr(c.exprToIL(t, b), dst.typ)
+    stmts.add newAsgn(inline(dst, stmts), inline(src, stmts))
 
-    bu.add UnitNode
+    expr = UnitNode
     result = prim(tkUnit) + {}
   of SourceKind.Return:
     var e =
       case t.len(n)
-      of 0: Expr(expr: @[Node(kind: IntVal)], typ: prim(tkUnit))
+      of 0: unitExpr
       of 1: c.exprToIL(t, t.child(n, 0))
       else: unreachable() # syntax error
 
     if e.typ.kind == tkVoid:
       c.error("cannot return 'void' expression")
-      e.expr = @[Node(kind: IntVal)] # add a placholder
       e.typ = prim(tkError)
 
     # apply the necessary to-supertype conversions:
     e = c.fitExpr(e, c.retType)
 
     stmts.add e.stmts
-    stmts.addStmt Return:
-      case e.typ.kind
-      of tkError:
-        discard "do nothing"
-      of AggregateTypes:
-        # special handling for aggregate types: store through the out parameter
-        stmts.addStmt Store:
-          bu.add Node(kind: Type, val: c.typeToIL(e.typ))
-          bu.subTree Copy:
-            bu.add Node(kind: Local, val: c.returnParam)
-          genUse(e.expr, bu)
-
-        bu.add UnitNode # return the unitary value
-      else:
-        genUse(e.expr, bu)
+    case e.typ.kind
+    of tkError:
+      discard "do nothing"
+    of AggregateTypes:
+      # special handling for aggregate types: store through the out parameter
+      stmts.add newAsgn(newDeref(c.typeToIL(e.typ), newLocal(c.returnParam)),
+                        e.expr)
+      stmts.add newReturn(UnitNode)
+    else:
+      stmts.add newReturn(e.expr)
 
     result = prim(tkVoid) + {}
   of SourceKind.Unreachable:
-    stmts.addStmt Unreachable:
-      discard
+    stmts.add newUnreachable()
     result = prim(tkVoid) + {}
   of SourceKind.Exprs:
     let last = t.len(n) - 1
@@ -1190,7 +1057,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
           result = e.typ + e.attribs
           case e.typ.kind
           of tkVoid: discard "okay, nothing to do"
-          else:      bu.add e.expr
+          else:      expr = e.expr
       else:
         case e.typ.kind
         of tkVoid:
@@ -1198,17 +1065,15 @@ proc exprToIL(c; t: InTree, n: NodeIndex, bu, stmts): ExprType =
           seenVoidExpr = true # check, but drop further stmts & exprs
         of tkUnit:
           voidGuard:
-            stmts.addStmt:
-              genDrop(e.expr, e.typ, bu)
+            stmts.add newDrop(e.expr)
         else:
           c.error("non-trailing expressions must be unit or void, got: $1" %
                     [$e.typ.kind])
           voidGuard:
-            stmts.addStmt:
-              genDrop(e.expr, e.typ, bu) # error correction
+            stmts.add newDrop(e.expr) # error correction
   of SourceKind.Decl:
-    localDeclToIL(c, t, n, bu, stmts)
-    bu.add UnitNode
+    localDeclToIL(c, t, n, stmts)
+    expr = UnitNode
     result = prim(tkUnit) + {}
   of AllNodes - ExprNodes:
     unreachable($t[n].kind)
@@ -1265,18 +1130,21 @@ proc exprToIL*(c; t): SemType =
 
   bu.subTree ProcDef:
     bu.add Node(kind: Type, val: signature)
+    bu.subTree Params:
+      for i in 0..<numILParams(procTy):
+        bu.add Node(kind: Local, val: i.uint32)
     bu.subTree Locals:
       for it in c.locals.items:
         bu.add Node(kind: Type, val: c.typeToIL(it))
     bu.subTree Stmts:
       # first emit all statements:
       for it in e.stmts.items:
-        bu.add it
+        convert(it, c.literals, bu)
 
       # then the expression:
       if e.typ.kind != tkVoid:
         bu.subTree Return:
-          genUse(e.expr, bu)
+          use(e.expr, c.literals, bu)
 
   c.procList.add ProcInfo(typ: procType(result))
 
@@ -1343,13 +1211,16 @@ proc declToIL*(c; t; n: NodeIndex) =
 
     var bu = initBuilder[NodeKind](ProcDef)
     bu.add Node(kind: Type, val: signature)
+    bu.subTree Params:
+      for i in 0..<numILParams(procTy):
+        bu.add Node(kind: Local, val: i.uint32)
     bu.subTree Locals:
       for it in c.locals.items:
         bu.add Node(kind: Type, val: c.typeToIL(it))
     # add the body:
     bu.subTree Stmts:
       for it in e.stmts.items:
-        bu.add it
+        convert(it, c.literals, bu)
 
     c.procs.add finish(bu)
   of SourceKind.TypeDecl:

@@ -187,11 +187,11 @@ proc lowerStmt(c; tree; n, bu): bool =
 
 proc lowerProc(c: var PassCtx, tree; n; changes) =
   c.nextLabel = 0
-  c.locals = tree.child(n, 1)
+  c.locals = tree.child(n, 2)
 
-  changes.replace(tree.child(n, 2), Stmts):
+  changes.replace(tree.child(n, 3), Stmts):
     # the body of a procedure must always end with a terminator
-    doAssert c.lowerStmt(tree, tree.child(n, 2), bu),
+    doAssert c.lowerStmt(tree, tree.child(n, 3), bu),
               "control-flow falls out of the body"
 
   assert c.context.len == 0, "context stack is not empty"

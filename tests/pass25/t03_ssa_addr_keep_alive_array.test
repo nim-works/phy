@@ -10,7 +10,7 @@ discard """
 )
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 2)
+  (ProcDef (Type 2) (Params)
     (Locals (Type 1))
     (Stmts
       (Drop (Addr (At (Local 0) (IntVal 0))))

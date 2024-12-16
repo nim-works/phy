@@ -80,7 +80,8 @@ proc checkmem*(a: VmAllocator, address: VirtualAddr, len: uint64,
   ##   address to `o` and returns false
   ## * otherwise leaves `o` unchanged an returns true
   let x = uint64(address)
-  if likely(x >= AddressBias and x + len <= a.hostSize + AddressBias):
+  if likely(x >= AddressBias and x + len <= a.hostSize + AddressBias and
+            x + len >= x):
     o = cast[HostPointer](addr a.host[x - AddressBias])
     false
   else:

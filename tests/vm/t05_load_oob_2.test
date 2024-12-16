@@ -1,0 +1,10 @@
+discard """
+  output: "(Error ecIllegalAccess)"
+"""
+.type P1 () -> void
+.start P1 main
+LdImmInt 0
+LdInt64 0
+Drop
+Ret
+.end

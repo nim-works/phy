@@ -103,7 +103,8 @@ continuation ::= (Continuation (Params) stack:<int> <stmt>* <exit>)
               |  (Except <local> stack:<int> <stmt>* <exit>)
 
 procdef ::= (ProcDef <type_id> (Locals <type>*) (Continuations <continuation>+))
-globaldef ::= <intVal> | <floatVal>
+int_or_float ::= <intVal> | <floatVal>
+globaldef ::= (GlobalDef <type> <int_or_float>)
 ```
 
 ### Foreign Procedures
