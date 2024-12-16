@@ -63,13 +63,12 @@ proc local(n: Node): LocalId =
   assert n.kind == Local
   LocalId(n.val)
 
-proc isAggregate(tree; n): bool =
+proc isAggregate(tree; n: Node): bool =
   var n = n
-  # resolve the indirection:
-  if tree[n].kind == Type:
-    n = tree.child(tree.child(0), tree[n].val)
-
-  tree[n].kind in {Record, Union, Array}
+  if n.kind == Type:
+    # resolve the indirection:
+    n = tree[tree.child(0), n.val]
+  n.kind in {Record, Union, Array}
 
 proc signature(c; tree; n): NodeIndex =
   case tree[n].kind
@@ -77,22 +76,26 @@ proc signature(c; tree; n): NodeIndex =
   of Proc: c.cache[tree[n].val]
   else:    unreachable()
 
-proc typeof(c; tree; n): NodeIndex =
+proc typeof(c; tree; n): Node =
   case tree[n].kind
-  of Path, Load, Deref:
-    tree.child(n, 0)
-  of Copy, Not:
+  of Path, Load, Deref, Add, Sub, Mul, Div, Mod, BitNot, BitAnd, BitOr, BitXor,
+     AddChck, SubChck, Shl, Shr, Conv, Reinterp, Neg:
+    # these are all expression that store their result type as the first
+    # node
+    tree[n, 0]
+  of Not, Eq, Lt, Le:
+    # boolean expressions
+    Node(kind: UInt, val: 1)
+  of Copy:
     c.typeof(tree, tree.child(n, 0))
   of Local:
-    tree.child(c.locals, tree[n].val)
-  of Add, Sub, Mul, Div, Mod, BitNot, BitAnd, BitOr, BitXor, AddChck, SubChck,
-     Eq, Lt, Le, Shl, Shr, Conv, Reinterp, Neg:
-    tree.child(n, 0)
+    tree[c.locals, tree[n].val]
   of Call:
-    tree.child(c.signature(tree, tree.child(n, 0)), 0)
+    # fetch the return type from the callee's signature
+    tree[c.signature(tree, tree.child(n, 0)), 0]
   of Global:
     # fetch the type from the ``GlobalDef``
-    tree.child(tree.child(tree.child(1), tree[n].val), 0)
+    tree[tree.child(tree.child(1), tree[n].val), 0]
   else:
     unreachable()
 
@@ -137,7 +140,7 @@ proc lowerPath(c; tree; n; reference: int, bu) =
       bu.replace root:
         bu.buildTree:
           tree(Deref,
-            node(tree[c.typeof(tree, root)]),
+            node(c.typeof(tree, root)),
             tree(Copy, node(tree[root])))
 
   of Local, Global:
@@ -169,7 +172,7 @@ proc lowerOperand(c; tree; n; reference: int, bu) =
     of Addr:
       c.lowerAddr(tree, n, reference, bu)
     else:
-      let tmp = c.newLocal(tree[c.typeof(tree, n)])
+      let tmp = c.newLocal(c.typeof(tree, n))
       c.addStmt:
         bu.buildTree tree(Asgn, node(tmp), embed(c.loweredExpr(tree, n, bu)))
       bu.replace n, bu.newCopyExpr(tmp)
@@ -191,7 +194,7 @@ proc lowerCallArgs(c; tree; n; start: int, last: BackwardsIndex; bu) =
 
   for i in countdown(tree.len(n) - last.int, first):
     let arg = tree.child(n, i)
-    if isAggregate(tree, tree.child(sig, i - first + 1)):
+    if isAggregate(tree, tree[sig, i - first + 1]):
       let local = c.newLocal(tree[sig, i - first + 1])
       if tree[arg].kind == Call:
         c.addStmt bu.openTree(tree, arg, m) do:
@@ -223,7 +226,7 @@ proc lowerExpr(c; tree; n, bu) =
     if tree[x].kind == Local and tree[x].local in c.params:
       # (Copy local) -> (Load typ (Copy local))
       bu.replace n,
-        bu.newTree(Load, toVirtual(c.typeof(tree, x)), toVirtual(n))
+        bu.buildTree tree(Load, node(c.typeof(tree, x)), embed(n))
     else:
       c.lowerPath(tree, x, c.stmts.len, bu)
   of Addr:
@@ -260,7 +263,7 @@ proc lowerStmt(c; tree; n; bu) =
     if tree[b].kind == Call and isAggregate(tree, c.typeof(tree, a)):
       # (Asgn x (Call a b ...)) ->
       #   (Call a' b' ... (Addr tmp)) (Asgn x' (Copy tmp))
-      let local = c.newLocal(tree[c.typeof(tree, a)])
+      let local = c.newLocal(c.typeof(tree, a))
       c.lowerCall(tree, b, bu.newAddrExpr(local), bu)
       c.lowerPath(tree, a, reference, bu)
       bu.replace b, bu.newCopyExpr(local)
@@ -269,7 +272,7 @@ proc lowerStmt(c; tree; n; bu) =
       c.lowerPath(tree, a, reference, bu)
   of Store:
     let (typ, a, b) = tree.triplet(n)
-    if tree[b].kind == Call and isAggregate(tree, typ):
+    if tree[b].kind == Call and isAggregate(tree, tree[typ]):
       # (Store typ x (Call a b ...)) ->
       #   (Call a' b' ... (Addr tmp)) (Store typ x' (Copy tmp))
       let local = c.newLocal(tree[typ])
@@ -303,7 +306,7 @@ proc lowerTerminator(c; tree; n; bu) =
     let dest = tree.child(n, 0)
     if isAggregate(tree, c.typeof(tree, dest)):
       # (CheckedCallAsgn dst ...) -> (CheckedCall ... (Addr tmp) ...)
-      let local = c.newLocal(tree[c.typeof(tree, dest)])
+      let local = c.newLocal(c.typeof(tree, dest))
       let target = tree.child(n, ^2)
       bu.modifyTree tree, n, CheckedCall, m:
         bu.remove m, dest
@@ -326,7 +329,7 @@ proc lowerTerminator(c; tree; n; bu) =
           # (Return x) -> (Store typ out x') (Return)
           c.addStmt bu.buildTree do:
             tree(Store,
-              node(tree[c.typeof(tree, val)]),
+              node(c.typeof(tree, val)),
               tree(Copy, node(c.outParam)),
               embed(c.loweredExpr(tree, val, bu)))
 
@@ -356,7 +359,7 @@ proc lowerProc(c; tree; n; sig: NodeIndex, bu) =
   c.locals = locals
   c.firstTemp = tree.len(locals)
 
-  if isAggregate(tree, tree.child(sig, 0)):
+  if isAggregate(tree, tree[sig, 0]):
     c.hasOutParam = true
     c.outParam = c.newLocal(c.addrType)
   else:
@@ -366,7 +369,7 @@ proc lowerProc(c; tree; n; sig: NodeIndex, bu) =
   block:
     let x = tree.child(blocks, 0)
     for i, it in tree.pairs(tree.child(x, 0)):
-      if isAggregate(tree, tree.child(sig, i + 1)):
+      if isAggregate(tree, tree[sig, i + 1]):
         c.params.incl tree[it].local
 
   for i, blk in tree.pairs(blocks):
@@ -412,12 +415,12 @@ proc lower*(tree; ptrSize: int): ChangeSet[NodeKind] =
     if tree[it].kind == ProcTy:
       result.modifyTree tree, it, m:
         # turn an aggregate return value into an out parameter:
-        if isAggregate(tree, tree.child(it, 0)):
+        if isAggregate(tree, tree[it, 0]):
           result.replace tree.child(it, 0), result.buildTree(tree(Void))
           result.insert m, tree.fin(it), c.addrType
 
         for x in tree.items(it, 1):
-          if isAggregate(tree, x):
+          if isAggregate(tree, tree[x]):
             result.replace x, c.addrType
 
   let procs = tree.child(2)
