@@ -20,6 +20,7 @@ import
     utils,
     vmspec,
     vmenv,
+    vmmodules,
     vmtypes
   ]
 
@@ -45,6 +46,7 @@ type
 
   AssemblerState* = object
     stack: seq[ProcState] ## in-progress procedures
+    module: VmModule ## in-progress module
 
     procs: Table[string, ProcIndex]
     consts: Table[string, int32]
@@ -141,7 +143,7 @@ proc parseTypedVal(s: Stream): TypedValue =
   let typ = parseEnum[ValueType]("vt" & s.ident())
   TypedValue(typ: typ, val: s.parseValue(typ))
 
-proc parseType(s: Stream, env: var VmEnv, a: AssemblerState): TypeId =
+proc parseType(s: Stream, env: var TypeEnv, a: AssemblerState): TypeId =
   ## Parses a signature type from `s` and adds the type directly to `env`,
   ## returning its ID.
   s.expectChar('(')
@@ -176,7 +178,7 @@ proc parseType(s: Stream, env: var VmEnv, a: AssemblerState): TypeId =
   s.space()
   s.expectString("->")
   s.space()
-  result = env.types.add(s.parseTypeName(), params)
+  result = env.add(s.parseTypeName(), params)
 
 proc prc(a: var AssemblerState): var ProcState {.inline.} =
   a.stack[a.stack.len - 1]
@@ -241,7 +243,7 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
   of opcYield:
     instrAC()
 
-proc patch(prc: var ProcState, c: VmEnv) =
+proc patch(prc: var ProcState) =
   ## Patches all jump instructions and prepares the content of `prc` for being
   ## added to `c`.
   for name, it in prc.labelLookup.pairs:
@@ -265,12 +267,11 @@ proc slice[T](old, with: seq[T]): Slice[uint32] =
 proc hoSlice[T](old, with: seq[T]): HOslice[uint32] =
   hoSlice(old.len.uint32, uint32(old.len + with.len))
 
-proc process*(a: var AssemblerState, line: sink string, env: var VmEnv) =
+proc process*(a: var AssemblerState, line: sink string) =
   ## Processes `line`, which must be a single line without the line terminator.
   ## An `AssemblerError <#AssemblerError>`_ or ``ValueError`` is raised when
-  ## something goes wrong. The `env` might have been modified already in this
-  ## case, but not to a point where it's in an invalid state, meaning that both
-  ## `a` and `env` can continue to be used after the exception is handled.
+  ## something goes wrong. After the exception is handled, `a` can continue to
+  ## be used.
   let s = newStringStream(line)
   s.space()
   if s.atEnd():
@@ -283,48 +284,48 @@ proc process*(a: var AssemblerState, line: sink string, env: var VmEnv) =
     case parseEnum[Directive](s.ident())
     of dirStart:
       # .start <type-id> <name>
-      var prc = ProcState(id: env.procs.len.ProcIndex)
+      var prc = ProcState(id: a.module.procs.len.ProcIndex)
       s.space()
       prc.typ = a.types[s.ident()]
       s.space()
       # register in the lookup table already in order to support self-
       # references
       a.procs[s.ident()] = prc.id
-      env.procs.add ProcHeader() # reserve a slot already
+      a.module.procs.add ProcHeader() # reserve a slot already
       a.stack.add prc
     of dirEnd:
       var prc = a.stack.pop()
-      patch(prc, env)
-      env.procs[int prc.id] =
+      patch(prc)
+      a.module.procs[int prc.id] =
         ProcHeader(kind: pkDefault, typ: prc.typ,
-                   code: slice(env.code, prc.code),
-                   locals: hoSlice(env.locals, prc.locals),
-                   eh: hoSlice(env.ehTable, prc.ehTable))
-      env.locals.add prc.locals
-      env.code.add prc.code
-      env.ehTable.add prc.ehTable
+                   code: slice(a.module.code, prc.code),
+                   locals: hoSlice(a.module.locals, prc.locals),
+                   eh: hoSlice(a.module.ehTable, prc.ehTable))
+      a.module.locals.add prc.locals
+      a.module.code.add prc.code
+      a.module.ehTable.add prc.ehTable
     of dirConst:
       # .const <name> <type> <value>
       s.space()
       let name = s.ident()
       s.space()
-      let id = env.constants.len
-      env.constants.add parseTypedVal(s)
+      let id = a.module.constants.len
+      a.module.constants.add parseTypedVal(s)
       a.consts[name] = int32 id
     of dirGlobal:
       # .global <name> <type> <value>
       s.space()
       let name = s.ident()
       s.space()
-      let id = env.globals.len
-      env.globals.add parseTypedVal(s)
+      let id = a.module.globals.len
+      a.module.globals.add parseTypedVal(s)
       a.globals[name] = int32 id
     of dirType:
       # .type <name> <type-desc>
       s.space()
       let name = s.ident()
       s.space()
-      let t = parseType(s, env, a)
+      let t = parseType(s, a.module.types, a)
       a.types[name] = t
     of dirLocal:
       # .local <name> <type>
@@ -356,3 +357,7 @@ proc process*(a: var AssemblerState, line: sink string, env: var VmEnv) =
   s.space()
   s.comment()
   expect s.atEnd
+
+proc close*(a: sink AssemblerState): VmModule =
+  ## Closes the assembler and returns the built module.
+  move a.module
