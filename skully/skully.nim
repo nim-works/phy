@@ -60,6 +60,7 @@ import
     trees
   ],
   skully/[
+    rtti,
     runner
   ],
   vm/[
@@ -105,6 +106,9 @@ type
       ##      of small sequences, the ordered table also incurs additional
       ##      overhead. A table that allows storing the actual key data (i.e.,
       ##      the type tree, in this case) should be used instead
+
+    rttiCache: Table[TypeId, uint32]
+      ## caches the RTTIv2 globals created for types
 
     globalsMap: Table[GlobalId, uint32]
       ## maps MIR globals and constants to IL globals
@@ -573,7 +577,29 @@ template makeExpr(typ: TypeId, body: untyped): Expr =
   else:
     unreachable()
 
-proc genDefault(c; env: MirEnv; dest: Expr, typ: TypeId, bu) =
+proc getTypeInfoV2(c; env: var MirEnv, typ: TypeId): Expr =
+  ## Returns a pointer expression referring to the RTTI global for `typ`.
+  ## The RTTI data is created first if it wasn't already.
+  let rttiType = env.types.add(c.graph.getCompilerProc("TNimTypeV2").typ)
+
+  var global: uint32
+  c.rttiCache.withValue typ, val:
+    global = val[]
+  do:
+    let data = genTypeInfoV2(env, c.graph, typ)
+    c.dataMap.withValue data, id:
+      global = id[]
+    do:
+      global = c.newGlobal(env, rttiType)
+      c.dataMap[data] = global
+
+    c.rttiCache[typ] = global
+
+  result = makeExpr PointerType:
+    bu.subTree Copy:
+      bu.add node(Global, global)
+
+proc genDefault(c; env: var MirEnv; dest: Expr, typ: TypeId, bu) =
   let typ = env.types.canonical(typ)
   case env.types.headerFor(typ, Lowered).kind
   of tkBool, tkChar, tkInt, tkUInt, tkRef, tkPtr, tkVar, tkLent, tkPointer:
@@ -581,12 +607,20 @@ proc genDefault(c; env: MirEnv; dest: Expr, typ: TypeId, bu) =
   of tkFloat:
     genAsgn(dest, makeExpr(@[node(FloatVal, c.lit.pack(0.0))], typ), bu)
   else:
-    # TODO: the type field needs to be initialized too. RTTI is currently
-    #       still missing
     let size = env.types.headerFor(typ, Lowered).size(env.types)
     bu.subTree Clear:
       takeAddr(dest, bu)
       bu.add node(IntVal, c.lit.pack(size))
+
+    # TODO: the original type has to be passed to hasRttiHeader and
+    #       getTypeInfoV2, otherwise distinct types don't have the
+    #       correct RTTI generated for them
+    if hasRttiHeader(env.types, typ):
+      bu.subTree Asgn:
+        c.genField(env, dest, -1, bu)
+        bu.use c.getTypeInfoV2(env, typ)
+
+    # TODO: implement initialization for RTTI headers in embedded types
 
 proc genField(c; env: MirEnv; tree; n; pos: int32, bu) =
   c.genField(env, c.gen(env, tree, n, false), pos, bu)
@@ -2755,9 +2789,6 @@ proc main(args: openArray[string]) =
   # override the default value
   if not isDefined(config, "StandaloneHeapSize"):
     defineSymbol(config, "StandaloneHeapSize", $(1024 * 1024 * 100)) # 100 MiB
-
-  # TODO: implement RTTI support and enable object checks
-  config.options = DefaultOptions - {optObjCheck}
 
   # replace some system modules:
   replaceModule(config, "pure/os", "os.nim")
