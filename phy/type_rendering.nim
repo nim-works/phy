@@ -44,6 +44,9 @@ proc typeToString*(typ: SemType): string =
     res.add typeToString(typ.elems[0])
     res
   of tkError:
+    # diagnostic messages should not show error types, therefore rendering is
+    # not implemented for them. If control-flow reaches here, it usually means
+    # that a guard against error types is missing somewhere
     unreachable()
 
 proc `$`*(typ: SemType): string =
