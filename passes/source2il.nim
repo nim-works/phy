@@ -9,7 +9,7 @@
 import
   std/[algorithm, sequtils, tables],
   passes/[builders, ir, spec, trees],
-  phy/[reporting, types],
+  phy/[reporting, type_rendering, types],
   vm/[utils]
 
 from std/strutils import `%`
@@ -434,7 +434,7 @@ proc fitExprStrict(c; e: sink Expr, typ: SemType): Expr =
     result = e # all good
   else:
     c.error("expected expression of type $1 but got type $2" %
-            [$typ.kind, $e.typ.kind])
+            [$typ, $e.typ])
     # turn into an error expression:
     result = Expr(stmts: e.stmts, typ: errorType())
 
@@ -739,7 +739,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
         case typ.kind
         of tkError:
           c.error("if ($1) and else ($2) branches cannot be unified into a single type" %
-                  [$body.typ.kind, $els.typ.kind])
+                  [$body.typ, $els.typ])
           (body, els)
         else:
           (c.fitExpr(body, typ), c.fitExpr(els, typ))
@@ -896,7 +896,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
             stmts.add newDrop(e.expr)
         else:
           c.error("non-trailing expressions must be unit or void, got: $1" %
-                    [$e.typ.kind])
+                    [$e.typ])
           voidGuard:
             stmts.add newDrop(e.expr) # error correction
   of SourceKind.Decl:
