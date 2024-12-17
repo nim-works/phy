@@ -645,11 +645,13 @@ proc genLength(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
   else:
     unreachable()
 
-proc genSetElem(c; env; tree; n; bu) =
+proc genSetElem(c; env; tree; n; styp: TypeId, bu) =
   ## Emits the expression for loading a value for use in a set-related
-  ## operation. This means making the type zero-based, if it isn't already.
-  proc aux(c; env; tree; n; bu) =
-    let first = c.graph.config.firstOrd(env.types[tree[n].typ])
+  ## operation. This means making turning the value into one relative to the
+  ## start of the set's value range.
+  proc aux(c; env; tree; n; styp: TypeId, bu) =
+    assert env.types[styp].kind == tySet
+    let first = c.graph.config.firstOrd(env.types[styp])
     if first != Zero:
       bu.subTree Sub:
         bu.add typeRef(c, env, tree[n].typ)
@@ -666,9 +668,9 @@ proc genSetElem(c; env; tree; n; bu) =
     bu.subTree Conv:
       bu.add node(UInt, 2)
       bu.add typeRef(c, env, typ)
-      aux(c, env, tree, n, bu)
+      aux(c, env, tree, n, styp, bu)
   else:
-    aux(c, env, tree, n, bu)
+    aux(c, env, tree, n, styp, bu)
 
 proc genSetOp(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   ## Generates the IL code for a binary set operation.
@@ -691,7 +693,9 @@ proc genSetOp(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     takeAddr(c.gen(env, tree, n, false), bu)
 
   template elem(n: NodePosition) =
-    c.genSetElem(env, tree, n, bu)
+    # watch out! Don't use the canonical set type, because then the set
+    # range's start value cannot be looked up anymore
+    c.genSetElem(env, tree, n, tree[a].typ, bu)
 
   template lenValue() =
     let L = env.types.headerFor(typ, Lowered).arrayLen(env.types)
@@ -1744,14 +1748,14 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
 
         stmts.addStmt Asgn:
           bu.useLvalue idx
-          c.genSetElem(env, tree, tree.child(it, 0), bu)
+          c.genSetElem(env, tree, tree.child(it, 0), tree[n].typ, bu)
 
         stmts.join(startLab)
         stmts.addStmt Branch:
           bu.subTree Le:
             bu.add node(UInt, 2)
             bu.use idx
-            c.genSetElem(env, tree, tree.child(it, 1), bu)
+            c.genSetElem(env, tree, tree.child(it, 1), tree[n].typ, bu)
           bu.goto(exitLab)
           bu.goto(bodyLab)
 
@@ -1771,7 +1775,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         stmts.join(exitLab)
       else:
         let e = makeExpr tree[it].typ:
-          c.genSetElem(env, tree, it, bu)
+          c.genSetElem(env, tree, it, tree[n].typ, bu)
         c.genIncl(env, dest, e, stmts)
   of mnkCast:
     let dst = env.types.canonical(tree[n].typ)
