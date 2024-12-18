@@ -513,9 +513,8 @@ The first form of the `TupleTy` operator produces the `unit` type.
 > TODO: this behaviour makes sense, but it renders `UnitTy` redundant. Consider
 > removing the latter, or at least making it an alias for `(TupleTy)`.
 
-The second form constructs a `tuple` type from the given types. Allowed
-operand type kinds are: `unit`, `int`, `float`, `tuple`, and `union`. An error
-is reported for any other type.
+The second form constructs a `tuple` type from the given types. None of the
+operands must be type `void` -- an error is reported otherwise.
 
 #### Union Type Constructors
 
