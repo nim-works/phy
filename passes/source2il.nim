@@ -682,7 +682,7 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
         var elem = c.exprToIL(t, t.child(n, 2))
         if s.typ.kind != tkSeq:
           c.error("'add' expects sequence operand")
-        elif s.attribs * {Mutable, Lvalue} <= {Mutable, Lvalue}:
+        elif s.attribs * {Mutable, Lvalue} < {Mutable, Lvalue}:
           c.error("'add' expects mutable lvalue sequence operand")
         else:
           # fit to the element type
