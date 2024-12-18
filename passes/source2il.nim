@@ -670,14 +670,14 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
       of "not":
         result = notToIL(c, t, n, expr, stmts)
       of "len":
-        lenCheck(t, n, 1)
+        lenCheck(t, n, 2)
         let e = c.exprToIL(t, t.child(n, 1))
         if e.typ.kind != tkSeq:
           c.error("'len' operand must be of sequence type")
         expr = newFieldExpr(inline(e, stmts), 0)
         result = prim(tkInt)
       of "add":
-        lenCheck(t, n, 2)
+        lenCheck(t, n, 3)
         let s    = c.exprToIL(t, t.child(n, 1))
         var elem = c.exprToIL(t, t.child(n, 2))
         if s.typ.kind != tkSeq:
