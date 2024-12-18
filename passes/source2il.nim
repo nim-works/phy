@@ -670,16 +670,14 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
       of "not":
         result = notToIL(c, t, n, expr, stmts)
       of "len":
-        lenCheck(t, n, bu, 1)
+        lenCheck(t, n, 1)
         let e = c.exprToIL(t, t.child(n, 1))
         if e.typ.kind != tkSeq:
           c.error("'len' operand must be of sequence type")
-        bu.subTree Field:
-          bu.inline(c.exprToIL(t, t.child(n, 1)), stmts)
-          bu.add Node(kind: Immediate, val: 0)
+        expr = newFieldExpr(inline(e, stmts), 0)
         result = prim(tkInt)
       of "add":
-        lenCheck(t, n, bu, 2)
+        lenCheck(t, n, 2)
         let s    = c.exprToIL(t, t.child(n, 1))
         var elem = c.exprToIL(t, t.child(n, 2))
         if s.typ.kind != tkSeq:
@@ -694,20 +692,16 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
           c.error("void expression is not allowed in this context")
           elem.typ = errorType()
 
-        stmts.addStmt Store:
-          bu.add Node(kind: Type, val: c.typeToIL(elem.typ))
-          bu.subTree Call:
+        stmts.add newAsgn(
+          newDeref(c.typeToIL(elem.typ),
             # TODO: call the 'prepareAdd' procedure here
-            bu.add Node(kind: Proc, val: 0)
-            bu.subTree Addr:
-              bu.inline(s, stmts)
-            bu.add Node(kind: IntVal, val: c.literals.pack(size(elem.typ)))
-          genUse(elem, bu, stmts)
+            newCall(0, @[newAddr inline(s, stmts), newIntVal(size(elem.typ))])),
+          inline(elem, stmts))
 
-        bu.add UnitNode
+        expr = UnitNode
         result = prim(tkUnit)
       of "clear":
-        lenCheck(t, n, bu, 2)
+        lenCheck(t, n, 2)
         let s = c.exprToIL(t, t.child(n, 1))
         if s.typ.kind != tkSeq:
           c.error("'clear' expects sequence operand")
@@ -715,13 +709,9 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
           c.error("'clear' expects mutable lvalue sequence operand")
 
         # set the length back to zero, but leave the capacity as is
-        stmts.addStmt Asgn:
-          bu.subTree Field:
-            bu.inline(s, stmts)
-            bu.add Node(kind: Immediate, val: 0)
-          bu.add Node(kind: IntVal, val: c.literals.pack(0))
+        stmts.add newAsgn(newFieldExpr(inline(s, stmts), 0), newIntVal(0))
 
-        bu.add UnitNode
+        expr = UnitNode
         result = prim(tkUnit)
       else:
         unreachable()
@@ -913,75 +903,46 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
     let
       typ = c.expectNot(c.evalType(t, t.child(n, 0)), tkVoid)
       length = t.len(n)
-    var elems = newSeq[Expr](length - 1)
+    var elems = newSeq[IrNode](length - 1)
 
     # assign all elements to temporaries first, so that the payload is only
     # allocated when control-flow reaches past the argument expressions
     block:
       var i = 0
       for it in t.items(n, 1):
-        let e = c.capture(c.fitExpr(c.exprToIL(t, it), typ), stmts)
-        elems[i] = Expr(expr: @[e], typ: typ)
+        elems[i] = c.capture(c.fitExpr(c.exprToIL(t, it), typ), stmts)
         inc i
 
     result = SemType(kind: tkSeq, elems: @[typ]) + {}
 
-    var tmp = c.newTemp(result.typ)
+    let
+      tmp = c.newTemp(result.typ)
+      payloadField = newFieldExpr(tmp, 1)
+
     # emit the length field assignment:
-    stmts.addStmt Asgn:
-      bu.subTree Field:
-        bu.add Node(kind: Local, val: tmp)
-        bu.add Node(kind: Immediate, val: 0)
-      bu.add Node(kind: IntVal, val: c.literals.pack(length))
+    stmts.add newAsgn(newFieldExpr(tmp, 0), newIntVal(length))
 
     # emit the payload field assignment:
     if length > 0:
       let size = size(prim(tkInt)) + size(typ) * length
       # the size of the payload is sizeof(capacity) + sizeof(element) * length
-      stmts.addStmt Asgn:
-        bu.subTree Field:
-          bu.add Node(kind: Local, val: tmp)
-          bu.add Node(kind: Immediate, val: 1)
-        bu.subTree Call:
-          # TODO: use the 'alloc' procedure here
-          bu.add Node(kind: Proc, val: 0)
-          bu.add Node(kind: IntVal, val: c.literals.pack(size))
+      # TODO: call the 'alloc' procedure here
+      stmts.add newAsgn(payloadField, newCall(0, newIntVal(size)))
 
+      let payloadExpr = newDeref(c.genPayloadType(typ), payloadField)
       # emit the capacity assignment:
-      stmts.addStmt Asgn:
-        bu.subTree Field:
-          bu.subTree Deref:
-            bu.add Node(kind: Type, val: c.genPayloadType(typ))
-            bu.subTree Copy:
-              bu.subTree Field:
-                bu.add Node(kind: Local, val: tmp)
-                bu.add Node(kind: Immediate, val: 1)
-          bu.add Node(kind: Immediate, val: 0)
-        bu.add Node(kind: IntVal, val: c.literals.pack(length))
+      stmts.add newAsgn(newFieldExpr(payloadExpr, 0), newIntVal(length))
 
       # emit the final assignments:
       for i, it in elems.pairs:
-        stmts.addStmt Asgn:
-          bu.subTree At:
-            bu.subTree Field:
-              bu.subTree Deref:
-                bu.add Node(kind: Type, val: c.genPayloadType(typ))
-                bu.subTree Copy:
-                  bu.subTree Field:
-                    bu.add Node(kind: Local, val: tmp)
-                    bu.add Node(kind: Immediate, val: 1)
-              bu.add Node(kind: Immediate, val: 1)
-            bu.add Node(kind: IntVal, val: c.literals.pack(i))
-          genUse(it.expr, bu)
+        stmts.add newAsgn(
+          newAt(newFieldExpr(payloadExpr, 1), newIntVal(i)),
+          it)
     else:
       # an empty sequence, set the payload pointer to zero (nil)
-      stmts.addStmt Asgn:
-        bu.subTree Field:
-          bu.add Node(kind: Local, val: tmp)
-          bu.add Node(kind: Immediate, val: 1)
-        bu.add Node(kind: IntVal, val: c.literals.pack(0))
+      stmts.add newAsgn(payloadField, newIntVal(0))
 
-    bu.add Node(kind: Local, val: tmp)
+    expr = tmp
   of SourceKind.FieldAccess:
     let
       (a, b) = t.pair(n)
