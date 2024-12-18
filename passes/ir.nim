@@ -70,6 +70,10 @@ proc newFieldExpr*(n: sink IrNode, index: int): IrNode =
   assert n.kind in {Field, At, Local, Deref, None}
   IrNode(kind: Field, children: @[n, newIntVal(index)])
 
+proc newAt*(lval, index: sink IrNode): IrNode =
+  assert lval.kind in {Field, At, Local, Deref, None}
+  IrNode(kind: At, children: @[lval, index])
+
 proc newDeref*(typ: uint32, n: sink IrNode): IrNode =
   IrNode(kind: Deref, children: @[IrNode(kind: Type, id: typ), n])
 

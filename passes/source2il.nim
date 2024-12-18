@@ -103,6 +103,9 @@ const
     "<=": ekBuiltinProc,
     "<": ekBuiltinProc,
     "not": ekBuiltinProc,
+    "len": ekBuiltinProc,
+    "add": ekBuiltinProc,
+    "clear": ekBuiltinProc,
     "true": ekBuiltinVal,
     "false": ekBuiltinVal
   }.toTable
@@ -242,6 +245,9 @@ proc evalType(c; t; n: NodeIndex): SemType =
       list.add c.expectNot(c.evalType(t, it), tkVoid)
 
     SemType(kind: tkProc, elems: list)
+  of SourceKind.SeqTy:
+    SemType(kind: tkSeq,
+            elems: @[c.expectNot(c.evalType(t, t.child(n, 0)), tkVoid)])
   of Ident:
     let
       name = t.getString(n)
@@ -301,6 +307,20 @@ proc typeToIL(c; typ: SemType): uint32 =
     # a proc type is used to represent both procedure signatures and the type
     # of procedural values. For values, the underlying storage type is a uint
     c.addType Node(kind: UInt, val: 8)
+  of tkSeq:
+    let
+      lengthType  = c.typeToIL(prim(tkInt))
+      pointerType = c.typeToIL(pointerType)
+    c.addType Record:
+      c.types.add Node(kind: Immediate, val: size(typ).uint32)
+      # the length field:
+      c.types.subTree Field:
+        c.types.add Node(kind: Immediate, val: 0)
+        c.types.add Node(kind: Type, val: lengthType)
+      # the payload field:
+      c.types.subTree Field:
+        c.types.add Node(kind: Immediate, val: 8)
+        c.types.add Node(kind: Type, val: pointerType)
 
 func numILParams(typ: SemType): int =
   ## Returns the number of parameters the IL signature type generated from
@@ -353,6 +373,31 @@ proc genProcType(c; typ: SemType): uint32 =
   do:
     result = rawGenProcType(c, typ)
     c.procTypeCache[typ] = result
+
+proc genPayloadType(c; typ: SemType): uint32 =
+  ## Generates and emits the payload type for a sequence with the given
+  ## element type (`typ`). Returns the ID of the payload type.
+  # TODO: cache the type description, so that it's only emitted once per
+  #       element type
+  let
+    intType = c.typeToIL(prim(tkInt))
+    elem = c.typeToIL(typ)
+
+  let arrayType = c.addType Array:
+    c.types.add Node(kind: Immediate, val: 1)
+    c.types.add Node(kind: Immediate, val: 0)
+    c.types.add Node(kind: Type, val: elem)
+
+  c.addType Record:
+    c.types.add Node(kind: Immediate, val: 9) # size of int
+    # the capacity field:
+    c.types.subTree Field:
+      c.types.add Node(kind: Immediate, val: 0)
+      c.types.add Node(kind: Type, val: intType)
+    # the data field:
+    c.types.subTree Field:
+      c.types.add Node(kind: Immediate, val: 8)
+      c.types.add Node(kind: Type, val: arrayType)
 
 proc resetProcContext(c) =
   c.locals.setLen(0) # re-use the memory
@@ -624,6 +669,50 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
         result = relToIL(c, t, n, name, expr, stmts)
       of "not":
         result = notToIL(c, t, n, expr, stmts)
+      of "len":
+        lenCheck(t, n, 2)
+        let e = c.exprToIL(t, t.child(n, 1))
+        if e.typ.kind != tkSeq:
+          c.error("'len' operand must be of sequence type")
+        expr = newFieldExpr(inline(e, stmts), 0)
+        result = prim(tkInt)
+      of "add":
+        lenCheck(t, n, 3)
+        let s    = c.exprToIL(t, t.child(n, 1))
+        var elem = c.exprToIL(t, t.child(n, 2))
+        if s.typ.kind != tkSeq:
+          c.error("'add' expects sequence operand")
+        elif s.attribs * {Mutable, Lvalue} < {Mutable, Lvalue}:
+          c.error("'add' expects mutable lvalue sequence operand")
+        else:
+          # fit to the element type
+          elem = c.fitExpr(elem, s.typ.elems[0])
+
+        if elem.typ.kind == tkVoid:
+          c.error("void expression is not allowed in this context")
+          elem.typ = errorType()
+
+        stmts.add newAsgn(
+          newDeref(c.typeToIL(elem.typ),
+            # TODO: call the 'prepareAdd' procedure here
+            newCall(0, @[newAddr inline(s, stmts), newIntVal(size(elem.typ))])),
+          inline(elem, stmts))
+
+        expr = UnitNode
+        result = prim(tkUnit)
+      of "clear":
+        lenCheck(t, n, 2)
+        let s = c.exprToIL(t, t.child(n, 1))
+        if s.typ.kind != tkSeq:
+          c.error("'clear' expects sequence operand")
+        elif s.attribs * {Mutable, Lvalue} <= {Mutable, Lvalue}:
+          c.error("'clear' expects mutable lvalue sequence operand")
+
+        # set the length back to zero, but leave the capacity as is
+        stmts.add newAsgn(newFieldExpr(inline(s, stmts), 0), newIntVal(0))
+
+        expr = UnitNode
+        result = prim(tkUnit)
       else:
         unreachable()
       return
@@ -810,6 +899,50 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       # it's the unit value
       expr = UnitNode
       result = prim(tkUnit) + {}
+  of SourceKind.Seq:
+    let
+      typ = c.expectNot(c.evalType(t, t.child(n, 0)), tkVoid)
+      length = t.len(n) - 1
+    var elems = newSeq[IrNode](length)
+
+    # assign all elements to temporaries first, so that the payload is only
+    # allocated when control-flow reaches past the argument expressions
+    block:
+      var i = 0
+      for it in t.items(n, 1):
+        elems[i] = c.capture(c.fitExpr(c.exprToIL(t, it), typ), stmts)
+        inc i
+
+    result = SemType(kind: tkSeq, elems: @[typ]) + {}
+
+    let
+      tmp = c.newTemp(result.typ)
+      payloadField = newFieldExpr(tmp, 1)
+
+    # emit the length field assignment:
+    stmts.add newAsgn(newFieldExpr(tmp, 0), newIntVal(length))
+
+    # emit the payload field assignment:
+    if length > 0:
+      let size = size(prim(tkInt)) + size(typ) * length
+      # the size of the payload is sizeof(capacity) + sizeof(element) * length
+      # TODO: call the 'alloc' procedure here
+      stmts.add newAsgn(payloadField, newCall(0, newIntVal(size)))
+
+      let payloadExpr = newDeref(c.genPayloadType(typ), payloadField)
+      # emit the capacity assignment:
+      stmts.add newAsgn(newFieldExpr(payloadExpr, 0), newIntVal(length))
+
+      # emit the final assignments:
+      for i, it in elems.pairs:
+        stmts.add newAsgn(
+          newAt(newFieldExpr(payloadExpr, 1), newIntVal(i)),
+          it)
+    else:
+      # an empty sequence, set the payload pointer to zero (nil)
+      stmts.add newAsgn(payloadField, newIntVal(0))
+
+    expr = tmp
   of SourceKind.FieldAccess:
     let
       (a, b) = t.pair(n)
