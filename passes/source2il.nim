@@ -902,8 +902,8 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
   of SourceKind.Seq:
     let
       typ = c.expectNot(c.evalType(t, t.child(n, 0)), tkVoid)
-      length = t.len(n)
-    var elems = newSeq[IrNode](length - 1)
+      length = t.len(n) - 1
+    var elems = newSeq[IrNode](length)
 
     # assign all elements to temporaries first, so that the payload is only
     # allocated when control-flow reaches past the argument expressions
