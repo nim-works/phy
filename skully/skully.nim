@@ -2298,6 +2298,69 @@ proc translateProcType(c; env: TypeEnv, id: TypeId, ignoreClosure: bool, bu) =
     if desc.callConv(env) == ccClosure and not ignoreClosure:
       bu.add typeRef(c, env, PointerType)
 
+proc embedTaggedUnion(c; env: TypeEnv, id: TypeId, bu) =
+  privateAccess(RecField) # required for accessing the field offsets
+
+  proc addType(c; bu: sink Builder[NodeKind]): uint32 =
+    c.types.mgetOrPut(finish(bu), c.types.len.uint32)
+
+  let
+    desc = env.headerFor(id, Lowered)
+    tagField = env.lookupField(id, 0)
+
+  # compute the alignment for the union:
+  # TODO: this needs to be upstreamed into NimSkull
+  var alignment = 0'i16
+  for _, it in env.fields(desc, 1):
+    let sub = env.headerFor(it.typ, Canonical)
+    if env.isEmbedded(it.typ):
+      # an anonymous record; its fields need to be considered too
+      for _, inner in env.fields(sub):
+        alignment = max(alignment, env.headerFor(inner.typ, Canonical).align)
+    else:
+      alignment = max(alignment, sub.align)
+
+  let offset = align(env[tagField].offset.uint32 + desc.size(env).uint32,
+                     uint32 alignment)
+    ## the offset of the union within the embedding record
+
+  let inner = block:
+    # XXX: size and alignment are currently ignored, as it's simpler this way
+    #      and no pass inspects these values anyhow (at least at the time of
+    #      writing)
+    var bu = initBuilder(Union)
+    bu.add node(Immediate, 0)
+    bu.add node(Immediate, uint32 alignment)
+    for _, it in env.fields(desc, 1):
+      if env.isEmbedded(it.typ):
+        # emit the record type for the embedded type, but make sure to correct
+        # the field offsets; they need to be relative to the start of the
+        # union, not to the start of the embedding record
+        var bu2 = initBuilder(Record)
+        bu2.add node(Immediate, 0)
+        bu2.add node(Immediate, 0)
+        for _, recf in env.fields(env.headerFor(it.typ, Lowered)):
+          bu2.subTree Field:
+            bu2.add node(Immediate, recf.offset.uint32 - offset)
+            bu2.add typeRef(c, env, recf.typ)
+
+        bu.add node(Type, c.addType(bu2))
+      else:
+        bu.add typeRef(c, env, it.typ)
+
+    c.addType(bu) # the union type
+
+  # emit the necessary fields for the embedding record. The tag field is
+  # inlined into the embedder, which gets around having to use another
+  # wrapper type
+  bu.subTree Field:
+    bu.add node(Immediate, env[tagField].offset.uint32)
+    bu.add typeRef(c, env, env[tagField].typ)
+
+  bu.subTree Field:
+    bu.add node(Immediate, offset)
+    bu.add node(Type, inner)
+
 proc translate(c; env: TypeEnv, id: TypeId, bu) =
   let desc = env.headerFor(id, Lowered)
   case desc.kind
@@ -2349,21 +2412,7 @@ proc translate(c; env: TypeEnv, id: TypeId, bu) =
       for f, recf in env.fields(desc):
         privateAccess(RecField)
         if env.headerFor(recf.typ, Canonical).kind == tkTaggedUnion:
-          # the tag field is inlined into the embedder. This is simpler,
-          # as it removes having to use another intermediate type
-          let tag = env[env.lookupField(recf.typ, 0)].typ
-          bu.subTree Field:
-            bu.add node(Immediate, recf.offset.uint32)
-            bu.add typeRef(c, env, tag)
-
-          # XXX: all field offsets within the tagged union are relative to the
-          #      start of the embedding record, and thus the union has to be
-          #      placed at offset 0. This results in correct code generation,
-          #      but it will cause issues as soon as the passes responsible for
-          #      lowering records start to expect sane input
-          bu.subTree Field:
-            bu.add node(Immediate, 0)
-            bu.add typeRef(c, env, recf.typ)
+          c.embedTaggedUnion(env, recf.typ, bu)
         else:
           bu.subTree Field:
             bu.add node(Immediate, recf.offset.uint32)
@@ -2375,16 +2424,6 @@ proc translate(c; env: TypeEnv, id: TypeId, bu) =
     #      "imported" type needs to be translated to the appropriate foreign
     #      type
     translate(c, env, elem(desc), bu)
-  of tkTaggedUnion:
-    # only generate the union part, the tag field is inlined into the embedder
-    bu.subTree Record:
-      # TODO: properly compute the size. It's not stored in the MIR type header
-      bu.add node(Immediate, 0)
-      bu.add node(Immediate, 0)
-      for f, recf in env.fields(desc, 1):
-        bu.subTree Field:
-          bu.add node(Immediate, 0)
-          bu.add typeRef(c, env, recf.typ)
   of tkProc, tkPtr, tkRef, tkVar, tkLent, tkCstring:
     c.translate(env, PointerType, bu)
   else:
