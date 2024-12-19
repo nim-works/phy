@@ -88,6 +88,10 @@ proc len*(t: PackedTree, i: NodeIndex): int =
 proc last*(tree: PackedTree, n: NodeIndex): NodeIndex =
   tree.child(n, tree.len(n) - 1)
 
+proc fin*(tree: PackedTree, n: NodeIndex): NodeIndex =
+  ## Returns the node one past the last node part of the subtree at `n`.
+  tree.next(n)
+
 iterator items*(t: PackedTree, at: NodeIndex): NodeIndex =
   ## Returns the index of each child node of the node at `at`.
   var n = t.first(at)

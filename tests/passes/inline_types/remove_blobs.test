@@ -1,0 +1,14 @@
+discard """
+  description: "Ensure that blob type removal works"
+  output: "(Done)"
+"""
+(TypeDefs
+  (Blob 8 2)
+  (ProcTy (Void))
+  (Blob 16 4))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1) 0 (Locals)
+    (List
+      (Block (Params)
+        (Return)))))

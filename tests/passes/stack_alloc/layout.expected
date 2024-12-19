@@ -1,0 +1,38 @@
+;$sexp
+(TypeDefs
+  (Blob 1 1)
+  (Blob 1 2)
+  (Blob 1 4)
+  (Blob 1 8)
+  (Blob 17 4)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 5) 32
+    (Locals (UInt 8))
+    (List
+      (Block
+        (Params (Local 0))
+        (Drop
+          (Copy (Local 0)))
+        (Drop
+          (Add (UInt 8)
+            (Copy (Local 0))
+            (IntVal 24)))
+        (Drop
+          (Add (UInt 8)
+            (Copy (Local 0))
+            (IntVal 25)))
+        (Drop
+          (Add (UInt 8)
+            (Copy (Local 0))
+            (IntVal 28)))
+        (Drop
+          (Add (UInt 8)
+            (Copy (Local 0))
+            (IntVal 29)))
+        (Drop
+          (Add (UInt 8)
+            (Copy (Local 0))
+            (IntVal 30)))
+        (Return)))))

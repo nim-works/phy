@@ -5,20 +5,14 @@ abstractions over control-flow, stack allocation, reinterpretation and
 conversions, and arithmetic operations, but generally stays close to VM
 bytecode.
 
-Procedures are split into continuations. They need to be ordered such
-that all continuation exits (except for `Loop`) describe forward
-jumps. One (and only one) continuation must be the "return" continuation.
-
 ```grammar
 numtype  ::= (Int size:<int>)
           |  (UInt size:<int>)
           |  (Float size:<int>)
 typedesc ::= (ProcTy (Void) <type>*)
           |  (ProcTy <type>+)
-          |  <numtype>
 type_id  ::= (Type <int>)
-type     ::= <type_id>
-          |  <numtype>
+type     ::= <numtype>
 ```
 
 A type can be either *inlined* (anonymous) or *identified*. An *identified*
@@ -29,35 +23,40 @@ where they're used (hence the name).
 Only numeric types can be inlined.
 
 ```grammar
-local ::= (Local <int>)
-proc ::= (Proc <int>)
+local   ::= (Local <int>)
+proc    ::= (Proc <int>)
 
-rvalue ::= (Load <type> <value>)
-        |  (Addr (IntVal <int>))
-        |  (Neg <type> <value>)
-        |  (Add <type> <value> <value>)
-        |  (Sub <type> <value> <value>)
-        |  (Mul <type> <value> <value>)
-        |  (Div <type> <value> <value>)
-        |  (Mod <type> <value> <value>)
-        |  (AddChck <type> <value> <value> <local>)
-        |  (SubChck <type> <value> <value> <local>)
-        |  (Not <value>)
-        |  (Eq <type> <value> <value>)
-        |  (Lt <type> <value> <value>)
-        |  (Le <type> <value> <value>)
-        |  (BitNot <type> <value>)
-        |  (BitOr <type> <value> <value>)
-        |  (BitAnd <type> <value> <value>)
-        |  (BitXor <type> <value> <value>)
-        |  (Shl <type> <value> <value>)
-        |  (Shr <type> <value> <value>)
-        |  (Reinterp <type> <type> <value>)
-        |  (Conv <type> <type> <value>)
-        |  (Call <proc> <value>*)
-        |  (Call <type> <value>+)
+arith  ::= (Neg <type> <expr>)
+        |  (Add <type> <expr> <expr>)
+        |  (Sub <type> <expr> <expr>)
+        |  (Mul <type> <expr> <expr>)
+        |  (Div <type> <expr> <expr>)
+        |  (Mod <type> <expr> <expr>)
+        |  (AddChck <type> <expr> <expr> <local>)
+        |  (SubChck <type> <expr> <expr> <local>)
+        |  (Not <expr>)
+        |  (Eq <type> <expr> <expr>)
+        |  (Lt <type> <expr> <expr>)
+        |  (Le <type> <expr> <expr>)
+        |  (BitNot <type> <expr>)
+        |  (BitOr  <type> <expr> <expr>)
+        |  (BitAnd <type> <expr> <expr>)
+        |  (BitXor <type> <expr> <expr>)
+        |  (Shl <type> <expr> <expr>)
+        |  (Shr <type> <expr> <expr>)
 
-intVal ::= (IntVal <int>)
+conv   ::= (Reinterp <type> <type> <expr>)
+        |  (Conv     <type> <type> <expr>)
+
+# TODO: `Reinterp` and `Conv` need to be replaced with concrete operations
+#       (e.g., zero extend, sign extend, ftoi.)
+
+memops ::= (Load <type> <expr>)
+
+call   ::= (Call <proc> <expr>*)
+        |  (Call <type_id> <expr>+)
+
+intVal   ::= (IntVal <int>)
 floatVal ::= (FloatVal <float>)
 
 simple ::= <intVal>
@@ -65,11 +64,15 @@ simple ::= <intVal>
         |  (ProcVal <int>)
         |  (Copy <local>)
         |  (Copy (Global <int>))
-value ::= <simple> | <rvalue>
+expr   ::= <simple>
+        |  <arith>
+        |  <conv>
+        |  <memops>
+        |  <call>
 
-cont_name ::= <int>
+block_name ::= <int>
 
-goto ::= (Continue <cont_name>)
+goto     ::= (Goto <block_name>)
 err_goto ::= (Unwind)
           |  <goto>
 
@@ -79,33 +82,48 @@ choice ::= (Choice <intVal> <goto>)
         |  (Choice <floatVal> <floatVal> <goto>)
 
 exit ::= <goto>
-      |  (Continue <cont_name> <value>)
-      |  (Loop <cont_name>)
+      |  (Return <expr>?)
+      |  (Loop <block_name>)
       |  (Unreachable)
-      |  (Raise <value> <err_goto>)
-      |  (SelectBool <value> false:<goto> true:<goto>)
+      |  (Raise <expr> <err_goto>)
+      |  (Branch <expr> false:<goto> true:<goto>)
       |  (Select <type> <simple> <choice>+)
-      |  (CheckedCall <proc> <value>* <goto> <err_goto>)
-      |  (CheckedCall <type> <value>+ <goto> <err_goto>)
-      |  (CheckedCallAsgn <local> <proc> <value>* <goto> <err_goto>)
-      |  (CheckedCallAsgn <local> <type> <value>+ <goto> <err_goto>)
+      |  (CheckedCall <proc> <expr>* <goto> <err_goto>)
+      |  (CheckedCall <type_id> <expr>+ <goto> <err_goto>)
+      |  (CheckedCallAsgn <local> <proc> <expr>* <goto> <err_goto>)
+      |  (CheckedCallAsgn <local> <type_id> <expr>+ <goto> <err_goto>)
 
-stmt ::= (Asgn <local> <value>)
-      |  (Store <type> <value> <value>)
-      |  (Clear <value> <value>)
-      |  (Blit <value> <value> <value>)
-      |  (Call <proc> <value>*)
-      |  (Call <type> <value>+)
-      |  (Drop <value>)
+stmt ::= (Asgn <local> <expr>)
+      |  (Store <type> <expr> <expr>)
+      |  (Clear <expr> <expr>)
+      |  (Blit <expr> <expr> <expr>)
+      |  (Drop <expr>)
+      |  <call>
 
-continuation ::= (Continuation (Params) stack:<int> <stmt>* <exit>)
-              |  (Continuation (Params <type>?)) # return continuation
-              |  (Except <local> stack:<int> <stmt>* <exit>)
+bblock ::= (Block  (Params <local>*) <stmt>* <exit>)
+        |  (Except (Params <local>)  <stmt>* <exit>)
 
-procdef ::= (ProcDef <type_id> (Locals <type>*) (Continuations <continuation>+))
 int_or_float ::= <intVal> | <floatVal>
 globaldef ::= (GlobalDef <type> <int_or_float>)
 ```
+
+```grammar
+procdef ::= (ProcDef <type_id> stack:<int> (Locals <type>*) (List <bblock>+))
+```
+
+Procedures are split into basic blocks. They need to be ordered such that
+blocks come before the block they jump to (except for via `Loop` exits).
+The first block is the entry block.
+
+Only the entry `Block` may use block parameters. If `stack` is greater than 0,
+the entry block must have `N` + 1 parameters (where `N` is the number of
+parameter specified by the proc signature), otherwise it must have `N`
+parameters. The entry block parameters specify which locals the procedure
+arguments are stored in on procedure entry.
+
+If `stack` is greater than 0, `stack` bytes are allocated from the stack on
+procedure entry, and the frame pointer is stored in the local specified last
+in the entry parameter block parameter list.
 
 ### Foreign Procedures
 

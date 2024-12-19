@@ -15,15 +15,15 @@ type
 
     List
 
-    Void, ProcTy, Blob, Record, Array
+    Void, ProcTy, Blob, Record, Union, Array
 
     Join
 
     Asgn, Drop, Clear, Blit
 
     Load, Store, Addr, Call
-    Deref, Field, At
-    Copy, Move, Rename
+    Deref, Field, At, Path
+    Copy
 
     Neg, Add, Sub, Mul, Div, Mod
     AddChck, SubChck
@@ -34,10 +34,10 @@ type
 
     Conv, Reinterp
 
-    Continue, Loop, Raise, Unreachable, Select, SelectBool
+    Goto, Loop, Raise, Unreachable, Select, Branch
     CheckedCall, CheckedCallAsgn, Unwind, Choice
 
-    Module, TypeDefs, ProcDefs, ProcDef, Locals, Continuations, Continuation,
+    Module, TypeDefs, ProcDefs, ProcDef, Locals,
     Except, Params, GlobalDefs, GlobalDef, Foreign
 
     Break, Return, Case, If, Block, Stmts

@@ -4,19 +4,18 @@
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
+  (ProcDef (Type 1) (Locals)
+    (List
+      (Block (Params)
+        (Return))))
   (ProcDef (Type 1)
-    (Continuations
-      (Continuation (Params) (Locals)
-        (Continue 1 (List)))
-      (Continuation (Params))))
-  (ProcDef (Type 1)
-    (Continuations
-      (Continuation (Params) (Locals)
+    (Locals (Type 0))
+    (List
+      (Block (Params)
         (CheckedCall (Proc 0)
-          (Continue 1 (List))
-          (Continue 2 (List))))
-      (Continuation (Params) (Locals)
-        (Continue 3 (List)))
-      (Except (Params (Type 0)) (Locals)
-        (Continue 3 (List)))
-      (Continuation (Params)))))
+          (Goto 1)
+          (Goto 2)))
+      (Block (Params)
+        (Return))
+      (Except (Params (Local 0))
+        (Return)))))

@@ -1,0 +1,70 @@
+;$sexp
+(TypeDefs
+  (Record 8 4
+    (Field 0 (Int 4))
+    (Field 4 (Int 4)))
+  (Record 16 4
+    (Field 0 (Type 0))
+    (Field 8 (Type 0)))
+  (Union 8 4 (Int 4) (Type 0))
+  (Array 32 4 8 (Int 4))
+  (Array 32 4 4 (Type 0))
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 5)
+    (Locals (Type 0) (Type 1) (Type 2) (Type 3) (Type 4))
+    (List
+      (Block (Params)
+        (Asgn
+          (Path (Int 4) (Local 0) 0)
+          (IntVal 0))
+        (Drop
+          (Copy
+            (Path (Int 4) (Local 0) 0)))
+        (Asgn
+          (Path (Int 4)
+            (Deref (Type 0)
+              (Addr (Local 0)))
+            0)
+          (IntVal 1))
+        (Drop
+          (Copy
+            (Path (Int 4)
+              (Deref (Type 0)
+                (Addr (Local 0)))
+              0)))
+        (Asgn
+          (Path (Int 4) (Local 0) 1)
+          (IntVal 0))
+        (Drop
+          (Copy
+            (Path (Int 4) (Local 0) 1)))
+        (Asgn
+          (Path (Type 0) (Local 1) 0)
+          (Copy
+            (Path (Type 0) (Local 1) 1)))
+        (Asgn
+          (Path (Int 4) (Local 1) 1 1)
+          (IntVal 2))
+        (Asgn
+          (Path (Int 4) (Local 2) 0)
+          (IntVal 0))
+        (Asgn
+          (Path (Type 0) (Local 2) 1)
+          (Copy (Local 0)))
+        (Asgn
+          (Path (Int 4) (Local 3) (IntVal 0))
+          (IntVal 1))
+        (Asgn
+          (Path (Int 4) (Local 3) (IntVal 1))
+          (IntVal 2))
+        (Asgn
+          (Path (Int 4) (Local 3)
+            (Copy
+              (Path (Int 4) (Local 3) (IntVal 1))))
+          (IntVal 3))
+        (Asgn
+          (Path (Int 4) (Local 4) (IntVal 3) 1)
+          (IntVal 0))
+        (Return)))))
