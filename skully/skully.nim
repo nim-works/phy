@@ -2333,18 +2333,22 @@ proc embedTaggedUnion(c; env: TypeEnv, id: TypeId, bu) =
     bu.add node(Immediate, uint32 alignment)
     for _, it in env.fields(desc, 1):
       if env.isEmbedded(it.typ):
-        # emit the record type for the embedded type, but make sure to correct
-        # the field offsets; they need to be relative to the start of the
-        # union, not to the start of the embedding record
-        var bu2 = initBuilder(Record)
-        bu2.add node(Immediate, 0)
-        bu2.add node(Immediate, 0)
-        for _, recf in env.fields(env.headerFor(it.typ, Lowered)):
-          bu2.subTree Field:
-            bu2.add node(Immediate, recf.offset.uint32 - offset)
-            bu2.add typeRef(c, env, recf.typ)
+        if env.headerFor(it.typ, Lowered).numFields == 0:
+          # don't emit an empty record
+          bu.add node(UInt, 1)
+        else:
+          # emit the record type for the embedded type, but make sure to
+          # correct the field offsets; they need to be relative to the start
+          # of the union, not to the start of the embedding record
+          var bu2 = initBuilder(Record)
+          bu2.add node(Immediate, 0)
+          bu2.add node(Immediate, 0)
+          for _, recf in env.fields(env.headerFor(it.typ, Lowered)):
+            bu2.subTree Field:
+              bu2.add node(Immediate, recf.offset.uint32 - offset)
+              bu2.add typeRef(c, env, recf.typ)
 
-        bu.add node(Type, c.addType(bu2))
+          bu.add node(Type, c.addType(bu2))
       else:
         bu.add typeRef(c, env, it.typ)
 
