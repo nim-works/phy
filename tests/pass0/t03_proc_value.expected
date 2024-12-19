@@ -1,6 +1,5 @@
 .type t0 () -> int
 .start t0 p0
-.local lo0 int
   LdImmInt 1
   Ret
 .end

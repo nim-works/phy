@@ -2,14 +2,11 @@ discard """
   output: "(Done 0.5)"
 """
 (TypeDefs
-  (Float 4)
-  (Float 8)
-  (ProcTy (Type 0)))
+  (ProcTy (Float 4)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 2) (Locals)
-    (Continuations
-      (Continuation (Params) 0
-        (Continue 1
-          (Conv (Type 0) (Type 1) (FloatVal 0.5000000149))))
-      (Continuation (Params (Type 0))))))
+  (ProcDef (Type 0) 0 (Locals)
+    (List
+      (Block (Params)
+        (Return
+          (Conv (Float 4) (Float 8) (FloatVal 0.5000000149)))))))

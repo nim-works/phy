@@ -54,7 +54,7 @@ proc join(bu; label: LabelId) =
     bu.add Node(kind: Immediate, val: label)
 
 proc goto(bu; label: LabelId) =
-  bu.subTree Continue:
+  bu.subTree Goto:
     bu.add Node(kind: Immediate, val: label)
 
 proc pushContext(c) =
@@ -130,7 +130,7 @@ proc lowerStmt(c; tree; n, bu): bool =
         (cond, a) = tree.pair(n)
         then      = c.newLabel()
 
-      bu.subTree SelectBool:
+      bu.subTree Branch:
         bu.copyFrom(tree, cond)
         bu.goto(c.leave(1)) # the false branch
         bu.goto(then)       # the true branch
@@ -143,7 +143,7 @@ proc lowerStmt(c; tree; n, bu): bool =
         then         = c.newLabel()
         els          = c.newLabel()
 
-      bu.subTree SelectBool:
+      bu.subTree Branch:
         bu.copyFrom(tree, cond)
         bu.goto(els)  # the false branch
         bu.goto(then) # the true branch

@@ -15,8 +15,10 @@ import
   generated/[
     lang0_checks,
     lang1_checks,
+    lang2_checks,
     lang3_checks,
     lang4_checks,
+    lang5_checks,
     lang25_checks,
     lang30_checks,
     source_checks
@@ -26,9 +28,13 @@ import
     debugutils,
     source2il,
     pass0,
-    pass1,
-    pass3,
-    pass4,
+    pass_aggregateParams,
+    pass_aggregatesToBlob,
+    pass_flattenPaths,
+    pass_inlineTypes,
+    pass_legalizeBlobOps,
+    pass_localsToBlob,
+    pass_stackAlloc,
     pass25,
     pass30,
     trees
@@ -57,8 +63,10 @@ type
     langBytecode = "vm"
     lang0 = "L0"
     lang1 = "L1"
+    lang2 = "L2"
     lang3 = "L3"
     lang4 = "L4"
+    lang5 = "L5"
     lang25 = "L25"
     lang30 = "L30"
     langSource = "source"
@@ -85,6 +93,9 @@ Commands:
   e                           similar to 'c', but also runs the generated
                               bytecode and echoes the result
 """
+  PointerSize = 8
+    ## the byte-width of pointer values
+    # TODO: this size needs to be configurable from the outside
 
 var
   gShow: set[Language]
@@ -114,8 +125,10 @@ proc syntaxCheck(code: PackedTree[spec.NodeKind], lang: Language) =
   case lang
   of lang0:  syntaxCheck(code, lang0_checks, module)
   of lang1:  syntaxCheck(code, lang1_checks, module)
+  of lang2:  syntaxCheck(code, lang2_checks, module)
   of lang3:  syntaxCheck(code, lang3_checks, module)
   of lang4:  syntaxCheck(code, lang4_checks, module)
+  of lang5:  syntaxCheck(code, lang5_checks, module)
   of lang25: syntaxCheck(code, lang25_checks, module)
   of lang30: syntaxCheck(code, lang30_checks, module)
   else:      unreachable()
@@ -198,22 +211,30 @@ proc compile(tree: var PackedTree[spec.NodeKind], source, target: Language) =
       assert false, "cannot be handled here: " & $current
     of lang1:
       syntaxCheck(tree, lang1_checks, module)
-      # TODO: don't hardcode the pointer size
-      tree = tree.apply(pass1.lower(tree, 8))
+      tree = tree.apply(pass_inlineTypes.lower(tree))
       current = lang0
+    of lang2:
+      syntaxCheck(tree, lang2_checks, module)
+      tree = tree.apply(pass_stackAlloc.lower(tree, PointerSize))
+      current = lang1
     of lang3:
       syntaxCheck(tree, lang3_checks, module)
-      # TODO: don't hardcode the pointer size
-      tree = tree.apply(pass3.lower(tree, 8))
-      current = lang1
+      tree = tree.apply(pass_aggregatesToBlob.lower(tree, PointerSize))
+      tree = tree.apply(pass_localsToBlob.lower(tree))
+      tree = tree.apply(pass_legalizeBlobOps.lower(tree))
+      current = lang2
     of lang4:
       syntaxCheck(tree, lang4_checks, module)
-      tree = tree.apply(pass4.lower(tree))
+      tree = tree.apply(pass_aggregateParams.lower(tree, PointerSize))
       current = lang3
+    of lang5:
+      syntaxCheck(tree, lang5_checks, module)
+      tree = tree.apply(pass_flattenPaths.lower(tree))
+      current = lang4
     of lang25:
       syntaxCheck(tree, lang25_checks, module)
       tree = tree.apply(pass25.lower(tree))
-      current = lang4
+      current = lang5
     of lang30:
       syntaxCheck(tree, lang30_checks, module)
       tree = tree.apply(pass30.lower(tree))

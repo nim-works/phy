@@ -1,0 +1,48 @@
+discard """
+  description: "
+    Ensure that aggregate parameters are turned into address (i.e., integer)
+    parameters correctly, and that the argument expressions at the callsite
+    are turned into an address-of operations accordingly
+  "
+  output: "(Done)"
+"""
+(TypeDefs
+  (Record 4 4
+    (Field 0 (Int 4)))
+  (ProcTy (Type 0))
+  (ProcTy (Void) (Type 0))
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Locals (Type 0))
+    (List
+      (Block (Params)
+        (Return
+          (Copy (Local 0))))))
+
+  (ProcDef (Type 2)
+    (Locals (Type 0) (Type 0))
+    (List
+      (Block
+        (Params (Local 0))
+          (Drop (Addr (Local 0)))
+          (Asgn (Local 1)
+            (Copy (Local 0)))
+          (Asgn
+            (Path (Int 4) (Local 0) 0)
+            (IntVal 100))
+          (Return))))
+
+  (ProcDef (Type 3)
+    (Locals (Type 0))
+    (List
+      (Block (Params)
+        (Call (Proc 1)
+          (Copy (Local 0)))
+        (Call (Proc 1)
+          (Load (Type 0)
+            (Addr (Local 0))))
+        (Call (Proc 1)
+          (Call (Proc 0)))
+        (Return)))))

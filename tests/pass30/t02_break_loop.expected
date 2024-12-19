@@ -8,7 +8,7 @@
       (Drop (IntVal 100))
       (Join 0)
       (Drop (IntVal 200))
-      (Continue 1)
+      (Goto 1)
       (Join 1)
       (Drop (IntVal 300))
       (Return))))
