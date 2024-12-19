@@ -52,9 +52,13 @@ import
     changesets,
     debugutils,
     pass0,
-    pass1,
-    pass3,
-    pass4,
+    pass_aggregateParams,
+    pass_aggregatesToBlob,
+    pass_flattenPaths,
+    pass_inlineTypes,
+    pass_legalizeBlobOps,
+    pass_localsToBlob,
+    pass_stackAlloc,
     pass25,
     spec,
     trees
@@ -2746,13 +2750,30 @@ proc generateCode(graph: ModuleGraph): VmModule =
     for id, it in procs.pairs:
       bu.add it
 
-  var tree = initTree[NodeKind](finish(bu), c.lit)
-  measure "pass25": tree = tree.apply(pass25.lower(tree))
-  measure "pass4": tree = tree.apply(pass4.lower(tree))
-  measure "pass3": tree = tree.apply(pass3.lower(tree, 8))
-  measure "pass1": tree = tree.apply(pass1.lower(tree, 8))
+  const PointerSize = 8
+  # TODO: make the size configurable
+  # TODO: delegate turning the L25 code into bytecode to the phy program; less
+  #       duplicated logic
 
-  result = pass0.translate(tree)
+  var tree = initTree[NodeKind](finish(bu), c.lit)
+  measure "pass25":
+    tree = tree.apply(pass25.lower(tree))
+  measure "flatten paths":
+    tree = tree.apply(pass_flattenPaths.lower(tree))
+  measure "aggregate params":
+    tree = tree.apply(pass_aggregateParams.lower(tree, PointerSize))
+  measure "aggregates to blob":
+    tree = tree.apply(pass_aggregatesToBlob.lower(tree, PointerSize))
+  measure "locals to blob":
+    tree = tree.apply(pass_localsToBlob.lower(tree))
+  measure "legalize blob ops":
+    tree = tree.apply(pass_legalizeBlobOps.lower(tree))
+  measure "stack alloc":
+    tree = tree.apply(pass_stackAlloc.lower(tree, PointerSize))
+  measure "inline":
+    tree = tree.apply(pass_inlineTypes.lower(tree))
+  measure "pass0":
+    result = pass0.translate(tree)
 
 proc main(args: openArray[string]) =
   let config = newConfigRef(cli_reporter.reportHook)
