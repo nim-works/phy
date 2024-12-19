@@ -2,24 +2,21 @@ discard """
   output: "(Done 1)"
 """
 (TypeDefs
-  (Int 8)
-  (Float 8)
-  (ProcTy (Type 0))
+  (ProcTy (Int 8))
 )
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 2) (Locals) (Continuations
-    (Continuation (Params) 0
-      (Select (Type 1) (FloatVal 20.0)
-        (Choice (FloatVal 15.0) (FloatVal 25.0) (Continue 1))
-        (Choice (FloatVal 10.0) (Continue 2)))
+  (ProcDef (Type 0) 0 (Locals) (List
+    (Block (Params)
+      (Select (Float 8) (FloatVal 20.0)
+        (Choice (FloatVal 15.0) (FloatVal 25.0) (Goto 1))
+        (Choice (FloatVal 10.0) (Goto 2)))
     )
-    (Continuation (Params) 0
-      (Continue 3 (IntVal 1))
+    (Block (Params)
+      (Return (IntVal 1))
     )
-    (Continuation (Params) 0
-      (Continue 3 (IntVal 2))
+    (Block (Params)
+      (Return (IntVal 2))
     )
-    (Continuation (Params (Type 0)))
   ))
 )

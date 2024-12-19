@@ -1,0 +1,64 @@
+discard """
+  description: "
+    Ensure that `Path`s are lowered into the correct arithmetic in all
+    cases
+  "
+  output: "(Done)"
+"""
+(TypeDefs
+  (Record 8 4
+    (Field 0 (Int 4))
+    (Field 4 (Int 4)))
+  (Record 16 4
+    (Field 0 (Type 0))
+    (Field 8 (Type 0)))
+  (Union 8 4 (Int 4) (Type 0))
+  (Array 16 4 2 (Type 0))
+  (Record 20 4
+    (Field 0 (Int 4))
+    (Field 4 (Type 3)))
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 5)
+    (Locals (Type 0) (Type 1) (Type 2) (Type 3) (Type 4) (Int 4))
+    (List
+      (Block (Params)
+        (Drop
+          (Addr (Path (Int 4) (Local 0) 0)))
+        (Drop
+          (Addr (Path (Int 4) (Local 0) 1)))
+
+        (Drop
+          (Addr (Path (Int 4) (Deref (Type 0)
+            (Addr (Local 0))) 1)))
+
+        (Drop
+          (Addr (Path (Int 4)  (Local 2) 0)))
+        (Drop
+          (Addr (Path (Type 0) (Local 2) 1)))
+
+        (Drop
+          (Addr (Path (Type 0) (Local 3) 0)))
+        (Drop
+          (Addr (Path (Type 0) (Local 3) (IntVal 0))))
+        (Drop
+          (Addr (Path (Type 0) (Local 3) (IntVal 1))))
+        (Drop
+          (Addr (Path (Type 0) (Local 3) (IntVal 2))))
+        (Drop
+          (Addr (Path (Type 0) (Local 3) (Copy (Local 5)))))
+        (Drop
+          (Addr (Path (Int 4) (Local 3) (IntVal 1) 1)))
+        (Drop
+          (Addr (Path (Int 4) (Local 3) (Copy (Local 5)) 1)))
+
+        (Drop
+          (Addr (Path (Int 4) (Local 4) 1 (Copy (Local 5)) 1)))
+
+        (Drop
+          (Addr (Path (Int 4) (Local 3)
+            (Load (Int 4)
+              (Addr (Path (Int 4) (Local 0) 0))))))
+
+        (Return)))))

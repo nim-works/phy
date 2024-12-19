@@ -1,0 +1,22 @@
+.type t0 (int, int) -> int
+.type t1 () -> int
+.start t0 p0
+.local lo0 int
+.local lo1 int
+.local lo2 int
+  StackAlloc 8
+  PopLocal lo2
+  PopLocal lo1
+  PopLocal lo0
+  GetLocal lo2
+  GetLocal lo0
+  WrInt64 0
+  GetLocal lo1
+  Ret
+.end
+.start t1 p1
+  LdImmInt 1
+  LdImmInt 2
+  Call p0 2
+  Ret
+.end

@@ -7,7 +7,7 @@
     (Stmts
       (Drop (IntVal 100))
       (Drop (IntVal 200))
-      (Continue 0)
+      (Goto 0)
       (Join 0)
       (Drop (IntVal 300))
       (Return))))

@@ -3,9 +3,9 @@
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 0)
-    (Continuations
-      (Continuation (Params) (Locals)
-        (Continue 1 (List)))
-      (Continuation (Params) (Locals)
-        (Loop 1 (List))))))
+  (ProcDef (Type 0) (Locals)
+    (List
+      (Block (Params)
+        (Goto 1))
+      (Block (Params)
+        (Loop 1)))))
