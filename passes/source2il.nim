@@ -67,8 +67,6 @@ type
 
     # procedure context:
     retType: SemType
-    returnParam: uint32
-      ## the index of the out parameter, if one is required
     locals: seq[SemType]
       ## all locals part of the procedure
     params: seq[tuple[typ: SemType, local: uint32]]
@@ -112,7 +110,7 @@ const
   unitExpr = Expr(expr: UnitNode, typ: prim(tkUnit))
     ## the expression evaluating to the unitary value
 
-  pointerType = prim(tkInt)
+  pointerType {.used.} = prim(tkInt)
     ## the type inhabited by pointer values. The constant is used as a
     ## placeholder until a dedicated pointer type is introduced
 
@@ -310,19 +308,14 @@ func numILParams(typ: SemType): int =
   ## Returns the number of parameters the IL signature type generated from
   ## `typ` is going to have.
   assert typ.kind == tkProc
-  typ.elems.len - 1 + ord(typ.elems[0].kind in AggregateTypes)
+  typ.elems.len - 1
 
 proc rawGenProcType(c; typ: SemType): uint32 =
   ## Generates the IL representation for the procedure signature type `typ`
   ## and adds it to `c`.
   assert typ.kind == tkProc
   let params = mapIt(typ.elems.toOpenArray(1, typ.elems.high)):
-    if it.kind in AggregateTypes:
-      # XXX: due to lack of support in the IL, aggregate values need to be
-      #      passed by address at the moment
-      c.typeToIL(pointerType)
-    else:
-      c.typeToIL(it)
+    c.typeToIL(it)
 
   template addParams() =
     for p in params.items:
@@ -333,16 +326,6 @@ proc rawGenProcType(c; typ: SemType): uint32 =
     c.addType ProcTy:
       c.types.subTree Void: discard
       addParams()
-  of AggregateTypes:
-    # aggregate types are passed via an out parameter.
-    # ``() -> T`` becomes ``(int) -> unit``
-    let
-      ret = c.typeToIL(prim(tkUnit))
-      arg = c.typeToIL(prim(tkInt))
-    c.addType ProcTy:
-      c.types.add Node(kind: Type, val: ret)
-      addParams()
-      c.types.add Node(kind: Type, val: arg)
   else:
     let typId = c.typeToIL(typ.elems[0])
     c.addType ProcTy:
@@ -556,12 +539,7 @@ proc userCallToIL(c; t; n: NodeIndex, expr; stmts): SemType =
         # capture the value to ensure a correct evaluation order between the
         # argument expressions
         let tmp = c.capture(arg, stmts)
-        if arg.typ.kind in AggregateTypes:
-          # XXX: due to lack of support in the IL, aggregate values need to be
-          #      passed by address at the moment
-          call.add newAddr(tmp)
-        else:
-          call.add tmp
+        call.add tmp
 
         inc i
 
@@ -588,14 +566,6 @@ proc userCallToIL(c; t; n: NodeIndex, expr; stmts): SemType =
       stmts.add call
       # mark the non-exceptional call exit as unreachable:
       stmts.add newUnreachable()
-    of AggregateTypes:
-      # the value is not returned normally, but passed via an out parameter
-      let tmp = c.newTemp(callee.typ.elems[0])
-      call.add newAddr(tmp)
-      stmts.add newDrop(call)
-
-      # return the temporary as the expression
-      expr = tmp
     else:
       expr = call
 
@@ -686,12 +656,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       expr = newLocal(ent.id.uint32)
       result = c.locals[ent.id] + {Lvalue, Mutable}
     of ekParam:
-      if c.params[ent.id].typ.kind in AggregateTypes:
-        # aggregate parameters use pass-by-address
-        expr = newDeref(c.typeToIL(c.params[ent.id].typ),
-                        newLocal(c.params[ent.id].local))
-      else:
-        expr = newLocal(c.params[ent.id].local)
+      expr = newLocal(c.params[ent.id].local)
       result = c.params[ent.id].typ + {Lvalue}
     of ekProc:
       # expand to a procedure address (`ProcVal`), which is always correct;
@@ -862,11 +827,6 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
     case e.typ.kind
     of tkError:
       discard "do nothing"
-    of AggregateTypes:
-      # special handling for aggregate types: store through the out parameter
-      stmts.add newAsgn(newDeref(c.typeToIL(e.typ), newLocal(c.returnParam)),
-                        e.expr)
-      stmts.add newReturn(UnitNode)
     else:
       stmts.add newReturn(e.expr)
 
@@ -933,20 +893,6 @@ proc exprToIL*(c; t): SemType =
   ## and turns it into a procedure. Also returns the type of the expression.
   var e = c.scopedExprToIL(t, NodeIndex(0))
   result = e.typ
-
-  if e.typ.kind in AggregateTypes:
-    # XXX: to properly handle non-primitive returns, the expression is
-    #      currently analysed twice
-    c.resetProcContext() # undo the effects
-    c.locals.add prim(tkInt) # add the pointer parameter
-    c.returnParam = 0
-    c.retType = e.typ
-    # crudely wrap the expression in a Return:
-    let t =
-      initTree(@[TreeNode[SourceKind](kind: SourceKind.Return, val: 1)] & t.nodes,
-               t.literals)
-    # analyse again:
-    e = c.scopedExprToIL(t, NodeIndex(0))
 
   defer:
     c.resetProcContext()
@@ -1017,18 +963,10 @@ proc declToIL*(c; t; n: NodeIndex) =
 
       # add the local and register the entity regadless of whether there was
       # an error
-      if procTy.elems[i + 1].kind in AggregateTypes:
-        c.locals.add pointerType # the parameter is of pointer type internally
-      else:
-        c.locals.add procTy.elems[i + 1]
+      c.locals.add procTy.elems[i + 1]
 
       c.params.add (procTy.elems[i + 1], c.locals.high.uint32)
       c.addDecl(name, Entity(kind: ekParam, id: c.params.high))
-
-    if c.retType.kind in AggregateTypes:
-      # needs an extra pointer parameter
-      c.locals.add prim(tkInt)
-      c.returnParam = uint32(c.locals.len - 1)
 
     # analyse the body:
     let e = c.exprToIL(t, t.child(n, 3))
