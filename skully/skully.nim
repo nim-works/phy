@@ -1,5 +1,5 @@
 import
-  std/[importutils, monotimes, os, strtabs, packedsets, tables, times],
+  std/[importutils, os, strtabs, packedsets, tables],
   compiler/front/[
     options,
     cli_reporter,
@@ -49,26 +49,12 @@ import
   ],
   passes/[
     builders,
-    changesets,
     debugutils,
-    pass0,
-    pass_aggregateParams,
-    pass_aggregatesToBlob,
-    pass_flattenPaths,
-    pass_inlineTypes,
-    pass_legalizeBlobOps,
-    pass_localsToBlob,
-    pass_stackAlloc,
-    pass25,
     spec,
     trees
   ],
   skully/[
-    rtti,
-    runner
-  ],
-  vm/[
-    vmmodules
+    rtti
   ]
 
 from compiler/mir/mirbodies import MirBody, `[]`
@@ -2462,11 +2448,6 @@ proc genType(c; env: TypeEnv, typ: TypeId): uint32 =
     result = c.types.mgetOrPut(finish(bu), c.types.len.uint32)
     c.typeMap[typ] = result
 
-template measure(name: string, body: untyped) =
-  let a = getMonoTime()
-  body
-  echo name, " took: ", inMilliseconds(getMonoTime() - a)
-
 proc findPatchFile(config: ConfigRef, file: string): FileIndex =
   var patchDir = getAppDir()
   # search for the directory that contains the patch modules
@@ -2723,7 +2704,7 @@ proc generateCodeForMain(c; env: var MirEnv; m: Module,
   let typ = c.genProcType(env, env.types.add(prc.typ))
   result = (prc, c.complete(env, typ, c.prc, body, finish(bu)))
 
-proc generateCode(graph: ModuleGraph): VmModule =
+proc generateCode(graph: ModuleGraph): PackedTree[NodeKind] =
   block:
     # the ``TFrame`` system type must not be treated as an imported type (as
     # those are not supported by skully), so we have to "correct" the type
@@ -2804,32 +2785,14 @@ proc generateCode(graph: ModuleGraph): VmModule =
     for id, it in procs.pairs:
       bu.add it
 
-  const PointerSize = 8
-  # TODO: make the size configurable
-  # TODO: delegate turning the L25 code into bytecode to the phy program; less
-  #       duplicated logic
-
-  var tree = initTree[NodeKind](finish(bu), c.lit)
-  measure "pass25":
-    tree = tree.apply(pass25.lower(tree))
-  measure "flatten paths":
-    tree = tree.apply(pass_flattenPaths.lower(tree))
-  measure "aggregate params":
-    tree = tree.apply(pass_aggregateParams.lower(tree, PointerSize))
-  measure "aggregates to blob":
-    tree = tree.apply(pass_aggregatesToBlob.lower(tree, PointerSize))
-  measure "locals to blob":
-    tree = tree.apply(pass_localsToBlob.lower(tree))
-  measure "legalize blob ops":
-    tree = tree.apply(pass_legalizeBlobOps.lower(tree))
-  measure "stack alloc":
-    tree = tree.apply(pass_stackAlloc.lower(tree, PointerSize))
-  measure "inline":
-    tree = tree.apply(pass_inlineTypes.lower(tree))
-  measure "pass0":
-    result = pass0.translate(tree)
+  result = initTree[NodeKind](finish(bu), c.lit)
 
 proc main(args: openArray[string]) =
+  if args.len != 2:
+    echo args
+    echo "usage: skully <module> <output>"
+    quit(1)
+
   let config = newConfigRef(cli_reporter.reportHook)
   config.writelnHook = proc(r: ConfigRef, output: string, flags: MsgFlags) =
     stdout.writeLine(output)
@@ -2842,12 +2805,12 @@ proc main(args: openArray[string]) =
 
   # set up a working compiler environment:
   processCmdLine(passCmd1, [], config)
-  config.setFromProjectName(args[^1])
+  config.setFromProjectName(args[0])
   discard loadConfigs(DefaultConfig, ids, config)
   extccomp.initVars(config)
   processCmdLine(passCmd2, [], config)
 
-  config.setFromProjectName(args[^1])
+  config.setFromProjectName(args[0])
   wantMainModule(config)
 
   # use the "any" OS in order to disable most platform-specific code
@@ -2894,10 +2857,7 @@ proc main(args: openArray[string]) =
 
   graph.compileProject(config.projectMainIdx)
 
-  # generate the IL code:
   let m = generateCode(graph)
-
-  # TODO: separate compilation from running the result
-  programResult = linkAndRun(m, 1024 * 1024 * 8) # 2 MiB stack
+  writeFile(args[1], pretty(m, trees.NodeIndex(0)))
 
 main(getExecArgs())
