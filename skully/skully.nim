@@ -142,8 +142,6 @@ const
     ## must be added to all raw address values, in order to undo the
     ## offset applied to address value on memory access performed by the VM
 
-  Branch = SelectBool # XXX: for forward compatibility
-
 using
   bu: var Builder[NodeKind]
   tree: MirTree
@@ -191,7 +189,7 @@ template buildExpr(typ: TypeId, body: untyped): Expr =
     unreachable()
 
 proc goto(bu; label: uint32) =
-  bu.subTree Continue:
+  bu.subTree Goto:
     bu.add node(Immediate, label)
 
 proc join(bu; label: uint32) =
@@ -263,7 +261,7 @@ proc genExit(c; tree; n; bu) =
     bu.subTree Unwind:
       discard
   of mnkLabel:
-    bu.subTree Continue:
+    bu.subTree Goto:
       bu.add node(Immediate, c.prc.request(tree[n].label))
   else:
     unreachable()
@@ -665,7 +663,7 @@ proc genLength(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
       then = c.prc.newLabel()
       els  = c.prc.newLabel()
       exit = c.prc.newLabel()
-    stmts.addStmt SelectBool:
+    stmts.addStmt Branch:
       bu.subTree Eq:
         bu.add typeRef(c, env, CstringType)
         c.translateValue(env, tree, n, true, bu)
@@ -1045,7 +1043,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     let a = c.prc.newLabel()
     let b = c.prc.newLabel()
     let after = c.prc.newLabel()
-    stmts.addStmt SelectBool:
+    stmts.addStmt Branch:
       var (arg1, arg2) =
         if tree[n, 1].magic == mMaxI:
           (0, 1)
@@ -1308,7 +1306,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     # emit the following:
     #   if x.p != nil and (x.p.cap and NIM_STRLIT_FLAG) == 0:
     #     dealloc(x.p)
-    stmts.addStmt SelectBool:
+    stmts.addStmt Branch:
       bu.subTree Eq:
         bu.add typeRef(c, env, ptrTyp)
         bu.subTree Copy:
@@ -1320,7 +1318,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       bu.goto els
     stmts.join then
     then = c.prc.newLabel()
-    stmts.addStmt SelectBool:
+    stmts.addStmt Branch:
       bu.subTree Eq:
         bu.add typeRef(c, env, env.types.sizeType)
         bu.subTree BitAnd:
@@ -1944,7 +1942,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
   of mnkIf:
     guardActive()
     let label = c.prc.newLabel()
-    stmts.addStmt SelectBool:
+    stmts.addStmt Branch:
       c.translateValue(env, tree, tree.child(n, 0), true, bu)
       c.genExit(tree, tree.child(n, 1), bu)
       bu.goto label
@@ -1988,7 +1986,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
         next = c.prc.newLabel()
         if tree[it].kind == mnkRange:
           let other = c.prc.newLabel()
-          stmts.addStmt SelectBool:
+          stmts.addStmt Branch:
             bu.subTree Le:
               bu.add typeRef(c, env, tree[n, 0].typ)
               c.translateValue(env, tree, tree.child(it, 0), true, bu)
@@ -1996,7 +1994,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
             bu.goto(next)
             bu.goto(other)
           stmts.join other
-          stmts.addStmt SelectBool:
+          stmts.addStmt Branch:
             bu.subTree Le:
               bu.add typeRef(c, env, tree[n, 0].typ)
               bu.use tmp
@@ -2004,7 +2002,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
             bu.goto(next) # continue with the next check
             bu.goto(then) # jump to the body of the branch
         else:
-          stmts.addStmt SelectBool:
+          stmts.addStmt Branch:
             bu.subTree Eq:
               bu.add typeRef(c, env, tree[n, 0].typ)
               bu.use tmp
@@ -2054,7 +2052,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
       for it in tree.items(n, 1, ^2):
         stmts.join(els)
         els = c.prc.newLabel()
-        stmts.addStmt SelectBool:
+        stmts.addStmt Branch:
           c.genOf(env, tree, expr, tree[it].typ, bu)
           bu.goto(els)
           bu.goto(then)
