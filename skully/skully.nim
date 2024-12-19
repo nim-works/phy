@@ -2390,7 +2390,7 @@ proc translate(c; env: TypeEnv, id: TypeId, bu) =
       bu.add node(Immediate, desc.align.uint32)
       bu.add node(Immediate, 1)
       bu.add typeRef(c, env, desc.elem())
-  of tkRecord, tkUnion:
+  of tkRecord:
     let (size, alignment) =
       if desc.size(env) >= 0:
         (desc.size(env).int, desc.align.int)
@@ -2421,6 +2421,12 @@ proc translate(c; env: TypeEnv, id: TypeId, bu) =
           bu.subTree Field:
             bu.add node(Immediate, recf.offset.uint32)
             bu.add typeRef(c, env, recf.typ)
+  of tkUnion:
+    bu.subTree Union:
+      bu.add node(Immediate, desc.size(env).uint32)
+      bu.add node(Immediate, desc.align.uint32)
+      for _, recf in env.fields(desc):
+        bu.add typeRef(c, env, recf.typ)
   of tkImported:
     # treat imported types as if they were equivalent to their "underlying"
     # type
