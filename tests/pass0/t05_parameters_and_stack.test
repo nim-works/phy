@@ -1,0 +1,28 @@
+discard """
+  description: "
+    Ensure that a procedure with both parameters and a frame pointer
+    works
+  "
+  output: "(Done 2)"
+"""
+(TypeDefs
+  (ProcTy (Int 8) (Int 8) (Int 8))
+  (ProcTy (Int 8)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0) 8
+    (Locals (Int 8) (Int 8) (Int 8))
+    (List
+      (Block
+        (Params (Local 0) (Local 1) (Local 2))
+        (Store (Int 8)
+          (Copy (Local 2))
+          (Copy (Local 0)))
+        (Return
+          (Copy (Local 1))))))
+
+  (ProcDef (Type 1) 0 (Locals)
+    (List
+      (Block (Params)
+        (Return
+          (Call (Proc 0) (IntVal 1) (IntVal 2)))))))

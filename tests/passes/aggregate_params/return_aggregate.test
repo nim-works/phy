@@ -1,0 +1,46 @@
+discard """
+  description: "
+    Ensure that return aggregate values are turned into out parameters
+    correctly, and that the callsites are properly transformed. The following
+    cases need to be tested:
+    * using an aggregate-returning call as an `Asgn` source
+    * using an aggregate-returning call as a `Store` source
+    * using an aggregate-returning call as a `Return` operand
+  "
+  output: "(Done)"
+"""
+(TypeDefs
+  (Record 4 4
+    (Field 0 (Int 4)))
+  (ProcTy (Type 0))
+  (ProcTy (Type 0) (Int 4))
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 2)
+    (Locals (Int 4) (Type 0))
+    (List
+      (Block
+        (Params (Local 0))
+        (Return
+          (Copy (Local 1))))))
+
+  (ProcDef (Type 1) (Locals)
+    (List
+      (Block (Params)
+        (Return
+          (Call (Proc 0) (IntVal 100))))))
+
+  (ProcDef (Type 3)
+    (Locals (Type 0))
+    (List
+      (Block (Params)
+        (Asgn (Local 0)
+          (Call (Proc 0) (IntVal 100)))
+        (Store (Type 0)
+          (Addr (Local 0))
+          (Call (Proc 0) (IntVal 100)))
+        (CheckedCallAsgn (Local 0) (Proc 0) (IntVal 100)
+          (Goto 1) (Unwind)))
+      (Block (Params)
+        (Return)))))

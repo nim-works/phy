@@ -5,11 +5,13 @@ discard """
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 0) (Locals)
-    (Continuations
-      (Continuation (Params))))
-  (ProcDef (Type 0) (Locals)
-    (Continuations
-      (Continuation (Params) 0
-        (CheckedCall (Type 0) (ProcVal 0) (Continue 1) (Unwind)))
-      (Continuation (Params)))))
+  (ProcDef (Type 0) 0 (Locals)
+    (List
+      (Block (Params)
+        (Return))))
+  (ProcDef (Type 0) 0 (Locals)
+    (List
+      (Block (Params)
+        (CheckedCall (Type 0) (ProcVal 0) (Goto 1) (Unwind)))
+      (Block (Params)
+        (Return)))))
