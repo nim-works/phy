@@ -93,6 +93,9 @@ Commands:
   e                           similar to 'c', but also runs the generated
                               bytecode and echoes the result
 """
+  PointerSize = 8
+    ## the byte-width of pointer values
+    # TODO: this size needs to be configurable from the outside
 
 var
   gShow: set[Language]
@@ -212,24 +215,20 @@ proc compile(tree: var PackedTree[spec.NodeKind], source, target: Language) =
       current = lang0
     of lang2:
       syntaxCheck(tree, lang2_checks, module)
-      # TODO: don't hardcode the pointer size
-      tree = tree.apply(pass_stackAlloc.lower(tree, 8))
+      tree = tree.apply(pass_stackAlloc.lower(tree, PointerSize))
       current = lang1
     of lang3:
       syntaxCheck(tree, lang3_checks, module)
-      # TODO: don't hardcode the pointer size
-      tree = tree.apply(pass_aggregatesToBlob.lower(tree, 8))
+      tree = tree.apply(pass_aggregatesToBlob.lower(tree, PointerSize))
       tree = tree.apply(pass_localsToBlob.lower(tree))
       tree = tree.apply(pass_legalizeBlobOps.lower(tree))
       current = lang2
     of lang4:
       syntaxCheck(tree, lang4_checks, module)
-      # TODO: don't hardcode the pointer size
-      tree = tree.apply(pass_aggregateParams.lower(tree, 8))
+      tree = tree.apply(pass_aggregateParams.lower(tree, PointerSize))
       current = lang3
     of lang5:
       syntaxCheck(tree, lang5_checks, module)
-      # TODO: don't hardcode the pointer size
       tree = tree.apply(pass_flattenPaths.lower(tree))
       current = lang4
     of lang25:
