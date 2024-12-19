@@ -234,9 +234,10 @@ proc typeRef(c; env: MirEnv, typ: TypeId): Node =
 proc genFlexArrayType(c; env: TypeEnv; typ: TypeId): uint32 =
   ## Returns the IL type ID of an array type with unknown length.
   var bu = initBuilder[NodeKind](Array)
-  # size and number don't matter, but use the minimum possible value to be
-  # safe
+  # size and number of elements don't matter, but use the minimum possible
+  # value to be safe
   bu.add node(Immediate, 1) # size
+  bu.add node(Immediate, 0) # alignment
   bu.add node(Immediate, 0) # elements
   bu.add typeRef(c, env, typ)
   result = c.types.mgetOrPut(finish(bu), c.types.len.uint32)
@@ -2313,28 +2314,31 @@ proc translate(c; env: TypeEnv, id: TypeId, bu) =
   of tkArray:
     bu.subTree Array:
       bu.add node(Immediate, desc.size(env).uint32)
+      bu.add node(Immediate, desc.align.uint32)
       bu.add node(Immediate, desc.arrayLen(env).uint32)
       bu.add typeRef(c, env, desc.elem())
   of tkUncheckedArray:
     bu.subTree Array:
       bu.add node(Immediate, 0)
+      bu.add node(Immediate, desc.align.uint32)
       bu.add node(Immediate, 1)
       bu.add typeRef(c, env, desc.elem())
   of tkRecord, tkUnion:
-    let size =
+    let (size, alignment) =
       if desc.size(env) >= 0:
-        desc.size(env)
+        (desc.size(env).int, desc.align.int)
       elif env[id] != nil and
            env[id].skipTypes(abstractVar).kind == tyOpenArray:
         # the size for openArrays is never filled in correctly; we have to
         # manually correct it here
-        c.graph.config.target.ptrSize * 2
+        (c.graph.config.target.ptrSize * 2, c.graph.config.target.ptrSize)
       else:
-        szUnknownSize
+        (szUnknownSize, szUnknownSize)
 
     assert size >= 0
     bu.subTree Record:
       bu.add node(Immediate, size.uint32)
+      bu.add node(Immediate, alignment.uint32)
 
       if desc.kind == tkRecord and desc.base(env) != VoidType:
         # the inherited-from type is added as the first field
@@ -2375,6 +2379,7 @@ proc translate(c; env: TypeEnv, id: TypeId, bu) =
     # only generate the union part, the tag field is inlined into the embedder
     bu.subTree Record:
       # TODO: properly compute the size. It's not stored in the MIR type header
+      bu.add node(Immediate, 0)
       bu.add node(Immediate, 0)
       for f, recf in env.fields(desc, 1):
         bu.subTree Field:
