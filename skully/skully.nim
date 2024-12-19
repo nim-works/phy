@@ -1021,7 +1021,9 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     let desc = env.types.headerFor(env.types.canonical(tree[a].typ), Lowered)
     if desc.kind == tkArray:
       wrapAsgn Call:
-        bu.add compilerProc(c, env, "cardSet")
+        bu.add compilerProc(c, env, "skullyCard")
+        takeAddr NodePosition(a)
+        bu.add node(IntVal, c.lit.pack(desc.size(env.types)))
     elif desc.size(env.types) == 8:
       wrapAsgn Call:
         bu.add compilerProc(c, env, "countBits64")

@@ -47,4 +47,8 @@ proc skullyLeSet(a, b: BitSet, len: int): bool {.compilerproc.} =
 
   result = true
 
+proc skullyCard(s: BitSet, len: int): int {.compilerproc.} =
+  for i in 0..<len:
+    inc result, card(s[i])
+
 {.pop.}
