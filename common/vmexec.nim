@@ -79,6 +79,17 @@ proc valueToString(env: var VmEnv, a: VirtualAddr, typ: SemType): string =
     # render as an ellipsis for now. Proper rendering requires access to
     # the procedure names, which we don't have at the moment
     result.add "..."
+  of tkSeq:
+    result = "["
+    let
+      len = readInt(p, 8)
+      data = readInt(cast[HostPointer](addr p[8]), 8) + 8
+    for i in 0..<len:
+      if i > 0:
+        result.add ", "
+      result.add valueToString(env, VirtualAddr(data + size(typ.elems[0]) * i),
+                               typ.elems[0])
+    result.add "]"
   of tkVoid, tkError:
     unreachable()
 
@@ -117,6 +128,8 @@ proc typeToString(typ: SemType): string =
     res.add ") -> "
     res.add typeToString(typ.elems[0])
     res
+  of tkSeq:
+    "seq(" & typeToString(typ.elems[0]) & ")"
   of tkError:
     unreachable()
 

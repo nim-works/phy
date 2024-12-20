@@ -9,7 +9,7 @@
 import
   std/[algorithm, sequtils, tables],
   passes/[builders, ir, spec, trees],
-  phy/[reporting, types],
+  phy/[reporting, tree_parser, types],
   vm/[utils]
 
 from std/strutils import `%`
@@ -56,6 +56,8 @@ type
     procs: Builder[NodeKind]
       ## the in-progress procedure section
     procList*: seq[ProcInfo]
+    globals: Builder[NodeKind]
+      ## the in-progress global variable section
 
     procTypeCache: Table[SemType, uint32]
       ## caches the ID of IL signature types generated for procedure types.
@@ -103,6 +105,9 @@ const
     "<=": ekBuiltinProc,
     "<": ekBuiltinProc,
     "not": ekBuiltinProc,
+    "len": ekBuiltinProc,
+    "add": ekBuiltinProc,
+    "clear": ekBuiltinProc,
     "true": ekBuiltinVal,
     "false": ekBuiltinVal
   }.toTable
@@ -115,6 +120,12 @@ const
   pointerType = prim(tkInt)
     ## the type inhabited by pointer values. The constant is used as a
     ## placeholder until a dedicated pointer type is introduced
+
+  # the allocator and generic seq procedures currently use static IDs
+  AllocProc = 0
+  DeallocProc {.used.} = 1
+  ReallocProc {.used.} = 2
+  PrepareAddProc = 4
 
 using
   c: var ModuleCtx
@@ -242,6 +253,9 @@ proc evalType(c; t; n: NodeIndex): SemType =
       list.add c.expectNot(c.evalType(t, it), tkVoid)
 
     SemType(kind: tkProc, elems: list)
+  of SourceKind.SeqTy:
+    SemType(kind: tkSeq,
+            elems: @[c.expectNot(c.evalType(t, t.child(n, 0)), tkVoid)])
   of Ident:
     let
       name = t.getString(n)
@@ -305,6 +319,20 @@ proc typeToIL(c; typ: SemType): uint32 =
     # a proc type is used to represent both procedure signatures and the type
     # of procedural values. For values, the underlying storage type is a uint
     c.addType Node(kind: UInt, val: 8)
+  of tkSeq:
+    let
+      lengthType  = c.typeToIL(prim(tkInt))
+      pointerType = c.typeToIL(pointerType)
+    c.addType Record:
+      c.types.add Node(kind: Immediate, val: size(typ).uint32)
+      # the length field:
+      c.types.subTree Field:
+        c.types.add Node(kind: Immediate, val: 0)
+        c.types.add Node(kind: Type, val: lengthType)
+      # the payload field:
+      c.types.subTree Field:
+        c.types.add Node(kind: Immediate, val: 8)
+        c.types.add Node(kind: Type, val: pointerType)
 
 func numILParams(typ: SemType): int =
   ## Returns the number of parameters the IL signature type generated from
@@ -357,6 +385,38 @@ proc genProcType(c; typ: SemType): uint32 =
   do:
     result = rawGenProcType(c, typ)
     c.procTypeCache[typ] = result
+
+proc genPayloadType(c; typ: SemType): uint32 =
+  ## Generates and emits the payload type for a sequence with the given
+  ## element type (`typ`). Returns the ID of the payload type.
+  # TODO: cache the type description, so that it's only emitted once per
+  #       element type
+  let
+    intType = c.typeToIL(prim(tkInt))
+    elem = c.typeToIL(typ)
+
+  let arrayType = c.addType Array:
+    c.types.add Node(kind: Immediate, val: 1)
+    c.types.add Node(kind: Immediate, val: 0)
+    c.types.add Node(kind: Type, val: elem)
+
+  c.addType Record:
+    c.types.add Node(kind: Immediate, val: 9) # size of int
+    # the capacity field:
+    c.types.subTree Field:
+      c.types.add Node(kind: Immediate, val: 0)
+      c.types.add Node(kind: Type, val: intType)
+    # the data field:
+    c.types.subTree Field:
+      c.types.add Node(kind: Immediate, val: 8)
+      c.types.add Node(kind: Type, val: arrayType)
+
+proc addProc(c; typ: sink SemType, def: seq[Node]): int =
+  ## Adds a procedure with signature `typ` and definition `def` to the
+  ## context, returning the ID to address it with.
+  c.procs.add def
+  c.procList.add ProcInfo(typ: typ)
+  result = c.procList.high
 
 proc resetProcContext(c) =
   c.locals.setLen(0) # re-use the memory
@@ -628,6 +688,58 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
         result = relToIL(c, t, n, name, expr, stmts)
       of "not":
         result = notToIL(c, t, n, expr, stmts)
+      of "len":
+        lenCheck(t, n, 2)
+        let e = c.exprToIL(t, t.child(n, 1))
+        if e.typ.kind != tkSeq:
+          c.error("'len' operand must be of sequence type")
+        expr = newFieldExpr(inline(e, stmts), 0)
+        result = prim(tkInt)
+      of "add":
+        lenCheck(t, n, 3)
+        let s    = c.exprToIL(t, t.child(n, 1))
+        var elem = c.exprToIL(t, t.child(n, 2))
+        if s.typ.kind != tkSeq:
+          c.error("'add' expects sequence operand")
+        elif s.attribs * {Mutable, Lvalue} < {Mutable, Lvalue}:
+          c.error("'add' expects mutable lvalue sequence operand")
+        else:
+          # fit to the element type
+          elem = c.fitExpr(elem, s.typ.elems[0])
+
+        if elem.typ.kind == tkVoid:
+          c.error("void expression is not allowed in this context")
+          elem.typ = errorType()
+
+        let
+          tmp   = c.newTemp(prim(tkInt))
+          deref = newDeref(c.typeToIL(s.typ), tmp)
+
+        # the lvalue is captured because we need to compute/take the address of
+        # both seq fields
+        stmts.add newAsgn(tmp, newAddr(inline(s, stmts)))
+        stmts.add newAsgn(
+          newDeref(c.typeToIL(elem.typ),
+            newCall(PrepareAddProc, @[newAddr(newFieldExpr(deref, 0)),
+                                      newAddr(newFieldExpr(deref, 1)),
+                                      newIntVal(size(elem.typ))])),
+          inline(elem, stmts))
+
+        expr = UnitNode
+        result = prim(tkUnit)
+      of "clear":
+        lenCheck(t, n, 2)
+        let s = c.exprToIL(t, t.child(n, 1))
+        if s.typ.kind != tkSeq:
+          c.error("'clear' expects sequence operand")
+        elif s.attribs * {Mutable, Lvalue} < {Mutable, Lvalue}:
+          c.error("'clear' expects mutable lvalue sequence operand")
+
+        # set the length back to zero, but leave the capacity as is
+        stmts.add newAsgn(newFieldExpr(inline(s, stmts), 0), newIntVal(0))
+
+        expr = UnitNode
+        result = prim(tkUnit)
       else:
         unreachable()
       return
@@ -814,6 +926,49 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       # it's the unit value
       expr = UnitNode
       result = prim(tkUnit) + {}
+  of SourceKind.Seq:
+    let
+      typ = c.expectNot(c.evalType(t, t.child(n, 0)), tkVoid)
+      length = t.len(n) - 1
+    var elems = newSeq[IrNode](length)
+
+    # assign all elements to temporaries first, so that the payload is only
+    # allocated when control-flow reaches past the argument expressions
+    block:
+      var i = 0
+      for it in t.items(n, 1):
+        elems[i] = c.capture(c.fitExpr(c.exprToIL(t, it), typ), stmts)
+        inc i
+
+    result = SemType(kind: tkSeq, elems: @[typ]) + {}
+
+    let
+      tmp = c.newTemp(result.typ)
+      payloadField = newFieldExpr(tmp, 1)
+
+    # emit the length field assignment:
+    stmts.add newAsgn(newFieldExpr(tmp, 0), newIntVal(length))
+
+    # emit the payload field assignment:
+    if length > 0:
+      let size = size(prim(tkInt)) + size(typ) * length
+      # the size of the payload is sizeof(capacity) + sizeof(element) * length
+      stmts.add newAsgn(payloadField, newCall(AllocProc, newIntVal(size)))
+
+      let payloadExpr = newDeref(c.genPayloadType(typ), payloadField)
+      # emit the capacity assignment:
+      stmts.add newAsgn(newFieldExpr(payloadExpr, 0), newIntVal(length))
+
+      # emit the final assignments:
+      for i, it in elems.pairs:
+        stmts.add newAsgn(
+          newAt(newFieldExpr(payloadExpr, 1), newIntVal(i)),
+          it)
+    else:
+      # an empty sequence, set the payload pointer to zero (nil)
+      stmts.add newAsgn(payloadField, newIntVal(0))
+
+    expr = tmp
   of SourceKind.FieldAccess:
     let
       (a, b) = t.pair(n)
@@ -912,18 +1067,196 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
 
 proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   ## Creates a new empty module translation/analysis context.
-  ModuleCtx(reporter: reporter,
-            types: initBuilder[NodeKind](TypeDefs),
-            procs: initBuilder[NodeKind](ProcDefs),
-            scopes: @[default(Scope)]) # start with the top-level scope
+  result = ModuleCtx(reporter: reporter,
+                     types: initBuilder[NodeKind](TypeDefs),
+                     procs: initBuilder[NodeKind](ProcDefs),
+                     globals: initBuilder[NodeKind](GlobalDefs),
+                     # start with the top-level scope
+                     scopes: @[default(Scope)])
+
+  template c: untyped = result
+
+  const
+    AddressBias = 4096
+    # XXX: the maximum amount of heap memory is currently static and allocated
+    #      up-front
+    HeapSize = 1024 * 1024 * 4 # 4 MiB
+
+  # globals and their meaning:
+  # * 0: immutable pointer to the start of the stack
+  # * 1: immutable pointer to the start of the heap
+  # * 2: mutable pointer to the start of the free heap
+  c.globals.subTree GlobalDef:
+    c.globals.add Node(kind: UInt, val: 8)
+    c.globals.add Node(kind: IntVal, val: AddressBias + 8 + HeapSize)
+  c.globals.subTree GlobalDef:
+    c.globals.add Node(kind: UInt, val: 8)
+    c.globals.add Node(kind: IntVal, val: AddressBias + 8)
+  # XXX: globals cannot be mutable at the moment, and so the heap pointer
+  #      global stores the address of a mutable cell which stores the actual
+  #      value
+  c.globals.subTree GlobalDef:
+    c.globals.add Node(kind: UInt, val: 8)
+    c.globals.add Node(kind: IntVal, val: AddressBias)
+
+  # add the built-in allocator and seq procedures
+  # XXX: these need to be provided by a system-like module in the future
+
+  template addProc(typ: SemType, body: string, args: untyped) =
+    discard addProc(result, typ, parseSexp[NodeKind](body % args, c.literals))
+
+  # the allocator uses a simple bump-pointer allocation scheme where memory
+  # is never freed for re-use. When heap memory is exhausted, an
+  # exception/panic is raised
+  const AllocBody = """
+    (ProcDef (Type $1)
+      (Params (Local 0))
+      (Locals (Type $2) (Type $2))
+      (Stmts
+        (If (Eq (Type $2) (Load (Type $2) (Copy (Global 2))) (IntVal 0))
+          (Asgn (Local 1) (Copy (Global 1)))
+          (Asgn (Local 1) (Load (Type $2) (Copy (Global 2)))))
+        (If
+          (Le (Type $2)
+            (Add (Type $2)
+              (Copy (Local 0))
+              (Copy (Local 1)))
+            (Copy (Global 0)))
+          (Stmts
+            (Store (Type $2)
+              (Copy (Global 2))
+              (Add (Type $2)
+                (Copy (Local 1))
+                (Copy (Local 0))))
+            (Return (Copy (Local 1))))
+          (Raise (IntVal 0)))))
+  """
+  var procTy = SemType(kind: tkProc, elems: @[pointerType, prim(tkInt)])
+  addProc procTy, AllocBody,
+          [$c.genProcType(procTy), $c.typeToIL(prim(tkInt))]
+
+  const DeallocBody = """
+    (ProcDef (Type $1)
+      (Params (Local 0))
+      (Locals (Type $2))
+      (Return (IntVal 0)))
+  """
+  addProc procTy, DeallocBody,
+          [$c.genProcType(procTy), $c.typeToIL(prim(tkInt))]
+
+  # realloc(ptr: pointer, oldsize: int, newsize: int) -> pointer
+  const ReallocBody = """
+    (ProcDef (Type $1)
+      (Params (Local 0) (Local 1) (Local 2))
+      (Locals (Type $2) (Type $2) (Type $2) (Type $2))
+      (If
+        (Eq (Type $2)
+          (Copy (Local 0))
+          (IntVal 0))
+        (Return (Call (Proc 0) (Copy (Local 2))))
+        (Stmts
+          (Asgn (Local 3) (Call (Proc 0) (Copy (Local 2))))
+          (Blit (Copy (Local 3)) (Copy (Local 0)) (Copy (Local 1)))
+          (Drop (Call (Proc 1) (Copy (Local 0))))
+          (Return (Copy (Local 3))))
+        )
+      )
+  """
+  addProc procTy, ReallocBody,
+          [$c.genProcType(procTy), $c.typeToIL(prim(tkInt))]
+
+  # grow(payload: pointer, capacity: int, stride: int) -> pointer
+  # reallocates the given payload if its capacity is less than the requested
+  # one. The new payload is returned
+  const GrowBody = """
+    (ProcDef (Type $1)
+      (Params (Local 0) (Local 1) (Local 2))
+      (Locals (Type $2) (Type $2) (Type $2))
+      (Stmts
+        (If
+          (Eq (Type $2)
+            (Copy (Local 0))
+            (IntVal 0))
+          (Asgn (Local 0)
+            (Call (Proc 0)
+              (Add (Type $2)
+                (IntVal $3)
+                (Mul (Type $2)
+                  (Copy (Local 1))
+                  (Copy (Local 2))))))
+          (If
+            (Not
+              (Lt (Type $2)
+                (Copy (Local 0))
+                (Copy (Local 1))))
+            (Asgn (Local 0)
+              (Call (Proc 2)
+                (Copy (Local 0))
+                (Add (Type $2)
+                  (IntVal $3)
+                  (Mul (Type $2)
+                    (Load (Type $2)
+                      (Copy (Local 0)))
+                    (Copy (Local 2))))
+                (Add (Type $2)
+                  (IntVal $3)
+                  (Mul (Type $2)
+                    (Copy (Local 1))
+                    (Copy (Local 2))))))))
+        (Store (Type $2)
+          (Copy (Local 0))
+          (Copy (Local 1)))
+        (Return (Copy (Local 0)))))
+  """
+  addProc procTy, GrowBody,
+          [$c.genProcType(procTy), $c.typeToIL(prim(tkInt)),
+           $size(prim(tkInt)) #[<- offset of payload's data field]#]
+
+  # prepareAdd(lenAddr: pointer, payloadAddr: pointer, stride: int) -> pointer
+  # increments the length and resizes the payload (via the grow procedure)
+  # when needed. The implementation works with all seq types in order to not
+  # having to synthesize a version for each used seq type
+  const PrepareAddBody = """
+    (ProcDef (Type $1)
+      (Params (Local 0) (Local 1) (Local 2))
+      (Locals (Type $2) (Type $2) (Type $2) (Type $2))
+      (Stmts
+        (Asgn (Local 3)
+          (Load (Type $2)
+            (Copy (Local 0))))
+        (Store (Type $2)
+          (Copy (Local 0))
+          (Add (Type $2)
+            (Copy (Local 3))
+            (IntVal 1)))
+        (Store (Type $2)
+          (Copy (Local 1))
+          (Call (Proc 3)
+            (Load (Type $2)
+              (Copy (Local 1)))
+            (Load (Type $2)
+              (Copy (Local 0)))
+            (Copy (Local 2))))
+        (Return
+          (Add (Type $2)
+            (Add (Type $2)
+              (Load (Type $2)
+                (Copy (Local 1)))
+              (IntVal $3))
+            (Mul (Type $2)
+              (Copy (Local 3))
+              (Copy (Local 2)))))))
+  """
+  addProc procTy, PrepareAddBody,
+          [$c.genProcType(procTy), $c.typeToIL(prim(tkInt)),
+           $size(prim(tkInt)) #[<- offset of payload's data field]#]
 
 proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
   ## Closes the module context and returns the accumulated translated code.
   var bu = initBuilder[NodeKind]()
   bu.subTree Module:
     bu.add finish(move c.types)
-    bu.subTree GlobalDefs:
-      discard
+    bu.add finish(move c.globals)
     bu.add finish(move c.procs)
 
   initTree[NodeKind](finish(bu), c.literals)
