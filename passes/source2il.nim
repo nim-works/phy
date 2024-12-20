@@ -121,6 +121,12 @@ const
     ## the type inhabited by pointer values. The constant is used as a
     ## placeholder until a dedicated pointer type is introduced
 
+  # the allocator and generic seq procedures currently use static IDs
+  AllocProc = 0
+  DeallocProc {.used.} = 1
+  ReallocProc {.used.} = 2
+  PrepareAddProc = 4
+
 using
   c: var ModuleCtx
   t: InTree
@@ -701,10 +707,18 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
           c.error("void expression is not allowed in this context")
           elem.typ = errorType()
 
+        let
+          tmp   = c.newTemp(prim(tkInt))
+          deref = newDeref(c.typeToIL(s.typ), tmp)
+
+        # the lvalue is captured because we need to compute/take the address of
+        # both seq fields
+        stmts.add newAsgn(tmp, newAddr(inline(s, stmts)))
         stmts.add newAsgn(
           newDeref(c.typeToIL(elem.typ),
-            # TODO: call the 'prepareAdd' procedure here
-            newCall(0, @[newAddr inline(s, stmts), newIntVal(size(elem.typ))])),
+            newCall(PrepareAddProc, @[newAddr(newFieldExpr(deref, 0)),
+                                      newAddr(newFieldExpr(deref, 1)),
+                                      newIntVal(size(elem.typ))])),
           inline(elem, stmts))
 
         expr = UnitNode
