@@ -949,8 +949,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
     if length > 0:
       let size = size(prim(tkInt)) + size(typ) * length
       # the size of the payload is sizeof(capacity) + sizeof(element) * length
-      # TODO: call the 'alloc' procedure here
-      stmts.add newAsgn(payloadField, newCall(0, newIntVal(size)))
+      stmts.add newAsgn(payloadField, newCall(AllocProc, newIntVal(size)))
 
       let payloadExpr = newDeref(c.genPayloadType(typ), payloadField)
       # emit the capacity assignment:
