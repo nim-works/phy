@@ -9,10 +9,11 @@
 import
   std/[algorithm, sequtils, tables],
   passes/[builders, ir, spec, trees],
-  phy/[reporting, type_rendering, types],
+  phy/[reporting, tree_parser, type_rendering, types],
   vm/[utils]
 
 from std/strutils import `%`
+from vm/vmalloc import AddressBias
 
 import passes/spec_source except NodeKind
 
@@ -56,6 +57,8 @@ type
     procs: Builder[NodeKind]
       ## the in-progress procedure section
     procList*: seq[ProcInfo]
+    globals: Builder[NodeKind]
+      ## the in-progress global variable section
 
     procTypeCache: Table[SemType, uint32]
       ## caches the ID of IL signature types generated for procedure types.
@@ -110,7 +113,7 @@ const
   unitExpr = Expr(expr: UnitNode, typ: prim(tkUnit))
     ## the expression evaluating to the unitary value
 
-  pointerType {.used.} = prim(tkInt)
+  pointerType = prim(tkInt)
     ## the type inhabited by pointer values. The constant is used as a
     ## placeholder until a dedicated pointer type is introduced
 
@@ -340,6 +343,13 @@ proc genProcType(c; typ: SemType): uint32 =
   do:
     result = rawGenProcType(c, typ)
     c.procTypeCache[typ] = result
+
+proc addProc(c; typ: sink SemType, def: seq[Node]): int =
+  ## Adds a procedure with signature `typ` and definition `def` to the
+  ## context, returning the ID to address it with.
+  c.procs.add def
+  c.procList.add ProcInfo(typ: typ)
+  result = c.procList.high
 
 proc resetProcContext(c) =
   c.locals.setLen(0) # re-use the memory
@@ -872,18 +882,123 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
 
 proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   ## Creates a new empty module translation/analysis context.
-  ModuleCtx(reporter: reporter,
-            types: initBuilder[NodeKind](TypeDefs),
-            procs: initBuilder[NodeKind](ProcDefs),
-            scopes: @[default(Scope)]) # start with the top-level scope
+  result = ModuleCtx(reporter: reporter,
+                     types: initBuilder[NodeKind](TypeDefs),
+                     procs: initBuilder[NodeKind](ProcDefs),
+                     globals: initBuilder[NodeKind](GlobalDefs),
+                     # start with the top-level scope
+                     scopes: @[default(Scope)])
+
+  template c: untyped = result
+
+  # XXX: the maximum amount of heap memory is currently static and allocated
+  #      up-front
+  const
+    StackSize = 1024 * 4        # 4 KiB
+    HeapSize  = 1024 * 1024 * 4 # 4 MiB
+    HeapStart = AddressBias + StackSize + 8
+
+  # note: the virtual address range below ``AddressBias`` is reserved.
+  # Memory layout:
+  # +----------+-------+------+------+
+  # | reserved | stack | mgmt | heap |
+  # +----------+-------+------+------+
+  # The 'mgmt' section stores the data necessary for managing the heap.
+
+  # globals and their meaning:
+  # * 0: size of the stack size
+  # * 1: address of the start of the heap
+  # * 2: address of the end of the heap
+  # * 3: address of the heap management data
+  c.globals.subTree GlobalDef:
+    c.globals.add Node(kind: UInt, val: 8)
+    c.globals.add Node(kind: IntVal, val: StackSize)
+  c.globals.subTree GlobalDef:
+    c.globals.add Node(kind: UInt, val: 8)
+    c.globals.add Node(kind: IntVal, val: HeapStart)
+  c.globals.subTree GlobalDef:
+    c.globals.add Node(kind: UInt, val: 8)
+    c.globals.add Node(kind: IntVal, val: HeapStart + HeapSize)
+  c.globals.subTree GlobalDef:
+    c.globals.add Node(kind: UInt, val: 8)
+    c.globals.add Node(kind: IntVal, val: HeapStart - 8)
+
+  # add the built-in allocator and seq procedures
+  # XXX: these need to be provided by a system-like module in the future
+
+  template addProc(typ: SemType, body: string, args: untyped) =
+    discard addProc(result, typ, parseSexp[NodeKind](body % args, c.literals))
+
+  # the allocator uses a simple bump-pointer allocation scheme where memory
+  # is never freed for re-use. When the heap memory is exhausted, an
+  # exception/panic is raised
+  const AllocBody = """
+    (ProcDef (Type $1)
+      (Params (Local 0))
+      (Locals (Type $2) (Type $2))
+      (Stmts
+        (If (Eq (Type $2) (Load (Type $2) (Copy (Global 3))) (IntVal 0))
+          (Asgn (Local 1) (Copy (Global 1)))
+          (Asgn (Local 1) (Load (Type $2) (Copy (Global 3)))))
+        (If
+          (Le (Type $2)
+            (Add (Type $2)
+              (Copy (Local 0))
+              (Copy (Local 1)))
+            (Copy (Global 2)))
+          (Stmts
+            (Store (Type $2)
+              (Copy (Global 3))
+              (Add (Type $2)
+                (Copy (Local 1))
+                (Copy (Local 0))))
+            (Return (Copy (Local 1))))
+          (Raise (IntVal 0)))))
+  """
+  var procTy = SemType(kind: tkProc, elems: @[pointerType, prim(tkInt)])
+  addProc procTy, AllocBody,
+          [$c.genProcType(procTy), $c.typeToIL(prim(tkInt))]
+
+  const DeallocBody = """
+    (ProcDef (Type $1)
+      (Params (Local 0))
+      (Locals (Type $2))
+      (Return (IntVal 0)))
+  """
+  procTy = SemType(kind: tkProc, elems: @[prim(tkUnit), pointerType])
+  addProc procTy, DeallocBody,
+          [$c.genProcType(procTy), $c.typeToIL(prim(tkInt))]
+
+  # realloc(ptr: pointer, oldsize: int, newsize: int) -> pointer
+  const ReallocBody = """
+    (ProcDef (Type $1)
+      (Params (Local 0) (Local 1) (Local 2))
+      (Locals (Type $2) (Type $2) (Type $2) (Type $2))
+      (If
+        (Eq (Type $2)
+          (Copy (Local 0))
+          (IntVal 0))
+        (Return (Call (Proc 0) (Copy (Local 2))))
+        (Stmts
+          (Asgn (Local 3) (Call (Proc 0) (Copy (Local 2))))
+          (Blit (Copy (Local 3)) (Copy (Local 0)) (Copy (Local 1)))
+          (Drop (Call (Proc 1) (Copy (Local 0))))
+          (Return (Copy (Local 3))))
+        )
+      )
+  """
+  procTy = SemType(kind: tkProc,
+                   elems: @[pointerType, pointerType, prim(tkInt),
+                            prim(tkInt)])
+  addProc procTy, ReallocBody,
+          [$c.genProcType(procTy), $c.typeToIL(prim(tkInt))]
 
 proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
   ## Closes the module context and returns the accumulated translated code.
   var bu = initBuilder[NodeKind]()
   bu.subTree Module:
     bu.add finish(move c.types)
-    bu.subTree GlobalDefs:
-      discard
+    bu.add finish(move c.globals)
     bu.add finish(move c.procs)
 
   initTree[NodeKind](finish(bu), c.literals)
