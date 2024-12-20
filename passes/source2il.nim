@@ -728,7 +728,7 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
         let s = c.exprToIL(t, t.child(n, 1))
         if s.typ.kind != tkSeq:
           c.error("'clear' expects sequence operand")
-        elif s.attribs * {Mutable, Lvalue} <= {Mutable, Lvalue}:
+        elif s.attribs * {Mutable, Lvalue} < {Mutable, Lvalue}:
           c.error("'clear' expects mutable lvalue sequence operand")
 
         # set the length back to zero, but leave the capacity as is
