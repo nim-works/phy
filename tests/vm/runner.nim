@@ -4,12 +4,14 @@ import
   std/[
     os,
     streams,
-    strutils
+    strutils,
+    tables
   ],
   vm/[
     assembler,
     vm,
     vmenv,
+    vmmodules,
     vmtypes,
     vmvalidation
   ]
@@ -32,7 +34,7 @@ else:
 # read all lines and pass them to the assembler:
 while not s.atEnd:
   try:
-    asmbl.process(s.readLine(), env)
+    asmbl.process(s.readLine())
     inc line
   except AssemblerError, ValueError:
     stderr.writeLine("In line " & $line & ": " & getCurrentExceptionMsg())
@@ -40,12 +42,16 @@ while not s.atEnd:
 
 s.close()
 
-# make sure the environment is valid:
-let errors = validate(env)
+# make sure the assembled module is correct:
+let
+  module = asmbl.close()
+  errors = validate(module)
 if errors.len > 0:
   for it in errors.items:
     stderr.writeLine(it)
   quit(1)
+
+link(env, default(Table[string, VmCallback]), [module])
 
 var
   res: YieldReason
