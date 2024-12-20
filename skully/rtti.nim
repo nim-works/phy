@@ -7,9 +7,6 @@ import
     ast_query,
     types
   ],
-  compiler/front/[
-    options
-  ],
   compiler/sem/[
     sighashes
   ],
@@ -63,7 +60,7 @@ proc genTypeInfo2Name(t: PType): string =
       res.add $hashType(it)
     res.add "|"
     it = it[0]
-  result = makeCString(res)
+  result = res
 
 proc genTypeInfoV2*(env: var MirEnv, graph: ModuleGraph, typ: TypeId): DataId =
   ## Generates the ``TNimTypeV2`` data for the given type `typ` and returns
