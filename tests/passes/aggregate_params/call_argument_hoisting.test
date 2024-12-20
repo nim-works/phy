@@ -1,0 +1,50 @@
+discard """
+  description: "
+    Ensure that call arguments, including a dynamic callee value, are correctly
+    materialized to a temporary when a following argument is hoisted
+  "
+  output: "(Done)"
+"""
+(TypeDefs
+  (Record 4 4
+    (Field 0 (Int 4)))
+  (ProcTy (Void) (Int 4) (Type 0) (Int 4))
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Locals (Int 4) (Type 0) (Int 4))
+    (List
+      (Block
+        (Params (Local 0) (Local 1) (Local 2))
+        (Return))))
+
+  (ProcDef (Type 2)
+    (Locals (Type 0) (Int 4) (UInt 8))
+    (List
+      (Block (Params)
+        (Call (Proc 0)
+          (IntVal 100)
+          (Copy (Local 0))
+          (Copy (Local 1)))
+
+        (Call (Proc 0)
+          (Copy (Local 1))
+          (Copy (Local 0))
+          (IntVal 100))
+
+        (Asgn (Local 2) (ProcVal 0))
+        (Call (Type 1)
+          (Copy (Local 2))
+          (IntVal 100)
+          (Copy (Local 0))
+          (IntVal 100))
+
+        (CheckedCall (Proc 0)
+          (Copy (Local 1))
+          (Copy (Local 0))
+          (Copy (Local 1))
+          (Goto 1) (Unwind)))
+
+      (Block (Params)
+        (Return)))))

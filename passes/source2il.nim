@@ -285,6 +285,9 @@ proc typeToIL(c; typ: SemType): uint32 =
     let args = mapIt(typ.elems, c.typeToIL(it))
     c.addType Record:
       c.types.add Node(kind: Immediate, val: size(typ).uint32)
+      # XXX: for the sake of ease of implementation, records use the maximum
+      #      possible alignment
+      c.types.add Node(kind: Immediate, val: 8)
       var off = 0 ## the current field offset
       for i, it in args.pairs:
         c.types.subTree Field:
@@ -293,16 +296,17 @@ proc typeToIL(c; typ: SemType): uint32 =
         off += size(typ.elems[i])
   of tkUnion:
     let args = mapIt(typ.elems, c.typeToIL(it))
-    let inner = c.addType Record:
+    let inner = c.addType Union:
       c.types.add Node(kind: Immediate, val: size(typ).uint32 - 8)
+      c.types.add Node(kind: Immediate, val: 8)
       for it in args.items:
-        c.types.subTree Field:
-          c.types.add Node(kind: Immediate, val: 0)
-          c.types.add Node(kind: Type, val: it)
+        c.types.add Node(kind: Type, val: it)
 
     let tag = c.typeToIL(prim(tkInt))
     c.addType Record:
       c.types.add Node(kind: Immediate, val: size(typ).uint32)
+      # XXX: alignment is ignored at the moment and just set to 1
+      c.types.add Node(kind: Immediate, val: 8)
       # the tag field:
       c.types.subTree Field:
         c.types.add Node(kind: Immediate, val: 0)

@@ -2,18 +2,18 @@ discard """
   output: "(Done 100)"
 """
 (TypeDefs
-  (Int 8)
-  (ProcTy (Type 0))
+  (ProcTy (Int 8))
 )
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 1) (Locals)
-    (Continuations
-      (Continuation (Params) 8
-        (Store (Type 0) (Addr (IntVal 0)) (IntVal 100))
-        (Continue 1 (Load (Type 0) (Addr (IntVal 0))))
+  (ProcDef (Type 0) 8
+    (Locals (UInt 8))
+    (List
+      (Block (Params (Local 0))
+        (Store (UInt 8) (Copy (Local 0)) (IntVal 100))
+        (Return
+          (Load (UInt 8) (Copy (Local 0))))
       )
-      (Continuation (Params (Type 0)))
     )
   )
 )

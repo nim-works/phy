@@ -6,17 +6,17 @@ discard """
 )
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 0) (Locals)
-    (Continuations
-      (Continuation (Params))
+  (ProcDef (Type 0) 0 (Locals)
+    (List
+      (Block (Params) (Return))
     )
   )
-  (ProcDef (Type 0) (Locals)
-    (Continuations
-      (Continuation (Params) 0
-        (CheckedCall (Proc 0) (Continue 1) (Unwind))
+  (ProcDef (Type 0) 0 (Locals)
+    (List
+      (Block (Params)
+        (CheckedCall (Proc 0) (Goto 1) (Unwind))
       )
-      (Continuation (Params))
+      (Block (Params) (Return))
     )
   )
 )

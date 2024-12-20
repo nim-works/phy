@@ -1,0 +1,28 @@
+discard """
+  description: "
+    Ensure that IDs of locals are updated correctly in all places, especially
+    block parameters
+  "
+  output: "(Done)"
+"""
+(TypeDefs
+  (Blob 8 8)
+  (ProcTy (Void) (Int 8))
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Locals (Type 0) (Int 8) (Int 8))
+    (List
+      (Block
+        (Params (Local 1))
+        (Drop (Addr (Local 0)))
+        (Drop (Copy (Local 1)))
+        (Return))
+      (Except
+        (Params (Local 2))
+        (Drop (Copy (Local 2)))
+        (Return))))
+  (ProcDef (Type 2) (Locals)
+    (List
+      (Block (Params) (Return)))))

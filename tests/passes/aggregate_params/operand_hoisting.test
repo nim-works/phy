@@ -1,0 +1,97 @@
+discard """
+  description: "
+    Ensure that the operands of all non-call, non-path operations are
+    materialized to a temporary when a succeeding expression within the
+    same statement is hoisted
+  "
+  output: "(Error ecIllegalAccess)"
+"""
+(TypeDefs
+  (Record 4 4
+    (Field 0 (Int 4)))
+  (ProcTy (Int 4) (Type 0))
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 1)
+    (Locals (Type 0))
+    (List
+      (Block
+        (Params (Local 0))
+        (Return (IntVal 4)))))
+
+  (ProcDef (Type 2)
+    (Locals (Type 0) (Int 4))
+    (List
+      (Block (Params)
+        (Drop
+          (Add (Int 4)
+            (Copy (Local 1))
+            (Call (Proc 0) (Copy (Local 0)))))
+        (Drop
+          (Sub (Int 4)
+            (Copy (Local 1))
+            (Call (Proc 0) (Copy (Local 0)))))
+        (Drop
+          (Mul (Int 4)
+            (Copy (Local 1))
+            (Call (Proc 0) (Copy (Local 0)))))
+        (Drop
+          (Div (Int 4)
+            (Copy (Local 1))
+            (Call (Proc 0) (Copy (Local 0)))))
+        (Drop
+          (Mod (Int 4)
+            (Copy (Local 1))
+            (Call (Proc 0) (Copy (Local 0)))))
+        (Drop
+          (AddChck (Int 4)
+            (Copy (Local 1))
+            (Call (Proc 0) (Copy (Local 0)))
+            (Local 1)))
+        (Drop
+          (SubChck (Int 4)
+            (Copy (Local 1))
+            (Call (Proc 0) (Copy (Local 0)))
+            (Local 1)))
+        (Drop
+          (BitAnd (Int 4)
+            (Copy (Local 1))
+            (Call (Proc 0) (Copy (Local 0)))))
+        (Drop
+          (BitOr (Int 4)
+            (Copy (Local 1))
+            (Call (Proc 0) (Copy (Local 0)))))
+        (Drop
+          (BitXor (Int 4)
+            (Copy (Local 1))
+            (Call (Proc 0) (Copy (Local 0)))))
+        (Drop
+          (Eq (Int 4)
+            (Copy (Local 1))
+            (Call (Proc 0) (Copy (Local 0)))))
+        (Drop
+          (Lt (Int 4)
+            (Copy (Local 1))
+            (Call (Proc 0) (Copy (Local 0)))))
+        (Drop
+          (Le (Int 4)
+            (Copy (Local 1))
+            (Call (Proc 0) (Copy (Local 0)))))
+        (Drop
+          (Shl (Int 4)
+            (Copy (Local 1))
+            (Call (Proc 0) (Copy (Local 0)))))
+        (Drop
+          (Shr (Int 4)
+            (Copy (Local 1))
+            (Call (Proc 0) (Copy (Local 0)))))
+
+        (Blit
+          (Copy (Local 1))
+          (Copy (Local 1))
+          (Call (Proc 0) (Copy (Local 0))))
+        (Clear
+          (Copy (Local 1))
+          (Call (Proc 0) (Copy (Local 0))))
+        (Return)))))

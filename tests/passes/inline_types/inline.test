@@ -1,0 +1,34 @@
+discard """
+  description: "
+    Ensure that inlining and type ID patching works for all cases:
+    * signature type operands
+    * global definitions
+    * signature type references in proc headers and bodies
+    * locals
+    * numeric type references in procedure bodies
+  "
+  output: "(Done)"
+"""
+(TypeDefs
+  (UInt 4)
+  (Int 8)
+  (Float 8)
+  (ProcTy (Type 1) (Type 2))
+  (ProcTy (Void)))
+(GlobalDefs
+  (GlobalDef (Type 2) (FloatVal 1.0)))
+(ProcDefs
+  (ProcDef (Type 3) 0
+    (Locals (Type 0) (Type 2))
+    (List
+      (Block
+        (Params (Local 1))
+        (Return
+          (Neg (Int 8)
+            (Add (Type 1) (IntVal 50) (IntVal 100)))))))
+  (ProcDef (Type 4) 0 (Locals)
+    (List
+      (Block (Params)
+        (Drop
+          (Call (Type 3) (ProcVal 0) (FloatVal 2.0)))
+        (Return)))))
