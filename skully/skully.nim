@@ -454,6 +454,7 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
     else:
       unreachable()
   of mnkPathConv:
+    const PointerLike = {tkVar, tkLent, tkRef, tkPtr}
     let a = env.types.canonical(tree[n].typ)
     let b = env.types.canonical(tree[n, 0].typ)
     if a == b:
@@ -467,7 +468,6 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
       if diff < 0:
         # it's an object up conversion. The argument can either be a
         # pointer-to-object or object
-        const PointerLike = {tkVar, tkLent, tkRef, tkPtr}
 
         proc emit(c; env; tree; n; diff: int, src: TypeId, bu) {.nimcall.} =
           if diff == 0:
@@ -489,9 +489,15 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
           wrapCopy:
             emit(c, env, tree, tree.child(n, 0), diff, b, bu)
       else:
-        # TODO: implement
-        recurse(tree.child(n, 0), wantValue)
-        warn(c, tree[n].info, "down-conversions are not implemented yet")
+        if env.types.headerFor(b, Lowered).kind in PointerLike:
+          # there are no pointer types in the IL; nothing to do
+          recurse(tree.child(n, 0), wantValue)
+        else:
+          assert not wantValue
+          bu.subTree Deref:
+            bu.add typeRef(c, env, a)
+            bu.subTree Addr:
+              recurse(tree.child(n, 0), false)
 
   of mnkStrLit, mnkAstLit:
     unreachable()
