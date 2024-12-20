@@ -90,14 +90,38 @@ proc hook_fabs(a: float): float {.compilerproc.} =
 # TODO: the overrides below should not be needed. Instead, the procedures
 #       calling these I/O and formatting procedures need to be hooked
 
+proc hook_fopen(filename, mode: cstring): File {.
+  compilerproc, importc: "cio.fopen".}
+
+proc hook_fclose(f: File): cint {.
+  compilerproc, importc: "cio.fclose".}
+
+proc hook_setvbuf(f: File, buf: pointer, mode: cint, size: csize_t): cint {.
+  compilerproc, importc: "cio.setvbuf".}
+
 proc hook_fflush(f: File): cint {.
   compilerproc, importc: "cio.fflush".}
+
+proc hook_fread(buf: pointer, size, n: csize_t, f: File): csize_t {.
+  compilerproc, importc: "cio.fread".}
 
 proc hook_fwrite(buf: pointer, size, n: csize_t, f: File): cint {.
   compilerproc, importc: "cio.fwrite".}
 
 proc hook_fgets(c: cstring, n: cint, f: File): cstring {.
   compilerproc, importc: "cio.fgets".}
+
+proc hook_fgetc(f: File): cint {.
+  compilerproc, importc: "cio.fgetc".}
+
+proc hook_ungetc(c: cint, f: File): cint {.
+  compilerproc, importc: "cio.ungetc".}
+
+proc hook_fseeko(f: File, offset: int64, whence: cint): cint {.
+  compilerproc, importc: "cio.fseek".}
+
+proc hook_ftello(f: File): int64 {.
+  compilerproc, importc: "cio.fseek".}
 
 proc hook_clearerr(f: File) {.
   compilerproc, importc: "cio.clearerr".}
