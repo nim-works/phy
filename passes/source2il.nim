@@ -1148,6 +1148,92 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   addProc procTy, ReallocBody,
           [$c.genProcType(procTy), $c.typeToIL(prim(tkInt))]
 
+  # grow(payload: pointer, capacity: int, stride: int) -> pointer
+  # reallocates the given payload if its capacity is less than the requested
+  # one. The new payload is returned
+  const GrowBody = """
+    (ProcDef (Type $1)
+      (Params (Local 0) (Local 1) (Local 2))
+      (Locals (Type $2) (Type $2) (Type $2))
+      (Stmts
+        (If
+          (Eq (Type $2)
+            (Copy (Local 0))
+            (IntVal 0))
+          (Asgn (Local 0)
+            (Call (Proc 0)
+              (Add (Type $2)
+                (IntVal $3)
+                (Mul (Type $2)
+                  (Copy (Local 1))
+                  (Copy (Local 2))))))
+          (If
+            (Not
+              (Lt (Type $2)
+                (Copy (Local 0))
+                (Copy (Local 1))))
+            (Asgn (Local 0)
+              (Call (Proc 2)
+                (Copy (Local 0))
+                (Add (Type $2)
+                  (IntVal $3)
+                  (Mul (Type $2)
+                    (Load (Type $2)
+                      (Copy (Local 0)))
+                    (Copy (Local 2))))
+                (Add (Type $2)
+                  (IntVal $3)
+                  (Mul (Type $2)
+                    (Copy (Local 1))
+                    (Copy (Local 2))))))))
+        (Store (Type $2)
+          (Copy (Local 0))
+          (Copy (Local 1)))
+        (Return (Copy (Local 0)))))
+  """
+  addProc procTy, GrowBody,
+          [$c.genProcType(procTy), $c.typeToIL(prim(tkInt)),
+           $size(prim(tkInt)) #[<- offset of payload's data field]#]
+
+  # prepareAdd(lenAddr: pointer, payloadAddr: pointer, stride: int) -> pointer
+  # increments the length and resizes the payload (via the grow procedure)
+  # when needed. The implementation works with all seq types in order to not
+  # having to synthesize a version for each used seq type
+  const PrepareAddBody = """
+    (ProcDef (Type $1)
+      (Params (Local 0) (Local 1) (Local 2))
+      (Locals (Type $2) (Type $2) (Type $2) (Type $2))
+      (Stmts
+        (Asgn (Local 3)
+          (Load (Type $2)
+            (Copy (Local 0))))
+        (Store (Type $2)
+          (Copy (Local 0))
+          (Add (Type $2)
+            (Copy (Local 3))
+            (IntVal 1)))
+        (Store (Type $2)
+          (Copy (Local 1))
+          (Call (Proc 3)
+            (Load (Type $2)
+              (Copy (Local 1)))
+            (Load (Type $2)
+              (Copy (Local 0)))
+            (Copy (Local 2))))
+        (Return
+          (Add (Type $2)
+            (Add (Type $2)
+              (Load (Type $2)
+                (Copy (Local 1)))
+              (IntVal $3))
+            (Mul (Type $2)
+              (Copy (Local 3))
+              (Copy (Local 2)))))))
+  """
+  addProc procTy, PrepareAddBody,
+          [$c.genProcType(procTy), $c.typeToIL(prim(tkInt)),
+           $size(prim(tkInt)) #[<- offset of payload's data field]#]
+
 proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
   ## Closes the module context and returns the accumulated translated code.
   var bu = initBuilder[NodeKind]()
