@@ -27,7 +27,7 @@ proc hook_strstr(haystack, needle: cstring): cstring {.compilerproc.} =
   # the most inefficient implementation imaginable
   let hLen = len(haystack)
   let nLen = len(needle)
-  for i in 0 ..< (hLen - nLen):
+  for i in 0 .. (hLen - nLen):
     if cmpMem(addr haystack[i], needle, nLen) == 0:
       return (addr haystack[i])
 
