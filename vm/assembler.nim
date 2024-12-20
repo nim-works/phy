@@ -59,6 +59,7 @@ type
     dirConst  = "const"  ## define a constant
     dirGlobal = "global" ## define a global
     dirType   = "type"   ## define a type
+    dirImport = "import" ## add an imported procedure
     dirLocal  = "local"  ## define a local
     dirLabel  = "label"  ## attach a label to the next instruction
     dirEh     = "eh"     ## attach an exception handler to the previous
@@ -180,6 +181,17 @@ proc parseType(s: Stream, env: var TypeEnv, a: AssemblerState): TypeId =
   s.space()
   result = env.add(s.parseTypeName(), params)
 
+proc parseQuoted(s: Stream): string =
+  ## Parses a quoted name.
+  # quoated names don't need to support the whole ASCII range
+  const Allowed = {'A'..'Z', 'a'..'z', '0'..'9', '_', '.', '#', '(', ')'}
+  expect s.readChar() == '"', "expected '\"'"
+  var c: char
+  while (c = s.readChar(); c in Allowed):
+    result.add c
+
+  expect c == '"', "expected closing '\"'"
+
 proc prc(a: var AssemblerState): var ProcState {.inline.} =
   a.stack[a.stack.len - 1]
 
@@ -283,7 +295,7 @@ proc process*(a: var AssemblerState, line: sink string) =
     s.expectChar('.')
     case parseEnum[Directive](s.ident())
     of dirStart:
-      # .start <type-id> <name>
+      # .start <type> <name>
       var prc = ProcState(id: a.module.procs.len.ProcIndex)
       s.space()
       prc.typ = a.types[s.ident()]
@@ -327,6 +339,18 @@ proc process*(a: var AssemblerState, line: sink string) =
       s.space()
       let t = parseType(s, a.module.types, a)
       a.types[name] = t
+    of dirImport:
+      # .import <type> <name> <quoted>
+      var prc = ProcHeader(kind: pkCallback)
+      s.space()
+      prc.typ = a.types[s.ident()]
+      s.space()
+      let name = s.ident()
+      s.space()
+      prc.code.a = a.module.host.len.uint32
+      a.procs[name] = a.module.procs.len.ProcIndex
+      a.module.procs.add prc
+      a.module.host.add parseQuoted(s)
     of dirLocal:
       # .local <name> <type>
       expect a.stack.len > 0, "only allowed in procedure"
