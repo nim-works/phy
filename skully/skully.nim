@@ -619,10 +619,17 @@ proc genOf(c; env: var MirEnv, tree; e: Expr, typ: TypeId; bu) =
     bu.add compilerProc(c, env, "isObj")
     bu.subTree Copy:
       c.genField(env, e, -1, bu)
-    # TODO: use the proper RTTI object. Unless we want to duplicate the RTTI
-    #       code generation from ``cgen``, RTTI generation needs to be moved
-    #       into ``mirgen`` first
-    bu.add node(IntVal, 0)
+
+    # fetch the type name from the RTTI object
+    # TODO: use the name cstring directly, without first requesting an RTTI
+    #       object
+    let rttiType = env.types.add(c.graph.getCompilerProc("TNimTypeV2").typ)
+    bu.subTree Copy:
+      bu.subTree Field:
+        bu.subTree Deref:
+          bu.add typeRef(c, env, rttiType)
+          bu.use c.getTypeInfoV2(env, typ)
+        bu.add node(Immediate, 3)
 
 proc genLength(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
   let typ = env.types.canonical(tree[n].typ)
@@ -1381,11 +1388,44 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       bu.add compilerProc(c, env, "echoBinSafe")
       bu.use oa
   of mOf:
-    wrapAsgn:
-      c.genOf(env, tree,
-              c.gen(env, tree, NodePosition tree.argument(n, 0), false),
-              tree[tree.argument(n, 1)].typ,
-              bu)
+    var typ = tree[tree.argument(n, 1)].typ
+    # the typ is a typedesc, and the only way to retrieve the inner type is
+    # by going through the PType
+    typ = env.types.add(env.types[typ].skipTypes(abstractPtrs))
+
+    let e = c.gen(env, tree, NodePosition tree.argument(n, 0), false)
+    case env.types.headerFor(env.types.canonical(e.typ), Canonical).kind
+    of tkRecord:
+      wrapAsgn:
+        c.genOf(env, tree, e, typ, bu)
+    of tkRef, tkPtr:
+      # emit ``if p == nil: false else: p[] of typ``
+      let
+        then = c.prc.newLabel()
+        els  = c.prc.newLabel()
+        next = c.prc.newLabel()
+      stmts.addStmt Branch:
+        bu.subTree Eq:
+          bu.add typeRef(c, env, e.typ)
+          bu.use e
+          bu.add node(IntVal, c.lit.pack(0))
+        bu.goto els
+        bu.goto then
+      stmts.join then
+      stmts.putInto dest, node(IntVal, c.lit.pack(0))
+      stmts.goto next
+      stmts.join els
+      let
+        elem = env.types.headerFor(env.types.canonical(e.typ), Canonical).elem
+        objExpr = buildExpr elem:
+          bu.subTree Deref:
+            bu.add typeRef(c, env, elem)
+            bu.use e
+      wrapAsgn:
+        c.genOf(env, tree, objExpr, typ, bu)
+      stmts.join next
+    else:
+      unreachable()
   of mChckBounds:
     # XXX: bound checks on to-openArray conversion are currently omitted, as
     #      the implementation would simply be too error-prone at the moment
