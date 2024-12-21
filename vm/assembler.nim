@@ -11,6 +11,7 @@
 
 import
   std/[
+    packedsets,
     parseutils,
     strutils,
     streams,
@@ -52,6 +53,7 @@ type
     consts: Table[string, int32]
     globals: Table[string, int32]
     types: Table[string, TypeId]
+    exports: array[ExportKind, PackedSet[uint32]]
 
   Directive = enum
     dirStart  = "start"  ## start a new procedure
@@ -59,6 +61,7 @@ type
     dirConst  = "const"  ## define a constant
     dirGlobal = "global" ## define a global
     dirType   = "type"   ## define a type
+    dirExport = "export" ## mark a procedure or global as exported
     dirLocal  = "local"  ## define a local
     dirLabel  = "label"  ## attach a label to the next instruction
     dirEh     = "eh"     ## attach an exception handler to the previous
@@ -179,6 +182,17 @@ proc parseType(s: Stream, env: var TypeEnv, a: AssemblerState): TypeId =
   s.expectString("->")
   s.space()
   result = env.add(s.parseTypeName(), params)
+
+proc parseInterface(s: Stream): string =
+  ## Parses an interface name.
+  # interface names don't need to support the whole ASCII range
+  const Allowed = {'A'..'Z', 'a'..'z', '0'..'9', '_', '.', '#', '(', ')'}
+  expect s.readChar() == '"', "expected '\"'"
+  var c: char
+  while (c = s.readChar(); c in Allowed):
+    result.add c
+
+  expect c == '"', "expected closing '\"'"
 
 proc prc(a: var AssemblerState): var ProcState {.inline.} =
   a.stack[a.stack.len - 1]
@@ -327,6 +341,21 @@ proc process*(a: var AssemblerState, line: sink string) =
       s.space()
       let t = parseType(s, a.module.types, a)
       a.types[name] = t
+    of dirExport:
+      # .export <kind> <name> <interface>
+      s.space()
+      let kind = parseEnum[ExportKind]("exp" & s.ident())
+      s.space()
+      let id =
+        case kind
+        of expProc:   a.procs[s.ident()].uint32
+        of expGlobal: a.globals[s.ident()].uint32
+      expect id notin a.exports[kind], "entity was already exported"
+      s.space()
+      a.module.exports.add:
+        Export(kind: kind, id: id, name: a.module.names.len.uint32)
+      let iface = s.parseInterface()
+      a.module.names.add iface
     of dirLocal:
       # .local <name> <type>
       expect a.stack.len > 0, "only allowed in procedure"
