@@ -19,11 +19,10 @@ type
     id*: uint32
     name*: uint32
       ## the external name under which the entity is exported. An index into
-      ## the module's name list
+      ## the module's `names` list
 
   VmModule* = object
-    ## A module is code plus information about imports, exports, and host
-    ## procedures.
+    ## A module is code plus information about imports and exports.
 
     # ---- core fields
     # these fields mirror the ones from ``VmEnv``
@@ -45,7 +44,7 @@ type
     lkKeep       ## keep the procedure entry
     lkRedirect   ## redirect to another entry
     lkImportHost ## turn into a host procedure entry
-    lkStub       ## turn into a stub
+    lkStub       ## turn into a stub entry
 
   LinkTable = seq[tuple[action: LinkAction, val: uint32]]
 
@@ -162,7 +161,7 @@ proc link*(env: var VmEnv, host: Table[string, VmCallback],
       if p.kind == pkCallback:
         let name {.cursor.} = m.names[p.code.a]
         if name in exported:
-          # the import imports an regular procedure
+          # the import imports a regular procedure
           tab[i] = (lkRedirect, exported[name])
         elif name in host:
           # the import imports a host procedure
@@ -180,7 +179,7 @@ proc link*(env: var VmEnv, host: Table[string, VmCallback],
 
       inc i
 
-  reset lookup # free the memory already
+  reset lookup # free the memory already, it's not needed anymore
 
   for m in modules.items:
     append(env, tab, m)
