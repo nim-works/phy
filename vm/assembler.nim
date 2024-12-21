@@ -348,6 +348,8 @@ proc process*(a: var AssemblerState, line: sink string) =
       let name = s.ident()
       s.space()
       prc.code.a = a.module.host.len.uint32
+      expect name notin a.procs:
+        "a procedure with the given name already exists"
       a.procs[name] = a.module.procs.len.ProcIndex
       a.module.procs.add prc
       a.module.host.add s.parseInterface()
