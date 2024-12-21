@@ -181,9 +181,9 @@ proc parseType(s: Stream, env: var TypeEnv, a: AssemblerState): TypeId =
   s.space()
   result = env.add(s.parseTypeName(), params)
 
-proc parseQuoted(s: Stream): string =
-  ## Parses a quoted name.
-  # quoated names don't need to support the whole ASCII range
+proc parseInterface(s: Stream): string =
+  ## Parses an interface name.
+  # interface names don't need to support the whole ASCII range
   const Allowed = {'A'..'Z', 'a'..'z', '0'..'9', '_', '.', '#', '(', ')'}
   expect s.readChar() == '"', "expected '\"'"
   var c: char
@@ -350,7 +350,7 @@ proc process*(a: var AssemblerState, line: sink string) =
       prc.code.a = a.module.host.len.uint32
       a.procs[name] = a.module.procs.len.ProcIndex
       a.module.procs.add prc
-      a.module.host.add parseQuoted(s)
+      a.module.host.add s.parseInterface()
     of dirLocal:
       # .local <name> <type>
       expect a.stack.len > 0, "only allowed in procedure"
