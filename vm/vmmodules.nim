@@ -9,6 +9,18 @@ import
   vm/[vmenv, vmspec, vmtypes]
 
 type
+  ExportKind* = enum
+    expProc
+    expGlobal
+
+  Export* = object
+    ## Describes an exported entity.
+    kind*: ExportKind
+    id*: uint32
+    name*: uint32
+      ## the external name under which the entity is exported. An index into
+      ## the module's name list
+
   VmModule* = object
     ## A module is code plus information about imports, exports, and host
     ## procedures.
@@ -25,17 +37,22 @@ type
     types*: TypeEnv
     # ---- end of core fields
 
+    exports*: seq[Export]
     names*: seq[string]
       ## interface names stored out-of-place
 
-  HostMap = Table[string, int]
-    ## maps foreign procedure names to the index of the callback implementing
-    ## the procedure
+  LinkAction = enum
+    lkKeep       ## keep the procedure entry
+    lkRedirect   ## redirect to another entry
+    lkImportHost ## turn into a host procedure entry
+    lkStub       ## turn into a stub
+
+  LinkTable = seq[tuple[action: LinkAction, val: uint32]]
 
 template appendAndModify(list: untyped, frm: untyped, body: untyped) =
   let start = list.len
   list.add frm
-  for it {.inject.} in list.toOpenArray(start, list.high).mitems:
+  for i {.inject.}, it {.inject.} in list.toOpenArray(start, list.high).mpairs:
     body
 
 proc patchInstr(instr: Instr, a: int32): Instr =
@@ -43,7 +60,7 @@ proc patchInstr(instr: Instr, a: int32): Instr =
   result = Instr(instr.InstrType and not(instrAMask shl instrAShift))
   result = Instr(result.InstrType or (InstrType(a) shl instrAShift))
 
-proc append(env: var VmEnv, lookup: HostMap, m: VmModule) =
+proc append(env: var VmEnv, tab: LinkTable, m: VmModule) =
   ## Appends all code and resources part of `m` to `env` while updating
   ## the references within.
   let
@@ -51,6 +68,7 @@ proc append(env: var VmEnv, lookup: HostMap, m: VmModule) =
     localsOffset = env.locals.len
     constOffset = env.constants.len
     globalsOffset = env.globals.len
+    procOffset = env.procs.len
     typeOffset = env.types.append m.types
 
   env.code.add m.code
@@ -81,30 +99,78 @@ proc append(env: var VmEnv, lookup: HostMap, m: VmModule) =
     it.dst += codeOffset.uint32
 
   appendAndModify env.procs, m.procs:
-    it.typ = TypeId(it.typ.ord + typeOffset)
-    case it.kind
-    of pkCallback:
-      # resolve the host procedure reference
-      it.code.a = lookup[m.host[it.code.a]].uint32
-    of pkDefault:
+    let
+      entry = tab[i + procOffset]
+      typ = TypeId(it.typ.ord + typeOffset)
+    case entry.action
+    of lkImportHost:
+      it = ProcHeader(kind: pkCallback, typ: typ)
+      it.code.a = entry.val
+    of lkKeep:
+      it.typ = typ
       # update the offsets
       it.code.a += codeOffset.uint32
       it.code.b += codeOffset.uint32
       it.locals.a += localsOffset.uint32
       it.locals.b += localsOffset.uint32
-    of pkStub:
-      discard "nothing to do"
+    of lkStub, lkRedirect:
+      # redirected procedures (i.e., resolved imported ones) are turned into
+      # stubs, which keeps the linking simpler, as IDs don't have to be
+      # shifted around
+      it = ProcHeader(kind: pkStub, typ: it.typ)
 
 proc link*(env: var VmEnv, host: Table[string, VmCallback],
            modules: openArray[VmModule]) =
-  ## Creates a VM instance with the code from all given modules. All host
-  ## procedures must be have an implementation provided by `host`.
-  var lookup: HostMap
-  for m in modules.items:
-    # the callbacks are only added to the environment when referenced
-    for it in m.host.items:
-      let i = lookup.mgetOrPut(it, env.callbacks.len)
-      if i == env.callbacks.len: # is it a new table entry?
-        env.callbacks.add host[it]
+  ## Creates a VM instance with the code from all given modules. If an imported
+  ## procedure resolves to neither a regular procedure nor host procedure
+  ## provided by `host`, it stays as a stub.
+  var
+    lookup: Table[string, int]
+      ## keeps track of the already registered callbacks. Callbacks are only
+      ## added to the environment when actually referenced
+    exported: Table[string, uint32]
+    tab: LinkTable
 
-    append(env, lookup, m)
+  # first pass: collect the IDs corresponding to interface names
+  block:
+    var offset = 0'u32
+    for m in modules.items:
+      for e in m.exports.items:
+        if e.kind == expProc:
+          # if there exists more than one export with the same interface name,
+          # the last one prevails
+          exported[m.names[e.name]] = offset + e.id
+
+      offset += m.procs.len.uint32
+
+    tab.newSeq(offset)
+
+  var i = 0
+  # second pass: compute the link action for each procedure
+  for m in modules.items:
+    for p in m.procs.items:
+      if p.kind == pkCallback:
+        let name {.cursor.} = m.names[p.code.a]
+        if name in exported:
+          # the import imports an regular procedure
+          tab[i] = (lkRedirect, exported[name])
+        elif name in host:
+          # the import imports a host procedure
+          let i = lookup.mgetOrPut(name, env.callbacks.len)
+          if i == env.callbacks.len: # is it a new table entry?
+            env.callbacks.add host[name]
+
+          tab[i] = (lkImportHost, i.uint32)
+        else:
+          # the import cannot be resolved, turn the procedure entry into
+          # a stub
+          tab[i] = (lkStub, 0'u32)
+      else:
+        tab[i] = (lkKeep, 0'u32)
+
+      inc i
+
+  reset lookup # free the memory already
+
+  for m in modules.items:
+    append(env, tab, m)
