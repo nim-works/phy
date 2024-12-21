@@ -1,0 +1,11 @@
+discard """
+  output: "(Done 1)"
+"""
+.type P1 (int) -> int
+.type P2 () -> int
+.import P1 imported "test"
+.start P2 main
+  LdImmInt 1
+  Call imported 1
+  Ret
+.end
