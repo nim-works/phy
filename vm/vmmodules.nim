@@ -97,7 +97,8 @@ proc append(env: var VmEnv, tab: LinkTable, m: VmModule) =
   # patch all references to procedures
   for it in env.code.toOpenArray(codeOffset, env.code.high).mitems:
     # FIXME: this is ignoring procedure *values*, which are currently
-    #        indistinguishable from normal integers. A new
+    #        indistinguishable from normal integers. A new opcode for
+    #        loading a procedure handle is needed
     if it.opcode == opcCall:
       let (action, pos) = tab[it.imm32 + procOffset]
       if action == lkRedirect:
