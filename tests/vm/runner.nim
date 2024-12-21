@@ -53,6 +53,11 @@ if errors.len > 0:
 
 link(env, default(Table[string, VmCallback]), [module])
 
+if env.procs.len == 0:
+  # there's nothing to execute, but don't treat this as an error
+  stdout.write("<no procedures>")
+  quit(0)
+
 var
   res: YieldReason
   # use 1KB for the in-memory stack
