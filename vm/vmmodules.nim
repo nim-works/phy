@@ -25,9 +25,8 @@ type
     types*: TypeEnv
     # ---- end of core fields
 
-    host*: seq[string]
-      ## names of host procedures. Callback procedure entries reference
-      ## elements in this lsit
+    names*: seq[string]
+      ## interface names stored out-of-place
 
   HostMap = Table[string, int]
     ## maps foreign procedure names to the index of the callback implementing

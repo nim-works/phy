@@ -284,7 +284,7 @@ proc verify*(hdr: ProcHeader, env: VmModule): CheckResult =
             Error
     # the EH table is checked later
   of pkCallback:
-    check test(env.host, hdr.code.a), Error
+    check test(env.names, hdr.code.a), Error
   of pkStub:
     discard
 
