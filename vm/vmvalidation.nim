@@ -286,7 +286,7 @@ proc verify*(hdr: ProcHeader, env: VmModule): CheckResult =
   of pkCallback:
     check test(env.names, hdr.code.a), Error
   of pkStub:
-    discard
+    result = CheckResult.err("stub procedures are not allowed in modules")
 
   check test(env.types.types, hdr.typ.uint32), "signature type is missing"
   result.initSuccess()
