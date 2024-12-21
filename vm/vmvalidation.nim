@@ -356,3 +356,16 @@ proc validate*(m: VmModule): seq[string] =
     if it.kind == pkDefault:
       handle verify(m, ProcIndex(i),
                     m.code.toOpenArray(it.code.a.int, it.code.b.int))
+
+  # check the export table:
+  for i, it in m.exports.pairs:
+    if not test(m.names, it.name):
+      result.add fmt"invalid export {i}: interface name doesn't exist"
+
+    case it.kind
+    of expGlobal:
+      if not test(m.globals, it.id):
+        result.add fmt"invalid export {i}: global {it.id} doesn't exist"
+    of expProc:
+      if not test(m.procs, it.id):
+        result.add fmt"invalid export {i}: procedure {it.id} doesn't exist"
