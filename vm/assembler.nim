@@ -11,7 +11,6 @@
 
 import
   std/[
-    packedsets,
     parseutils,
     strutils,
     streams,
@@ -53,7 +52,6 @@ type
     consts: Table[string, int32]
     globals: Table[string, int32]
     types: Table[string, TypeId]
-    exports: array[ExportKind, PackedSet[uint32]]
 
   Directive = enum
     dirStart  = "start"  ## start a new procedure
@@ -350,7 +348,6 @@ proc process*(a: var AssemblerState, line: sink string) =
         case kind
         of expProc:   a.procs[s.ident()].uint32
         of expGlobal: a.globals[s.ident()].uint32
-      expect id notin a.exports[kind], "entity was already exported"
       s.space()
       a.module.exports.add:
         Export(kind: kind, id: id, name: a.module.names.len.uint32)
