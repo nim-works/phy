@@ -17,7 +17,7 @@ import
   ]
 
 proc test(env: var VmEnv, args: openArray[Value], _: RootRef): CallbackResult =
-  ## A VM callback.
+  ## A VM callback, created for the purpose of testing.
   CallbackResult(code: cecValue, value: args[0])
 
 # 1MB max memory for the VM should be plenty enough for the tests
