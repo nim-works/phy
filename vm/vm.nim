@@ -194,12 +194,16 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
     check not checkmem(c.allocator, a, uint(len), p), ecIllegalAccess
     p
 
+  template add(a: uint64, b: int32): uint64 =
+    # overflow-safe unsigned/signed addition that correctly wraps around
+    a + cast[uint64](int64(b))
+
   template load[T](typ: typedesc[T]): T =
-    cast[ptr typ](checkmem(operand(1).intVal + imm32(), sizeof(typ)))[]
+    cast[ptr typ](checkmem(add(operand(1).uintVal, imm32()), sizeof(typ)))[]
 
   template store[T](v: T) =
     let val = v
-    cast[ptr T](checkmem(pop(int64) + imm32(), sizeof(T)))[] = val
+    cast[ptr T](checkmem(add(pop(uint64), imm32()), sizeof(T)))[] = val
 
   template mainLoop(label, body: untyped) =
     # a template in order to reduce visual nesting
@@ -343,7 +347,7 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
     of opcWrFlt64:  store(pop(float64))
     of opcWrRef:
       let val = pop(ForeignRef)
-      let dst = cast[ptr ForeignRef](checkmem(pop(int64) + imm32(), 8))
+      let dst = cast[ptr ForeignRef](checkmem(add(pop(uint64), imm32()), 8))
       # account for self-assignment: increment before decrementing
       if val.isNonNil:   c.allocator.incRef(val)
       if dst[].isNonNil: c.allocator.decRef(dst[])
