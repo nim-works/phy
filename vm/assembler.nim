@@ -145,6 +145,7 @@ proc parseValue(s: Stream, typ: ValueType): Value =
 
 proc parseTypedVal(s: Stream): TypedValue =
   let typ = parseEnum[ValueType]("vt" & s.ident())
+  s.space()
   TypedValue(typ: typ, val: s.parseValue(typ))
 
 proc parseType(s: Stream, env: var TypeEnv, a: AssemblerState): TypeId =
