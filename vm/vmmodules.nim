@@ -179,7 +179,7 @@ proc link*(env: var VmEnv, host: Table[string, VmCallback],
 
       inc i
 
-  reset lookup # free the memory already, it's not needed anymore
+  reset lookup # free the memory eagerly, it's not needed anymore
 
   for m in modules.items:
     append(env, tab, m)
