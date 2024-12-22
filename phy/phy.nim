@@ -154,9 +154,9 @@ proc print(tree: PackedTree[spec.NodeKind], lang: Language) =
     stdout.writeLine(pretty(tree, tree.child(1)))
     stdout.writeLine(pretty(tree, tree.child(2)))
 
-proc print(env: VmEnv) =
+proc print(m: VmModule) =
   genericPrint(langBytecode):
-    stdout.write(disassemble(env))
+    stdout.write(disassemble(m))
 
 proc sourceToIL(text: string): (PackedTree[spec.NodeKind], SemType) =
   ## Given an S-expression representation of the source language (`text`),
@@ -360,9 +360,10 @@ proc main(args: openArray[string]) =
         echo "Error: ", it
       quit(1)
 
+    print(module)
+
     var env = initVm(1024, 1024 * 1024) # 1 MiB max memory
     link(env, hostProcedures(gRunner), [module])
-    print(env)
 
     # handle the eval command:
     if cmd == Eval:
