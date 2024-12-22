@@ -350,9 +350,11 @@ proc process*(a: var AssemblerState, line: sink string) =
         of expProc:   a.procs[s.ident()].uint32
         of expGlobal: a.globals[s.ident()].uint32
       s.space()
+      let iface = s.parseInterface()
+      # parse the interface name *before* modifying the module
       a.module.exports.add:
         Export(kind: kind, id: id, name: a.module.names.len.uint32)
-      a.module.names.add s.parseInterface()
+      a.module.names.add iface
     of dirImport:
       # .import <type> <name> <interface>
       var prc = ProcHeader(kind: pkCallback)
@@ -365,8 +367,10 @@ proc process*(a: var AssemblerState, line: sink string) =
       expect name notin a.procs:
         "a procedure with the given name already exists"
       a.procs[name] = a.module.procs.len.ProcIndex
+      let iface = s.parseInterface()
+      # parse the interface name *before* modifying the module
       a.module.procs.add prc
-      a.module.names.add s.parseInterface()
+      a.module.names.add iface
     of dirLocal:
       # .local <name> <type>
       s.space()
