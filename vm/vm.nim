@@ -22,6 +22,7 @@ type
     ecTypeError      ## type error
     ecCallbackError  ## a fatal error ocurred within a callback
     ecUnreachable    ## an 'unreachable' instruction was executed
+    ecDivByZero      ## division by zero
 
   YieldReasonKind* = enum
     yrkDone
@@ -256,11 +257,27 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
     of opcAddInt: asgn 1, binaryOp(`+`, uint64)
     of opcSubInt: asgn 1, binaryOp(`-`, uint64)
     of opcMulInt: asgn 1, binaryOp(`*`, uint64)
-    of opcDivInt: asgn 1, binaryOp(`div`, int64)
-    of opcDivU:   asgn 1, binaryOp(`div`, uint64)
-    of opcModInt: asgn 1, binaryOp(`mod`, int64)
-    of opcModU:   asgn 1, binaryOp(`mod`, uint64)
-    of opcNegInt: asgn 1, -operand(1).intVal
+    of opcDivInt:
+      let divisor = pop(int64)
+      check divisor != 0, ecDivByZero
+      if likely(divisor != -1):
+        asgn 1, operand(1).intVal div divisor
+      else:
+        # x div -1 == x * -1. This prevents overflow errors when
+        # x == low(int64)
+        asgn 1, operand(1).uintVal * high(uint64)
+    of opcDivU:
+      let divisor = pop(uint64)
+      check divisor != 0, ecDivByZero
+      asgn 1, operand(1).uintVal div divisor
+    of opcModInt:
+      let divisor = pop(int64)
+      check divisor != 0, ecDivByZero
+      asgn 1, operand(1).intVal mod divisor
+    of opcModU:
+      let divisor = pop(uint64)
+      check divisor != 0, ecDivByZero
+      asgn 1, operand(1).uintVal mod divisor
     of opcOffset:
       # use unsigned integers, for overflow-safe arithmetic
       let idx = pop(uint64)
