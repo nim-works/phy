@@ -107,6 +107,8 @@ proc parseIntLike[T](s: Stream, _: typedesc[T]): T =
   while (let c = s.peekChar(); c notin {' ', '\t', '\n', '\r', '\0'}):
     str.add s.readChar()
 
+  expect str.len > 0, "expected integer value"
+
   var temp: BiggestInt
   if parseBiggestInt(str, temp) != str.len:
     # error; might be an integer in hex format
