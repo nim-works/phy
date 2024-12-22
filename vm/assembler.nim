@@ -60,6 +60,7 @@ type
     dirGlobal = "global" ## define a global
     dirType   = "type"   ## define a type
     dirExport = "export" ## mark a procedure or global as exported
+    dirImport = "import" ## add an imported procedure
     dirLocal  = "local"  ## define a local
     dirLabel  = "label"  ## attach a label to the next instruction
     dirEh     = "eh"     ## attach an exception handler to the previous
@@ -295,7 +296,7 @@ proc process*(a: var AssemblerState, line: sink string) =
     s.expectChar('.')
     case parseEnum[Directive](s.ident())
     of dirStart:
-      # .start <type-id> <name>
+      # .start <type> <name>
       var prc = ProcState(id: a.module.procs.len.ProcIndex)
       s.space()
       prc.typ = a.types[s.ident()]
@@ -351,11 +352,23 @@ proc process*(a: var AssemblerState, line: sink string) =
       s.space()
       a.module.exports.add:
         Export(kind: kind, id: id, name: a.module.names.len.uint32)
-      let iface = s.parseInterface()
-      a.module.names.add iface
+      a.module.names.add s.parseInterface()
+    of dirImport:
+      # .import <type> <name> <interface>
+      var prc = ProcHeader(kind: pkCallback)
+      s.space()
+      prc.typ = a.types[s.ident()]
+      s.space()
+      let name = s.ident()
+      s.space()
+      prc.code.a = a.module.names.len.uint32
+      expect name notin a.procs:
+        "a procedure with the given name already exists"
+      a.procs[name] = a.module.procs.len.ProcIndex
+      a.module.procs.add prc
+      a.module.names.add s.parseInterface()
     of dirLocal:
       # .local <name> <type>
-      expect a.stack.len > 0, "only allowed in procedure"
       s.space()
       let name = s.ident()
       s.space()
