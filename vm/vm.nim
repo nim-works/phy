@@ -278,6 +278,9 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
       let divisor = pop(uint64)
       check divisor != 0, ecDivByZero
       asgn 1, operand(1).uintVal mod divisor
+    of opcNegInt:
+      # overflow-safe two's complement integer negation
+      asgn 1, (not operand(1).uintVal) + 1
     of opcOffset:
       # use unsigned integers, for overflow-safe arithmetic
       let idx = pop(uint64)
