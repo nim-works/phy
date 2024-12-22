@@ -234,7 +234,7 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
      opcReinterpF32, opcReinterpF64, opcReinterpI32, opcReinterpI64,
      opcExcept, opcUnreachable, opcRaise, opcMemCopy, opcMemClear, opcGrow:
     Instr(op) # instruction with no immediate operands
-  of opcAddImm, opcLdConst, opcLdImmInt, opcOffset,
+  of opcAddImm, opcLdImmInt, opcOffset,
      opcLdInt8, opcLdInt16, opcLdInt32, opcLdInt64, opcLdFlt32, opcLdFlt64,
      opcWrInt8, opcWrInt16, opcWrInt32, opcWrInt64, opcWrFlt32, opcWrFlt64,
      opcWrRef, opcStackAlloc, opcStackFree:
@@ -244,6 +244,8 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
   of opcMask, opcSignExtend, opcAddChck, opcSubChck, opcUIntToFloat,
      opcFloatToUint, opcSIntToFloat, opcFloatToSInt:
     instrC()
+  of opcLdConst:
+    makeInstr(a.consts[s.ident()])
   of opcBranch:
     makeInstr(s.parseLabel(a), c = (s.space(); s.parseIntLike(int8)))
   of opcJmp:
