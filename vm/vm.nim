@@ -10,6 +10,8 @@ import
     vmtypes
   ]
 
+from std/math import isNaN
+
 type
   ErrorCode* = enum
     ecIllegalAccess  ## trying to access memory not accessible to the VM
@@ -309,23 +311,26 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
       if imm8() == 8: asgn 1, float64(operand(1).uintVal)
       else:           asgn 1, float64(float32(operand(1).uintVal))
     of opcFloatToUInt:
-      # convert to signed int, cast, then narrow
-      let width = imm8()
-      var val = cast[uint64](int64(operand(1).floatVal))
-      if width < 64:
-        val = val and ((1'u64 shl width) - 1)
-      asgn 1, val
+      let hi = (1'u64 shl imm8()) - 1
+      let arg = operand(1).floatVal
+      asgn 1:
+        if unlikely(isNaN(arg)): 0'u64
+        elif arg < 0.0:          0'u64
+        elif arg > float64(hi):  hi
+        else:                    uint64(arg)
     of opcSIntToFloat:
       if imm8() == 8: asgn 1, float64(operand(1).intVal)
       else:           asgn 1, float64(float32(operand(1).intVal))
     of opcFloatToSInt:
+      let abs = 1'u64 shl (imm8() - 1)
+      let hi = int64(abs - 1)
+      let lo = int64(not(abs) + 1) # negate abs
       let arg = operand(1).floatVal
-      case imm8()
-      of 8: asgn 1, int64(arg)
-      of 4: asgn 1, int64(int32(arg))
-      of 2: asgn 1, int64(int16(arg))
-      of 1: asgn 1, int64(int8(arg))
-      else: unreachable()
+      asgn 1:
+        if unlikely(isNaN(arg)): 0'i64
+        elif arg < float64(lo):  lo
+        elif arg > float64(hi):  hi
+        else:                    int64(arg)
     of opcReinterpF32:
       asgn 1, float64(cast[float32](cast[uint32](operand(1))))
     of opcReinterpI32:

@@ -168,7 +168,11 @@ proc run(ctx: var ValidationState, env: VmModule, pos: PrgCtr, instr: Instr
   of opcUIntToFloat, opcSIntToFloat:
     pop(vtInt)
     push(vtFloat)
-  of opcFloatToSInt, opcFloatToUint, opcReinterpI32, opcReinterpI64:
+  of opcFloatToSInt, opcFloatToUInt:
+    check imm8(instr) in 1..64, "width out of range"
+    pop(vtFloat)
+    push(vtInt)
+  of opcReinterpI32, opcReinterpI64:
     pop(vtFloat)
     push(vtInt)
   of opcLdInt8, opcLdInt16, opcLdInt32, opcLdInt64:

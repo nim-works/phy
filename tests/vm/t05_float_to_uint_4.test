@@ -1,0 +1,9 @@
+discard """
+  output: "(Done 65536)"
+"""
+.type P1 () -> int
+.start P1 main
+  LdImmFloat 65536
+  FloatToUInt 32
+  Ret
+.end
