@@ -1,6 +1,5 @@
-## Implements a simpler disassembler for the VM (i.e., bytecode -> text
-## representation). The text representation can be passed back into the
-## assembler.
+## Implements a simpler disassembler for VM modules. The text representation
+## can be passed back into the assembler.
 
 import
   std/[
@@ -9,8 +8,9 @@ import
   ],
   vm/[
     vmenv,
-    vmtypes,
+    vmmodules,
     vmspec,
+    vmtypes,
     utils
   ]
 
@@ -37,7 +37,7 @@ proc formatValue(result: var string, t: ValueType, specifier: string) =
   of vtRef:   result.add "ref"
 
 
-proc disassemble*(env: VmEnv, prc: ProcHeader, result: var string) =
+proc disassemble*(env: VmModule, prc: ProcHeader, result: var string) =
   ## Turns the given `prc` into its text representation, appending the result
   ## to `result`.
   # emit all locals at the start:
@@ -108,13 +108,11 @@ proc disassemble*(env: VmEnv, prc: ProcHeader, result: var string) =
         result.add &".eh L{env.ehTable[e].dst}\n"
         break
 
-proc disassemble*(env: VmEnv): string =
-  ## Returns the text representation for the full `env`. Except when
-  ## containing stub and host/callback procedures, the text representation
-  ## can be re-assembled into a ``VmEnv`` that has the same meaning as the
-  ## input `env`.
+proc disassemble*(m: VmModule): string =
+  ## Returns the text representation for the full `m`. The text representation
+  ## can be re-assembled into a ``VmModule`` that has the same meaning as `m`.
   # emit the type directives:
-  for i in 0..<env.types.types.len:
+  for i in 0..<m.types.types.len:
     let id = TypeId(i)
     result.add fmt".type t{i} ("
 
@@ -125,29 +123,39 @@ proc disassemble*(env: VmEnv): string =
       of tkFloat:   "float"
       of tkForeign: "foreign"
 
-    for i, it in parameters(env.types, id):
+    for i, it in parameters(m.types, id):
       if i > 0:
         result.add ", "
       result.add toString(it)
 
-    result.add ") -> " & toString(env.types.returnType(id)) & "\n"
+    result.add ") -> " & toString(m.types.returnType(id)) & "\n"
 
   # emit the constants:
-  for i, val in env.constants.pairs:
+  for i, val in m.constants.pairs:
     result.add &".const c{i} {val}\n"
 
   # emit the globals:
-  for i, val in env.globals.pairs:
+  for i, val in m.globals.pairs:
     result.add &".global g{i} {val}\n"
 
   # emit the procedures:
-  for i, prc in env.procs.pairs:
+  for i, prc in m.procs.pairs:
     case prc.kind
-    of pkStub:
-      result.add &".stub {prc.typ} p{i}\n"
     of pkDefault:
       result.add &".start {prc.typ} p{i}\n"
-      disassemble(env, prc, result)
+      disassemble(m, prc, result)
       result.add ".end\n"
     of pkCallback:
-      result.add &".host {prc.typ} p{i}\n"
+      # interface names are not allowed to contain '"' or other special
+      # characters; escaping the string is therefore not necessary
+      result.add &".import {prc.typ} p{i} \"{m.names[prc.code.a]}\"\n"
+    of pkStub:
+      unreachable() # not possible
+
+  # # emit the exports:
+  for e in m.exports.items:
+    case e.kind
+    of expGlobal:
+      result.add &".export global g{e.id} \"{m.names[e.name]}\"\n"
+    of expProc:
+      result.add &".export proc p{e.id} \"{m.names[e.name]}\"\n"
