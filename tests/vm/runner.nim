@@ -16,6 +16,10 @@ import
     vmvalidation
   ]
 
+proc test(env: var VmEnv, args: openArray[Value], _: RootRef): CallbackResult =
+  ## A VM callback, created for the purpose of testing.
+  CallbackResult(code: cecValue, value: args[0])
+
 # 1MB max memory for the VM should be plenty enough for the tests
 var
   env   = initVm(1024, 1024 * 1024)
@@ -51,7 +55,7 @@ if errors.len > 0:
     stderr.writeLine(it)
   quit(1)
 
-link(env, default(Table[string, VmCallback]), [module])
+link(env, toTable({"test": test}), [module])
 
 var
   res: YieldReason
