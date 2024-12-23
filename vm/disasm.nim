@@ -136,7 +136,7 @@ proc disassemble*(m: VmModule): string =
 
   # emit the globals:
   for i, val in m.globals.pairs:
-    result.add &".global g{i} {val}\n"
+    result.add &".global g{i} {val.typ} {val}\n"
 
   # emit the procedures:
   for i, prc in m.procs.pairs:
