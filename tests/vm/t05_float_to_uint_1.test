@@ -1,0 +1,12 @@
+discard """
+  description: "NaN is converted to 0"
+  output: "(Done 0)"
+"""
+.type P1 () -> int
+.start P1 main
+  LdImmFloat 0.0
+  LdImmFloat 0.0
+  DivFloat
+  FloatToUInt 32
+  Ret
+.end

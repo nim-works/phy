@@ -660,8 +660,8 @@ proc translate*(module: PackedTree[NodeKind]): VmModule =
       result.ehTable.add prc.ehTable
     else:
       # must be a host procedure
-      result.host.add module.getString(module.child(def, 1))
+      result.names.add module.getString(module.child(def, 1))
 
       result.procs.add ProcHeader(kind: pkCallback,
                                   typ: module[def, 0].typ)
-      result.procs[i].code.a = result.host.high.uint32
+      result.procs[i].code.a = result.names.high.uint32

@@ -154,9 +154,9 @@ proc print(tree: PackedTree[spec.NodeKind], lang: Language) =
     stdout.writeLine(pretty(tree, tree.child(1)))
     stdout.writeLine(pretty(tree, tree.child(2)))
 
-proc print(env: VmEnv) =
+proc print(m: VmModule) =
   genericPrint(langBytecode):
-    stdout.write(disassemble(env))
+    stdout.write(disassemble(m))
 
 proc sourceToIL(text: string): (PackedTree[spec.NodeKind], SemType) =
   ## Given an S-expression representation of the source language (`text`),
@@ -306,7 +306,7 @@ proc main(args: openArray[string]) =
   s.close()
 
   var
-    env = initVm(1024, 1024 * 1024) # 1MB of memory
+    module: VmModule
     code: PackedTree[spec.NodeKind]
     typ: SemType
 
@@ -318,10 +318,12 @@ proc main(args: openArray[string]) =
 
     for line in splitLines(text, false):
       try:
-        a.process(line, env)
+        a.process(line)
       except AssemblerError as e:
         error input & "(" & $lineN & ", 1): " & e.msg
       inc lineN
+
+    module = a.close()
   else:
     var newSource = source
 
@@ -342,7 +344,7 @@ proc main(args: openArray[string]) =
       # compile to L0 code and then translate to bytecode
       compile(code, newSource, lang0)
       syntaxCheck(code, lang0)
-      link(env, hostProcedures(gRunner), [pass0.translate(code)])
+      module = pass0.translate(code)
       # the bytecode is verified later
     else:
       compile(code, newSource, target)
@@ -351,14 +353,17 @@ proc main(args: openArray[string]) =
 
   if target == langBytecode:
     # make sure the environment is correct:
-    let errors = validate(env)
+    let errors = validate(module)
     if errors.len > 0:
-      echo "Validation of the VM environment failed"
+      echo "VM module validation failed"
       for it in errors.items:
         echo "Error: ", it
       quit(1)
 
-    print(env)
+    print(module)
+
+    var env = initVm(1024, 1024 * 1024) # 1 MiB max memory
+    link(env, hostProcedures(gRunner), [module])
 
     # handle the eval command:
     if cmd == Eval:

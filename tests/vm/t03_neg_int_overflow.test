@@ -1,0 +1,13 @@
+discard """
+  description: "
+    NegInt behaves like MulInt with a factor -1 in the overflow case
+  "
+  output: "(Done (9223372036854775808 or -9223372036854775808))"
+"""
+.type P1 () -> int
+.const low int 0x8000_0000_0000_0000
+.start P1 main
+  LdConst low
+  NegInt
+  Ret
+.end

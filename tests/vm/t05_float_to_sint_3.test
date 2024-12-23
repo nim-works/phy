@@ -1,0 +1,9 @@
+discard """
+  output: "(Done (18446744073709551488 or -128))"
+"""
+.type P1 () -> int
+.start P1 main
+  LdImmFloat -400
+  FloatToSInt 8
+  Ret
+.end

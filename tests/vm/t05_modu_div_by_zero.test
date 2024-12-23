@@ -1,0 +1,10 @@
+discard """
+  output: "(Error ecDivByZero)"
+"""
+.type P1 () -> int
+.start P1 main
+  LdImmInt 0
+  LdImmInt 0
+  ModU
+  Ret
+.end

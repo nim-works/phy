@@ -144,17 +144,18 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
     m = m.apply(pass_stackAlloc.lower(m, 8))
     m = m.apply(pass_inlineTypes.lower(m))
 
-    # generate the bytecode:
-    var env = initVm(1024, 1024 * 1024)
-    link(env, hostProcedures(includeTest = false), [translate(m)])
+    let module = translate(m)
 
-    # make sure the bytecode and environment is correct:
-    let errors = validate(env)
+    # make sure the module is correct:
+    let errors = validate(module)
     if errors.len > 0:
       for it in errors.items:
         echo it
       echo "validation failure"
       return
+
+    var env = initVm(1024, 1024 * 1024)
+    link(env, hostProcedures(includeTest = false), [module])
 
     # eval and print:
     echo run(env, ProcIndex(env.procs.high), typ)
