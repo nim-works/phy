@@ -1,0 +1,7 @@
+.type t0 () -> int
+.global g0 int 100
+.start t0 p0
+  LdImmInt 100
+  Ret
+.end
+.export global g0 "exported"
