@@ -371,7 +371,19 @@ proc main(args: openArray[string]) =
       else:
         error "invalid memory configuration"
 
-      if module.procs.len == 0:
+      # look for the procedure to start evaluation with:
+      var entry = none ProcIndex
+      if source == langSource:
+        # use the last exported procedure, if any
+        for i in countdown(module.exports.high, 0):
+          if module.exports[i].kind == expProc:
+            entry = some module.exports[i].id.ProcIndex
+            break
+      elif module.procs.len > 0:
+        # simply use the last procedure
+        entry = some module.procs.high.ProcIndex
+
+      if entry.isNone:
         if gRunner:
           discard "okay, silently ignore"
           return
@@ -385,9 +397,9 @@ proc main(args: openArray[string]) =
 
       if source == langSource:
         # we have type high-level type information
-        stdout.write run(env, stack, env.procs.high.ProcIndex, typ)
+        stdout.write run(env, stack, entry.unsafeGet, typ)
       else:
         # we don't have high-level type information
-        stdout.write run(env, stack, env.procs.high.ProcIndex)
+        stdout.write run(env, stack, entry.unsafeGet)
 
 main(getExecArgs())
