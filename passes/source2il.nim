@@ -938,6 +938,15 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
     c.globals.add Node(kind: UInt, val: 8)
     c.globals.add Node(kind: IntVal, val: HeapStart - 8)
 
+  c.exports.subTree Export:
+    c.exports.add Node(kind: StringVal, val: c.literals.pack("stack_size"))
+    c.exports.add Node(kind: Global, val: 0)
+  # the end-of-heap pointer is taken to also represent the amount of total
+  # guest memory (which is not entirely correct, due to the address bias)
+  c.exports.subTree Export:
+    c.exports.add Node(kind: StringVal, val: c.literals.pack("total_memory"))
+    c.exports.add Node(kind: Global, val: 2)
+
   # add the built-in allocator and seq procedures
   # XXX: these need to be provided by a system-like module in the future
 
