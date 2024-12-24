@@ -1067,6 +1067,11 @@ proc exprToIL*(c; t): SemType =
           use(e.expr, c.literals, bu)
 
   c.procList.add ProcInfo(typ: procType(result))
+  # add the procedure as an export, to be able to look it up from the outside
+  c.exports.subTree Export:
+    let id = c.procList.high
+    c.exports.add Node(kind: StringVal, val: c.literals.pack("expr." & $id))
+    c.exports.add Node(kind: Proc, val: id.uint32)
 
 proc declToIL*(c; t; n: NodeIndex) =
   ## Translates the given source language declaration to the target IL.
@@ -1135,6 +1140,14 @@ proc declToIL*(c; t; n: NodeIndex) =
         convert(it, c.literals, bu)
 
     c.procs.add finish(bu)
+    # add the user-defined procedure as an export, to be able to look it up
+    # from the outside
+    c.exports.subTree Export:
+      # prefix with `module.` so that the name cannot collide with foreign
+      # procedure names (which use their own prefix)
+      c.exports.add Node(kind: StringVal,
+                         val: c.literals.pack("module." & name))
+      c.exports.add Node(kind: Proc, val: c.procList.high.uint32)
   of SourceKind.TypeDecl:
     let name = t.getString(t.child(n, 0))
     if c.lookup(name).kind != ekNone:
