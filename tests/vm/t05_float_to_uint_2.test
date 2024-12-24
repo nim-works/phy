@@ -1,0 +1,9 @@
+discard """
+  output: "(Done 255)"
+"""
+.type P1 () -> int
+.start P1 main
+  LdImmFloat 300
+  FloatToUInt 8
+  Ret
+.end

@@ -107,6 +107,8 @@ proc parseIntLike[T](s: Stream, _: typedesc[T]): T =
   while (let c = s.peekChar(); c notin {' ', '\t', '\n', '\r', '\0'}):
     str.add s.readChar()
 
+  expect str.len > 0, "expected integer value"
+
   var temp: BiggestInt
   if parseBiggestInt(str, temp) != str.len:
     # error; might be an integer in hex format
@@ -143,6 +145,7 @@ proc parseValue(s: Stream, typ: ValueType): Value =
 
 proc parseTypedVal(s: Stream): TypedValue =
   let typ = parseEnum[ValueType]("vt" & s.ident())
+  s.space()
   TypedValue(typ: typ, val: s.parseValue(typ))
 
 proc parseType(s: Stream, env: var TypeEnv, a: AssemblerState): TypeId =
@@ -231,7 +234,7 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
      opcReinterpF32, opcReinterpF64, opcReinterpI32, opcReinterpI64,
      opcExcept, opcUnreachable, opcRaise, opcMemCopy, opcMemClear, opcGrow:
     Instr(op) # instruction with no immediate operands
-  of opcAddImm, opcLdConst, opcLdImmInt, opcOffset,
+  of opcAddImm, opcLdImmInt, opcOffset,
      opcLdInt8, opcLdInt16, opcLdInt32, opcLdInt64, opcLdFlt32, opcLdFlt64,
      opcWrInt8, opcWrInt16, opcWrInt32, opcWrInt64, opcWrFlt32, opcWrFlt64,
      opcWrRef, opcStackAlloc, opcStackFree:
@@ -241,6 +244,8 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
   of opcMask, opcSignExtend, opcAddChck, opcSubChck, opcUIntToFloat,
      opcFloatToUint, opcSIntToFloat, opcFloatToSInt:
     instrC()
+  of opcLdConst:
+    makeInstr(a.consts[s.ident()])
   of opcBranch:
     makeInstr(s.parseLabel(a), c = (s.space(); s.parseIntLike(int8)))
   of opcJmp:

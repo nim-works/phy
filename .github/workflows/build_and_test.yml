@@ -56,10 +56,10 @@ jobs:
           fetch-depth: 0
           filter: tree:0
 
-      # always use the most recent NimSkull version
+      # use a pinned version in order to make CI runs reproducible
       - uses: nim-works/setup-nimskull@0.1.2
         with:
-          nimskull-version: "*"
+          nimskull-version: "0.1.0-dev.21431"
 
       - name: Build koch
         run: nim c -d:nimStrictMode --outdir:bin koch.nim
@@ -85,10 +85,10 @@ jobs:
           fetch-depth: 0
           filter: tree:0
 
-      # always use the most recent NimSkull version
+      # use a pinned version in order to make CI runs reproducible
       - uses: nim-works/setup-nimskull@0.1.2
         with:
-          nimskull-version: "*"
+          nimskull-version: "0.1.0-dev.21431"
 
       - name: Build koch
         run: nim c -d:nimStrictMode --outdir:bin koch.nim
