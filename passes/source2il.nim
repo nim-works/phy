@@ -383,6 +383,18 @@ proc capture(c; e: sink Expr; stmts): IrNode =
   stmts.add e.stmts
   stmts.add newAsgn(result, e.expr)
 
+proc inlineLvalue(c; e: sink Expr; stmts): IrNode =
+  ## Returns `e` as an l-value IL expression, committing `e` to a temporary
+  ## first if needed.
+  case e.expr.kind
+  of Local, At, Field, Deref:
+    stmts.add e.stmts
+    result = e.expr
+  else:
+    # IL r-value expressions cannot be used where an l-value expression is
+    # expected; going through a temporary solves this
+    result = c.capture(e, stmts)
+
 proc fitExpr(c; e: sink Expr, target: SemType): Expr =
   ## Makes sure `e` fits into the `target` type, returning the expression
   ## with the appropriate conversion operation applied. If the type of `e`
@@ -798,7 +810,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       let idx = t.getInt(b)
       if idx >= 0 and idx < tup.typ.elems.len:
         result = tup.typ.elems[idx] + tup.attribs
-        expr = newFieldExpr(inline(tup, stmts), idx.int)
+        expr = newFieldExpr(inlineLvalue(c, tup, stmts), idx.int)
       else:
         c.error("tuple has no element with index " & $idx)
         result = errorType() + {Lvalue, Mutable}

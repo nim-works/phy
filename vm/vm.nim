@@ -10,6 +10,8 @@ import
     vmtypes
   ]
 
+from std/math import isNaN
+
 type
   ErrorCode* = enum
     ecIllegalAccess  ## trying to access memory not accessible to the VM
@@ -20,6 +22,7 @@ type
     ecTypeError      ## type error
     ecCallbackError  ## a fatal error ocurred within a callback
     ecUnreachable    ## an 'unreachable' instruction was executed
+    ecDivByZero      ## division by zero
 
   YieldReasonKind* = enum
     yrkDone
@@ -194,12 +197,16 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
     check not checkmem(c.allocator, a, uint(len), p), ecIllegalAccess
     p
 
+  template add(a: uint64, b: int32): uint64 =
+    # overflow-safe unsigned/signed addition that correctly wraps around
+    a + cast[uint64](int64(b))
+
   template load[T](typ: typedesc[T]): T =
-    cast[ptr typ](checkmem(operand(1).intVal + imm32(), sizeof(typ)))[]
+    cast[ptr typ](checkmem(add(operand(1).uintVal, imm32()), sizeof(typ)))[]
 
   template store[T](v: T) =
     let val = v
-    cast[ptr T](checkmem(pop(int64) + imm32(), sizeof(T)))[] = val
+    cast[ptr T](checkmem(add(pop(uint64), imm32()), sizeof(T)))[] = val
 
   template mainLoop(label, body: untyped) =
     # a template in order to reduce visual nesting
@@ -250,11 +257,30 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
     of opcAddInt: asgn 1, binaryOp(`+`, uint64)
     of opcSubInt: asgn 1, binaryOp(`-`, uint64)
     of opcMulInt: asgn 1, binaryOp(`*`, uint64)
-    of opcDivInt: asgn 1, binaryOp(`div`, int64)
-    of opcDivU:   asgn 1, binaryOp(`div`, uint64)
-    of opcModInt: asgn 1, binaryOp(`mod`, int64)
-    of opcModU:   asgn 1, binaryOp(`mod`, uint64)
-    of opcNegInt: asgn 1, -operand(1).intVal
+    of opcDivInt:
+      let divisor = pop(int64)
+      check divisor != 0, ecDivByZero
+      if likely(divisor != -1):
+        asgn 1, operand(1).intVal div divisor
+      else:
+        # x div -1 == x * -1. This prevents overflow errors when
+        # x == low(int64)
+        asgn 1, operand(1).uintVal * high(uint64)
+    of opcDivU:
+      let divisor = pop(uint64)
+      check divisor != 0, ecDivByZero
+      asgn 1, operand(1).uintVal div divisor
+    of opcModInt:
+      let divisor = pop(int64)
+      check divisor != 0, ecDivByZero
+      asgn 1, operand(1).intVal mod divisor
+    of opcModU:
+      let divisor = pop(uint64)
+      check divisor != 0, ecDivByZero
+      asgn 1, operand(1).uintVal mod divisor
+    of opcNegInt:
+      # overflow-safe two's complement integer negation
+      asgn 1, (not operand(1).uintVal) + 1
     of opcOffset:
       # use unsigned integers, for overflow-safe arithmetic
       let idx = pop(uint64)
@@ -305,23 +331,26 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
       if imm8() == 8: asgn 1, float64(operand(1).uintVal)
       else:           asgn 1, float64(float32(operand(1).uintVal))
     of opcFloatToUInt:
-      # convert to signed int, cast, then narrow
-      let width = imm8()
-      var val = cast[uint64](int64(operand(1).floatVal))
-      if width < 64:
-        val = val and ((1'u64 shl width) - 1)
-      asgn 1, val
+      let hi = (1'u64 shl imm8()) - 1
+      let arg = operand(1).floatVal
+      asgn 1:
+        if unlikely(isNaN(arg)): 0'u64
+        elif arg < 0.0:          0'u64
+        elif arg > float64(hi):  hi
+        else:                    uint64(arg)
     of opcSIntToFloat:
       if imm8() == 8: asgn 1, float64(operand(1).intVal)
       else:           asgn 1, float64(float32(operand(1).intVal))
     of opcFloatToSInt:
+      let abs = 1'u64 shl (imm8() - 1)
+      let hi = int64(abs - 1)
+      let lo = int64(not(abs) + 1) # negate abs
       let arg = operand(1).floatVal
-      case imm8()
-      of 8: asgn 1, int64(arg)
-      of 4: asgn 1, int64(int32(arg))
-      of 2: asgn 1, int64(int16(arg))
-      of 1: asgn 1, int64(int8(arg))
-      else: unreachable()
+      asgn 1:
+        if unlikely(isNaN(arg)): 0'i64
+        elif arg < float64(lo):  lo
+        elif arg > float64(hi):  hi
+        else:                    int64(arg)
     of opcReinterpF32:
       asgn 1, float64(cast[float32](cast[uint32](operand(1))))
     of opcReinterpI32:
@@ -343,7 +372,7 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
     of opcWrFlt64:  store(pop(float64))
     of opcWrRef:
       let val = pop(ForeignRef)
-      let dst = cast[ptr ForeignRef](checkmem(pop(int64) + imm32(), 8))
+      let dst = cast[ptr ForeignRef](checkmem(add(pop(uint64), imm32()), 8))
       # account for self-assignment: increment before decrementing
       if val.isNonNil:   c.allocator.incRef(val)
       if dst[].isNonNil: c.allocator.decRef(dst[])

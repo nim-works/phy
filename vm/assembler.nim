@@ -59,6 +59,8 @@ type
     dirConst  = "const"  ## define a constant
     dirGlobal = "global" ## define a global
     dirType   = "type"   ## define a type
+    dirExport = "export" ## mark a procedure or global as exported
+    dirImport = "import" ## add an imported procedure
     dirLocal  = "local"  ## define a local
     dirLabel  = "label"  ## attach a label to the next instruction
     dirEh     = "eh"     ## attach an exception handler to the previous
@@ -105,6 +107,8 @@ proc parseIntLike[T](s: Stream, _: typedesc[T]): T =
   while (let c = s.peekChar(); c notin {' ', '\t', '\n', '\r', '\0'}):
     str.add s.readChar()
 
+  expect str.len > 0, "expected integer value"
+
   var temp: BiggestInt
   if parseBiggestInt(str, temp) != str.len:
     # error; might be an integer in hex format
@@ -141,6 +145,7 @@ proc parseValue(s: Stream, typ: ValueType): Value =
 
 proc parseTypedVal(s: Stream): TypedValue =
   let typ = parseEnum[ValueType]("vt" & s.ident())
+  s.space()
   TypedValue(typ: typ, val: s.parseValue(typ))
 
 proc parseType(s: Stream, env: var TypeEnv, a: AssemblerState): TypeId =
@@ -180,6 +185,17 @@ proc parseType(s: Stream, env: var TypeEnv, a: AssemblerState): TypeId =
   s.space()
   result = env.add(s.parseTypeName(), params)
 
+proc parseInterface(s: Stream): string =
+  ## Parses an interface name.
+  # interface names don't need to support the whole ASCII range
+  const Allowed = {'A'..'Z', 'a'..'z', '0'..'9', '_', '.', '#', '(', ')'}
+  expect s.readChar() == '"', "expected '\"'"
+  var c: char
+  while (c = s.readChar(); c in Allowed):
+    result.add c
+
+  expect c == '"', "expected closing '\"'"
+
 proc prc(a: var AssemblerState): var ProcState {.inline.} =
   a.stack[a.stack.len - 1]
 
@@ -218,7 +234,7 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
      opcReinterpF32, opcReinterpF64, opcReinterpI32, opcReinterpI64,
      opcExcept, opcUnreachable, opcRaise, opcMemCopy, opcMemClear, opcGrow:
     Instr(op) # instruction with no immediate operands
-  of opcAddImm, opcLdConst, opcLdImmInt, opcOffset,
+  of opcAddImm, opcLdImmInt, opcOffset,
      opcLdInt8, opcLdInt16, opcLdInt32, opcLdInt64, opcLdFlt32, opcLdFlt64,
      opcWrInt8, opcWrInt16, opcWrInt32, opcWrInt64, opcWrFlt32, opcWrFlt64,
      opcWrRef, opcStackAlloc, opcStackFree:
@@ -228,6 +244,8 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
   of opcMask, opcSignExtend, opcAddChck, opcSubChck, opcUIntToFloat,
      opcFloatToUint, opcSIntToFloat, opcFloatToSInt:
     instrC()
+  of opcLdConst:
+    makeInstr(a.consts[s.ident()])
   of opcBranch:
     makeInstr(s.parseLabel(a), c = (s.space(); s.parseIntLike(int8)))
   of opcJmp:
@@ -283,7 +301,7 @@ proc process*(a: var AssemblerState, line: sink string) =
     s.expectChar('.')
     case parseEnum[Directive](s.ident())
     of dirStart:
-      # .start <type-id> <name>
+      # .start <type> <name>
       var prc = ProcState(id: a.module.procs.len.ProcIndex)
       s.space()
       prc.typ = a.types[s.ident()]
@@ -327,9 +345,39 @@ proc process*(a: var AssemblerState, line: sink string) =
       s.space()
       let t = parseType(s, a.module.types, a)
       a.types[name] = t
+    of dirExport:
+      # .export <kind> <name> <interface>
+      s.space()
+      let kind = parseEnum[ExportKind]("exp" & s.ident())
+      s.space()
+      let id =
+        case kind
+        of expProc:   a.procs[s.ident()].uint32
+        of expGlobal: a.globals[s.ident()].uint32
+      s.space()
+      let iface = s.parseInterface()
+      # parse the interface name *before* modifying the module
+      a.module.exports.add:
+        Export(kind: kind, id: id, name: a.module.names.len.uint32)
+      a.module.names.add iface
+    of dirImport:
+      # .import <type> <name> <interface>
+      var prc = ProcHeader(kind: pkCallback)
+      s.space()
+      prc.typ = a.types[s.ident()]
+      s.space()
+      let name = s.ident()
+      s.space()
+      prc.code.a = a.module.names.len.uint32
+      expect name notin a.procs:
+        "a procedure with the given name already exists"
+      a.procs[name] = a.module.procs.len.ProcIndex
+      let iface = s.parseInterface()
+      # parse the interface name *before* modifying the module
+      a.module.procs.add prc
+      a.module.names.add iface
     of dirLocal:
       # .local <name> <type>
-      expect a.stack.len > 0, "only allowed in procedure"
       s.space()
       let name = s.ident()
       s.space()

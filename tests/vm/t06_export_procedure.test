@@ -1,0 +1,8 @@
+discard """
+  output: "(Done)"
+"""
+.type P1 () -> void
+.start P1 p
+  Ret
+.end
+.export proc p "main"
