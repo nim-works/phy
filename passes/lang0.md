@@ -125,22 +125,35 @@ If `stack` is greater than 0, `stack` bytes are allocated from the stack on
 procedure entry, and the frame pointer is stored in the local specified last
 in the entry parameter block parameter list.
 
-### Foreign Procedures
+### Imported Procedures
 
 ```grammar
-procdef += (Foreign <type_id> (StringVal <string>))
+procdef += (Import typ:<type_id> name:(StringVal <string>))
 ```
 
-Foreign procedures are procedures that have an external implementation. How the
-identifier is interpreted is up to the code generator / linker to decide.
+Procedure imports declare procedures whose implementation is provided
+externally. The `name` provides the interface name that the implementation is
+provided under, and `typ` must be equal to the signature type of the
+implementation.
+
+### Exports
+
+```grammar
+export_id ::= (Proc <int>)
+           |  (Global <int>)
+export    ::= (Export name:(StringVal <string>) id:<export_id>)
+```
+
+An export makes a procedure or global variable available to the outside under
+the given `name`.
 
 ### Module
 
-All relevant entities (types, globals, and procedures) are stored under the
-top-level node, in dedicated sections, to allow for easy and fast access to
-them.
+All relevant entities (types, globals, procedures, and exports) are stored
+under the top-level node, in dedicated sections, to allow for easy and fast
+access to them.
 
 ```grammar
-module ::= (Module (TypeDefs <typedesc>*) (GlobalDefs <globaldef>*) (ProcDefs <procdef>*))
+module ::= (Module (TypeDefs <typedesc>*) (GlobalDefs <globaldef>*) (ProcDefs <procdef>*) (List <export>+)?)
 top ::= <module>
 ```

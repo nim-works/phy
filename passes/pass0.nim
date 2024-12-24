@@ -665,3 +665,18 @@ proc translate*(module: PackedTree[NodeKind]): VmModule =
       result.procs.add ProcHeader(kind: pkCallback,
                                   typ: module[def, 0].typ)
       result.procs[i].code.a = result.names.high.uint32
+
+  # add the exports, if any:
+  if module.len(NodeIndex 0) == 4: # is there an export list?
+    let exports = module.next(procs)
+    for it in module.items(exports):
+      var ex = Export(name: result.names.len.uint32,
+                      id:   module[it, 1].id.uint32)
+      ex.kind =
+        case module[it, 1].kind
+        of Proc:   expProc
+        of Global: expGlobal
+        else:      unreachable()
+
+      result.exports.add ex
+      result.names.add module.getString(module.child(it, 0))
