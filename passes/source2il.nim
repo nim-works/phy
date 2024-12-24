@@ -59,6 +59,8 @@ type
     procList*: seq[ProcInfo]
     globals: Builder[NodeKind]
       ## the in-progress global variable section
+    exports: Builder[NodeKind]
+      ## the in-progress export section
 
     procTypeCache: Table[SemType, uint32]
       ## caches the ID of IL signature types generated for procedure types.
@@ -898,6 +900,7 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
                      types: initBuilder[NodeKind](TypeDefs),
                      procs: initBuilder[NodeKind](ProcDefs),
                      globals: initBuilder[NodeKind](GlobalDefs),
+                     exports: initBuilder[NodeKind](List),
                      # start with the top-level scope
                      scopes: @[default(Scope)])
 
@@ -1012,6 +1015,9 @@ proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
     bu.add finish(move c.types)
     bu.add finish(move c.globals)
     bu.add finish(move c.procs)
+    let exports = finish(move c.exports)
+    if exports.len > 1: # don't add an empty export list
+      bu.add exports
 
   initTree[NodeKind](finish(bu), c.literals)
 
