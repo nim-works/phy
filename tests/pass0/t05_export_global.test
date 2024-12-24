@@ -1,5 +1,5 @@
 discard """
-  output: "(Done 100)"
+  output: "(Done 200)"
 """
 (TypeDefs
   (ProcTy (Int 8)))
@@ -9,6 +9,6 @@ discard """
   (ProcDef (Type 0) 0 (Locals)
     (List
       (Block (Params)
-        (Return (IntVal 100))))))
+        (Return (IntVal 200))))))
 (List
   (Export "exported" (Global 0)))
