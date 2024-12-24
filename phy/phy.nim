@@ -4,6 +4,7 @@
 
 import
   std/[
+    options,
     os,
     parseopt,
     streams,
@@ -362,23 +363,31 @@ proc main(args: openArray[string]) =
 
     print(module)
 
-    var env = initVm(1024, 1024 * 1024) # 1 MiB max memory
-    link(env, hostProcedures(gRunner), [module])
-
     # handle the eval command:
     if cmd == Eval:
-      if env.procs.len == 0:
+      var mem: MemoryConfig
+      if (let v = readMemConfig(module); v.isSome):
+        mem = v.unsafeGet
+      else:
+        error "invalid memory configuration"
+
+      if module.procs.len == 0:
         if gRunner:
           discard "okay, silently ignore"
           return
         else:
           error "there's nothing to run"
 
+      # reserve the maximum amount of memory up-front
+      var env = initVm(mem.total, mem.total)
+      link(env, hostProcedures(gRunner), [module])
+      let stack = hoSlice(mem.stackStart, mem.stackStart + mem.stackSize)
+
       if source == langSource:
         # we have type high-level type information
-        stdout.write run(env, env.procs.high.ProcIndex, typ)
+        stdout.write run(env, stack, env.procs.high.ProcIndex, typ)
       else:
         # we don't have high-level type information
-        stdout.write run(env, env.procs.high.ProcIndex)
+        stdout.write run(env, stack, env.procs.high.ProcIndex)
 
 main(getExecArgs())
