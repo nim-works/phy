@@ -1,8 +1,8 @@
 discard """
   description: "
-    Declarations within the `While` condition are visible to the body
+    Declarations within the `While` condition are not visible to the body
   "
-  output: "(): unit"
+  reject: true
 """
 (While
   (Exprs
