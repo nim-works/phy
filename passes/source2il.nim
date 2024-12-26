@@ -439,7 +439,10 @@ proc fitExprStrict(c; e: sink Expr, typ: SemType): Expr =
 
 proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType
 
-proc exprToIL(c; t: InTree, n: NodeIndex): Expr =
+proc openExprToIL(c; t: InTree, n: NodeIndex): Expr =
+  ## Analyzes the given expression and generates the IL code for it. Symbols
+  ## introduced by the analysis *escape* into the enclosing scope, hence the
+  ## procedure's name.
   result.expr = IrNode(kind: None)
   (result.typ, result.attribs) = exprToIL(c, t, n, result.expr, result.stmts)
   # verify some postconditions:
@@ -448,11 +451,11 @@ proc exprToIL(c; t: InTree, n: NodeIndex): Expr =
   assert result.typ.kind in {tkVoid, tkError} or result.expr.kind != None,
          "non-void `Expr` must have a trailing expression"
 
-proc scopedExprToIL(c; t; n: NodeIndex): Expr =
+proc exprToIL(c; t; n: NodeIndex): Expr =
   ## Analyzes the given expression and generates the IL for it. Analysis
   ## happens within a new scope, which is discarded afterwards.
   c.openScope()
-  result = c.exprToIL(t, n)
+  result = c.openExprToIL(t, n)
   c.closeScope()
 
 template lenCheck(t; n: NodeIndex, expected: int) =
@@ -684,10 +687,8 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
   of SourceKind.And, SourceKind.Or:
     let
       (a, b) = t.pair(n)
-      ea  = c.fitExprStrict(c.exprToIL(t, a), prim(tkBool))
-      # the second operand is evaluated conditionally, and it's thus placed
-      # within its own scope
-      eb  = c.fitExprStrict(c.scopedExprToIL(t, b), prim(tkBool))
+      ea  = c.fitExprStrict(c.openExprToIL(t, a), prim(tkBool))
+      eb  = c.fitExprStrict(c.exprToIL(t, b), prim(tkBool))
       tmp = c.newTemp(prim(tkBool))
 
     if t[n].kind == SourceKind.And:
@@ -707,13 +708,13 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
   of SourceKind.If:
     let
       (p, b) = t.pair(n) # predicate and body, always present
-      cond = exprToIL(c, t, p)
+      cond = openExprToIL(c, t, p)
     if cond.typ.kind != tkBool:
       c.error("`If` condition must be a boolean expression")
 
     let
-      body = scopedExprToIL(c, t, b)
-      els = if t.len(n) == 3: scopedExprToIL(c, t, t.child(n, 2))
+      body = exprToIL(c, t, b)
+      els = if t.len(n) == 3: exprToIL(c, t, t.child(n, 2))
             else:             unitExpr
       typ = commonType(body.typ, els.typ)
       (fb, fe) =
@@ -853,7 +854,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       if not seenVoidExpr:
         body
     for i, si in t.pairs(n):
-      let e = c.exprToIL(t, si)
+      let e = c.openExprToIL(t, si)
       voidGuard:
         stmts.add e.stmts
       if i == last:
@@ -903,7 +904,7 @@ proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
 proc exprToIL*(c; t): SemType =
   ## Translates the given source language expression to the highest-level IL
   ## and turns it into a procedure. Also returns the type of the expression.
-  var e = c.scopedExprToIL(t, NodeIndex(0))
+  var e = c.exprToIL(t, NodeIndex(0))
   result = e.typ
 
   defer:
