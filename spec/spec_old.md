@@ -1,8 +1,7 @@
 ## Phy Specification
 
 > Note: this document is outdated an no longer authoritative. It's kept around
-> since there are some ideas/directions here that haven't been translated to
-> the new specification.
+> for some of it's ideas/directions that haven't been formalized yet.
 
 This document describes the semantics of the source language.
 
