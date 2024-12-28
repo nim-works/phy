@@ -192,23 +192,23 @@ conclusion being a judgments of the form `C |-_t x : typ`.
 ```
 
 --------------------- # S-void-type
-C |-_t (VoidTy): void
+C |-_t (VoidTy) : void
 
 
 --------------------- # S-unit-type
-C |-_t (UnitTy): unit
+C |-_t (UnitTy) : unit
 
 
 --------------------- # S-bool-type
-C |-_t (BoolTy): bool
+C |-_t (BoolTy) : bool
 
 
 ------------------- # S-int-type
-C |-_t (IntTy): int
+C |-_t (IntTy) : int
 
 
 ----------------------- # S-float-type
-C |-_t (FloatTy): float
+C |-_t (FloatTy) : float
 
 
 ----------------------- # S-empty-tuple-type
