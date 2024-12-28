@@ -50,8 +50,8 @@ texpr    ::= <ident>
           |  (UnionTy <texpr>+)
           |  (ProcTy <texpr>+)
 
-param_decl ::= (ParamDecl name:<ident> type:<texpr>)
-decl       ::= (ProcDecl <ident> <texpr> (ParamDecl <param_decl>) <expr>)
+param_decl ::= (ParamDecl <ident> <texpr>)
+decl       ::= (ProcDecl <ident> <texpr> (Params <param_decl>*) <expr>)
             |  (TypeDecl <ident> <texpr>)  # type alias
 module     ::= (Module <decl>*)
 
