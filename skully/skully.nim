@@ -2246,7 +2246,7 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
       if sfImportc in prc.flags:
         # the procedure is still imported, but now we know that it's deliberate
         var bu = initBuilder[NodeKind]()
-        bu.subTree Foreign:
+        bu.subTree Import:
           bu.add c.genProcType(env, env.types.add(prc.typ))
           bu.add node(StringVal, c.lit.pack(prc.extname))
         bodies[evt.entity.prc] = finish(bu)
