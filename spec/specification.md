@@ -92,7 +92,7 @@ c   ::= n                           # corresponds to `(IntVal n)`
 l   ::= ...                         # first-class location
 val ::= <c>
      |  <l>
-     |  (TupleCons <val>+)          # tuple value
+     |  (tuple <val>+)              # tuple value
      |  (proc <typ> [x <typ>]* <e>) # procedural value
 typ ::= void                        # corresponds to `(VoidTy)`
      |  unit                        # corresponds to `(UnitTy)`
@@ -476,7 +476,6 @@ E  ::= []
     |  (FieldAccess E n)
     |  (Asgn E' n)
     |  (Asgn le E)
-    |  (Asgn E v)
     |  (TupleCons val* E e*)
     |  (Call val* E e*)
     |  (Call x val* E e*)
@@ -498,7 +497,7 @@ The pure notions of reduction are:
 
 (While e_1 e_2)  ~~>  (If e_1 (Exprs e_2 (While e_1 e_2)) (TupleCons)) # E-while
 
-(FieldAccess (TupleCons val^n) i)  ~~>  val_i # E-field-access
+(FieldAccess (tuple val^n) i)  ~~>  val_i # E-tuple-access
 
 val_3 = int_add(val_1, val_2)  val_3 != {}
 ------------------------------------------ # E-add-int
@@ -539,9 +538,17 @@ val_3 = lt(val_1, val_2)
 
 The impure notions of reduction are:
 ```
+C.locs(l) = (tuple val^n)
+----------------------------------- # E-tuple-loc-access
+C; (FieldAccess l i)  ~~>  C; val_i
+
+val_2 = copy(C, val_1) ...
+------------------------------------------------ # E-tuple-cons
+C; (TupleCons val_1+)  ~~>  C; (tuple val_2 ...)
+
 l notin C.locs
------------------------------------------------------------ # E-let-introduce
-C; (Let x val e)  ~~>  C + locs with l -> copy(val); e[x/l]
+-------------------------------------------------------------- # E-let-introduce
+C; (Let x val e)  ~~>  C + locs with l -> copy(C, val); e[x/l]
 # TODO: the location needs to be removed from `C` once e is done evaluating,
 #       otherwise it remains accessible. This is not a problem at the moment,
 #       but it will be once there are first-class locations (e.g., pointers)
@@ -549,7 +556,11 @@ C; (Let x val e)  ~~>  C + locs with l -> copy(val); e[x/l]
 #       achieved via a new `(Pop x)` construct, where `(Let x val e)` reduces
 #       to `(Pop x e)`
 
-C; (Asgn l val)  ~~>  C + locs with l -> copy(val); (TupleCons) # E-asgn
+C; (Asgn l val)  ~~>  C + locs with l -> copy(C, val); (TupleCons) # E-asgn
+
+le ~~> val_2  val_3 = copy(C, val_2) with n -> copy(C, val_1)
+------------------------------------------------------------- # E-field-asgn
+C; (Asgn (FieldAccess le n) val_1)  ~~>  C; (Asgn le val_3)
 
 val_1 = (proc typ_r [x typ_p]^n e)
 ---------------------------------------------------------------- # E-call-reduce
@@ -570,7 +581,7 @@ C; E[e_1]  -->  C; E[e_2]
 -----------------------------  # E-reduce-impure
 C_1; E[e_1]  -->  C_2; E[e_2]
 
-val_2 = copy(val_1)
+val_2 = copy(C, val_1)
 ----------------------------------------------------- # E-return
 C; B[(Frame typ E[(Return val_1)])]  -->  C; B[val_2]
 
@@ -608,10 +619,10 @@ is neither a location nor contains any:
 ```
 copy (C, val) -> val
 
-copy(C, c)                 = c
-copy(C, l)                 = copy(C, C.locs(l))
-copy(C, (Proc typ e))      = (Proc typ e)
-copy(C, (TupleCons val^n)) = (TupleCons copy(val)^n)
+copy(C, c)                        = c
+copy(C, l)                        = copy(C, C.locs(l))
+copy(C, (proc typ_r [x typ]^n e)) = (proc typ_r [x typ]^n e)
+copy(C, (tuple val^n))            = (tuple val^n)
 ```
 
 #### Type Safety
