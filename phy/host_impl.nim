@@ -160,9 +160,7 @@ proc hostProcedures*(includeTest: bool): Table[string, VmCallback] =
     # XXX: we cannot pass a cstring back into the VM
     ret 0
   hostProc "cstr.strtod":
-    # XXX: this implementation breaks sandboxing when the cstring is not
-    #      properly NUL-terminated, which is easily exploitable by adversarial
-    #      code, but this is not really relevant at the moment. Hooking these
-    #      low-level C procedures is a bad idea anyway...
-    var tmp = strtod(cast[cstring](toHost(args[0].addrVal, 1)), nil)
-    ret tmp
+    let tmp = checkString(env, args[0].addrVal)
+    if not tmp.valid:
+      return CallbackResult(code: cecError)
+    ret strtod(tmp.p, nil)
