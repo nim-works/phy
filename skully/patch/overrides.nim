@@ -87,6 +87,12 @@ proc hook_fabs(a: float): float {.compilerproc.} =
   else:
     result = a
 
+proc hook_isnan(a: float): bool {.compilerproc.} =
+  # only works for IEEE 754 doubles
+  let bits = cast[uint64](a)
+  ((bits and 0x7ff0000000000000'u64) == 0x7ff0000000000000'u64) and
+    (bits and 0xFFFFFFFFFFFFF'u64) != 0
+
 # TODO: the overrides below should not be needed. Instead, the procedures
 #       calling these I/O and formatting procedures need to be hooked
 
