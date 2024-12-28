@@ -374,8 +374,9 @@ C |-_t e : typ
 -------------------------------------------------------- # S-type-decl
 C |- (TypeDecl x e) --> C + symbols with x -> (type typ)
 
-x_1 notin C.symbols  C |-_t e_1 : typ_1  C |- e_2 : typ_2 ...  typ_2 != void ...
-p = (ProcTy typ_1 typ_2 ...)  C + return = typ + symbols with x_1 -> p, x_2 -> typ_2 ... |- e : void
+x_1 notin C.symbols  x_1 != x_2 ...  x_2 notin C.symbols  |x_2| = |{x_2 ...}|  C |-_t e_1 : typ_1
+C |- e_2 : typ_2 ...  typ_2 != void ...  p = (ProcTy typ_1 typ_2 ...)
+C + return = typ + symbols with x_1 -> p, x_2 -> typ_2 ... |- e : void
 ---------------------------------------------------------------------------------------------------- # S-proc-decl
 C |- (ProcDecl x_1 e_1 (Params (ParamDecl x_2 e_2)*) e_3) --> C + symbols with x_1 -> p
 
