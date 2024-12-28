@@ -4,6 +4,7 @@
 
 import
   std/[
+    options,
     os,
     parseopt,
     streams,
@@ -362,23 +363,43 @@ proc main(args: openArray[string]) =
 
     print(module)
 
-    var env = initVm(1024, 1024 * 1024) # 1 MiB max memory
-    link(env, hostProcedures(gRunner), [module])
-
     # handle the eval command:
     if cmd == Eval:
-      if env.procs.len == 0:
+      var mem: MemoryConfig
+      if (let v = readMemConfig(module); v.isSome):
+        mem = v.unsafeGet
+      else:
+        error "invalid memory configuration"
+
+      # look for the procedure to start evaluation with:
+      var entry = none ProcIndex
+      if source == langSource:
+        # use the last exported procedure, if any
+        for i in countdown(module.exports.high, 0):
+          if module.exports[i].kind == expProc:
+            entry = some module.exports[i].id.ProcIndex
+            break
+      elif module.procs.len > 0:
+        # simply use the last procedure
+        entry = some module.procs.high.ProcIndex
+
+      if entry.isNone:
         if gRunner:
           discard "okay, silently ignore"
           return
         else:
           error "there's nothing to run"
 
+      # reserve the maximum amount of memory up-front
+      var env = initVm(mem.total, mem.total)
+      link(env, hostProcedures(gRunner), [module])
+      let stack = hoSlice(mem.stackStart, mem.stackStart + mem.stackSize)
+
       if source == langSource:
         # we have type high-level type information
-        stdout.write run(env, env.procs.high.ProcIndex, typ)
+        stdout.write run(env, stack, entry.unsafeGet, typ)
       else:
         # we don't have high-level type information
-        stdout.write run(env, env.procs.high.ProcIndex)
+        stdout.write run(env, stack, entry.unsafeGet)
 
 main(getExecArgs())

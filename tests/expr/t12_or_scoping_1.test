@@ -1,0 +1,13 @@
+discard """
+  description: "
+    Declarations in the first operand expression are visible to the `Or`s
+    second operand.
+  "
+  output: "true: bool"
+"""
+(Exprs
+  (Or
+    (Exprs
+      (Decl x true)
+      false)
+    x))

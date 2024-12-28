@@ -1,0 +1,10 @@
+discard """
+  output: ""
+"""
+(TypeDefs
+  (ProcTy (Int 8)))
+(GlobalDefs
+  (GlobalDef (Int 8) (IntVal 100)))
+(ProcDefs)
+(List
+  (Export "exported" (Global 0)))

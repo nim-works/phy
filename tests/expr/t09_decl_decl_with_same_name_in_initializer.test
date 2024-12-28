@@ -1,5 +1,5 @@
 discard """
-  reject: true
+  output: "200: int"
 """
 (Exprs
   (Decl (Ident "x")

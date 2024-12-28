@@ -1,15 +1,15 @@
 discard """
   description: "
-    Declarations in the first operand expression are part of the surrounding
-    scope.
+    Declarations in the first operand expression are *not* part of the
+    `Or`'s surrounding scope.
   "
-  output: "100: int"
+  reject: true
 """
 (Exprs
   (Decl (Ident "a")
-    (And
+    (Or
       (Exprs
         (Decl (Ident "b") (IntVal 100))
         (Ident "true"))
-      (Ident "true")))
+      (Ident "false")))
   (Ident "b"))
