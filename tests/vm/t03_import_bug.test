@@ -1,0 +1,15 @@
+discard """
+  description: "Regression test for a linker bug"
+  output: "(Done 100)"
+"""
+.type P1 (int) -> int
+.type P2 () -> int
+.start P2 p
+  LdImmInt 100
+  Ret
+.end
+.import P1 imported "test"
+.start P2 main
+  Call p 0
+  Ret
+.end
