@@ -282,7 +282,8 @@ proc genExpr(c; tree; val: NodeIndex) =
     let typ = parseType(tree, tree.child(val, 0))
     c.genExpr(tree, tree.child(val, 1))
     c.instr(opcBitNot)
-    c.mask(typ) # discard the unused higher bits
+    if typ.kind == t0kUInt:
+      c.mask(typ)
   of BitAnd:
     let (_, a, b) = tree.triplet(val)
     c.genExpr(tree, a)
