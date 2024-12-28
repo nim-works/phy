@@ -585,6 +585,9 @@ val_2 = copy(C, val_1)
 ----------------------------------------------------- # E-return
 C; B[(Frame typ E[(Return val_1)])]  -->  C; B[val_2]
 
+----------------------------------------------------- # E-return-unit
+C; B[(Frame typ E[(Return)])]  -->  C; B[(TupleCons)]
+
 B != []
 ------------------------------------------ # E-unreachable
 C; B[(Unreachable)]  -->  C; (Unreachable)
