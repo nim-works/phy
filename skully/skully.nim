@@ -127,6 +127,7 @@ const
   AddressBias = 4096
     ## must be added to all raw address values, in order to undo the
     ## offset applied to address value on memory access performed by the VM
+  StackSize = 1024 * 1024 # 1 MiB
 
 using
   bu: var Builder[NodeKind]
@@ -190,8 +191,7 @@ proc newGlobal(c; env: MirEnv, typ: TypeId): uint32 =
   # occupy the memory slot:
   c.globalsAddress += desc.size(env.types).uint32
 
-  # offset the ID by one, so the that ID 0 stays reserved for internal use
-  result = c.globals.high.uint32 + 1
+  result = c.globals.high.uint32
 
 proc newLabel(c: var ProcContext): uint32 =
   result = c.nextLabel
@@ -2815,21 +2815,40 @@ proc generateCode(graph: ModuleGraph): PackedTree[NodeKind] =
       bu.add it
 
   bu.subTree GlobalDefs:
-    # the global with ID 0 always stores the ID. The runner later reads the
-    # value in order to know where the stack should start
-    let stack = align(c.globalsAddress, 8) + AddressBias
-    bu.subTree GlobalDef:
-      bu.add node(UInt, 8)
-      bu.add node(IntVal, c.lit.pack(int64 stack))
-
     for it in c.globals.items:
       bu.subTree GlobalDef:
         bu.add node(UInt, 8)
         bu.add node(IntVal, c.lit.pack(it.address.int + AddressBias))
 
+    # the stack starts after the globals' memory region
+    c.globalsAddress = align(c.globalsAddress, 8)
+
+    # define the globals storing the memory configuration:
+    bu.subTree GlobalDef: # stack start
+      bu.add node(UInt, 8)
+      bu.add node(IntVal, c.lit.pack(c.globalsAddress.BiggestInt))
+    bu.subTree GlobalDef: # stack size
+      bu.add node(UInt, 8)
+      bu.add node(IntVal, c.lit.pack(StackSize))
+    bu.subTree GlobalDef: # total memory
+      bu.add node(UInt, 8)
+      bu.add node(IntVal, c.lit.pack(c.globalsAddress.BiggestInt + StackSize))
+
   bu.subTree ProcDefs:
     for id, it in procs.pairs:
       bu.add it
+
+  # the exports:
+  bu.subTree List:
+    bu.subTree Export:
+      bu.add Node(kind: StringVal, val: c.lit.pack("stack_start"))
+      bu.add Node(kind: Global, val: c.globals.len.uint32)
+    bu.subTree Export:
+      bu.add Node(kind: StringVal, val: c.lit.pack("stack_size"))
+      bu.add Node(kind: Global, val: c.globals.len.uint32 + 1)
+    bu.subTree Export:
+      bu.add Node(kind: StringVal, val: c.lit.pack("total_memory"))
+      bu.add Node(kind: Global, val: c.globals.len.uint32 + 2)
 
   result = initTree[NodeKind](finish(bu), c.lit)
 
