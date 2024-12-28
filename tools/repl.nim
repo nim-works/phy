@@ -160,8 +160,7 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
     if (let v = readMemConfig(module); v.isSome):
       mem = v.unsafeGet
     else:
-      # if reached, there's a bug in either source2il or the lowering passes
-      unreachable()
+      unreachable("memory config invalid; there's probably a bug in source2il")
 
     var env = initVm(mem.total, mem.total)
     link(env, hostProcedures(includeTest = false), [module])
