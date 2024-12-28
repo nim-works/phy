@@ -209,7 +209,7 @@ C |- (FloatTy): (type float)
 
 
 ----------------------------- # S-empty-tuple-type
-C |- (TupleTy) |- (type unit)
+C |- (TupleTy) : (type unit)
 ```
 
 ##### Identifiers
@@ -225,11 +225,11 @@ C |- x : typ
 ```
 C |- e : (type typ) ...  typ != void ...
 --------------------------------------------- # S-tuple-type
-C |- (TupleTy e+) |- (type (TupleTy typ ...))
+C |- (TupleTy e+) : (type (TupleTy typ ...))
 
 C |- e : (type typ) ...  typ != void ...  |{typ ...}| = |e| # each type must be unique
 ----------------------------------------------------------- # S-union-type
-C |- (UnionTy e+) |- (type (UnionTy typ ...))
+C |- (UnionTy e+) : (type (UnionTy typ ...))
 
 C |- res : (type typ_1)   C |- e : (type typ_2) ...  typ_2 != void ...
 ---------------------------------------------------------------------- # S-proc-type
@@ -351,7 +351,7 @@ preservation for the later operational semantics.
 ```
 C |- e : typ_2  typ_2 <:= typ_1
 ------------------------------- # S-Frame
-(Frame typ_1 e) : typ_1
+C |- (Frame typ_1 e) : typ_1
 
 
 --------------------------------------------------------- # S-proc-val
@@ -377,7 +377,7 @@ p = (ProcTy typ_1 typ_2 ...)  C + return = typ + symbols with x_1 -> p, x_2 -> t
 C |- (ProcDecl x_1 e_1 (Params (ParamDecl x_2 e_2)*) e_3) --> C + symbols with x_1 -> p
 
 
---------------------
+-------------------- # S-empty-module
 C |- (Module) --> C
 
 C_n |- decl --> C_n+1 ...
