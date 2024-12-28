@@ -42,7 +42,7 @@ proc c_ferror(f: CFilePtr): cint {.
   importc: "ferror", header: "<stdio.h>".}
 
 proc strtod(buf: cstring, endptr: ptr cstring): float64 {.
-  importc: "strtod", header: "<string.h>".}
+  importc: "strtod", header: "<stdlib.h>".}
 
 proc checkString(env: VmEnv, a: VirtualAddr): tuple[valid: bool, p: cstring] =
   ## Translates the guest character array pointer to a host pointer.
