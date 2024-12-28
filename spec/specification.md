@@ -165,7 +165,7 @@ typ_1 <: (UnionTy typ_1 typ_2 ...) # | a type is a subtype of `UnionTy` if it's
                                    # | a part of the union (in any position)
 ```
 
-#### Typing Judgments
+#### Typing Rules
 
 This section describes how types are assigned to the abstract syntax. An
 abstract syntax tree is well-formed if and only if a type can be assigned to
@@ -184,56 +184,55 @@ Unless explicitly stated otherwise, a deduction rule's conclusion is always
 a single *typing judgement*, whereas a premise may be either a
 *typing judgment* or *side condition*.
 
+Type expressions use a separate set of rules. They're identified by the
+conclusion being a judgments of the form `C |-_t x : typ`.
+
 ##### Primitive Types
 
 ```
 
--------------------------- # S-void-type
-C |- (VoidTy): (type void)
+--------------------- # S-void-type
+C |-_t (VoidTy): void
 
 
--------------------------- # S-unit-type
-C |- (UnitTy): (type unit)
+--------------------- # S-unit-type
+C |-_t (UnitTy): unit
 
 
--------------------------- # S-bool-type
-C |- (BoolTy): (type bool)
+--------------------- # S-bool-type
+C |-_t (BoolTy): bool
 
 
------------------------- # S-int-type
-C |- (IntTy): (type int)
+------------------- # S-int-type
+C |-_t (IntTy): int
 
 
----------------------------- # S-float-type
-C |- (FloatTy): (type float)
+----------------------- # S-float-type
+C |-_t (FloatTy): float
 
 
------------------------------ # S-empty-tuple-type
-C |- (TupleTy) : (type unit)
-```
-
-##### Identifiers
-
-```
-x in C   C.symbols(x) = typ
---------------------------- # S-identifier
-C |- x : typ
+----------------------- # S-empty-tuple-type
+C |-_t (TupleTy) : unit
 ```
 
 ##### Composite Types
 
 ```
-C |- e : (type typ) ...  typ != void ...
---------------------------------------------- # S-tuple-type
-C |- (TupleTy e+) : (type (TupleTy typ ...))
+x in C.symbols  C.symbols(x) = (type typ)
+----------------------------------------- # S-type-ident
+C |-_t x : typ
 
-C |- e : (type typ) ...  typ != void ...  |{typ ...}| = |e| # each type must be unique
------------------------------------------------------------ # S-union-type
-C |- (UnionTy e+) : (type (UnionTy typ ...))
+C |-_t e : typ ...  typ != void ...
+------------------------------------------ # S-tuple-type
+C |-_t (TupleTy e+) : (TupleTy typ ...)
 
-C |- res : (type typ_1)   C |- e : (type typ_2) ...  typ_2 != void ...
----------------------------------------------------------------------- # S-proc-type
-C |- (ProcTy res e*) : (type (ProcTy typ_1 typ_2 ...))
+C |-_t e : typ ...  typ != void ...  |{typ ...}| = |e| # each type must be unique
+------------------------------------------------------ # S-union-type
+C |-_t (UnionTy e+) : (UnionTy typ ...)
+
+C |-_t res : typ_1   C |-_t e : typ_2 ...  typ_2 != void ...
+------------------------------------------------------------ # S-proc-type
+C |-_t (ProcTy res e*) : (ProcTy typ_1 typ_2 ...)
 ```
 
 ##### Expressions
@@ -268,6 +267,10 @@ C |- (TupleCons) : unit
 
 ------------------------- # S-unreachable
 C |- (Unreachable) : void
+
+x in C.symbols  C.symbols(x) = typ  typ != (type ...)
+----------------------------------------------------- # S-identifier
+C |- x : typ
 
 C |- e : All[typ] ...  typ != void ...
 --------------------------------------- # S-tuple
@@ -367,11 +370,11 @@ C_1 |- e --> C_2
 which is read as "under context `C_1`, `e` *steps to* context `C_2`".
 
 ```
-C |- e : (type typ)
+C |-_t e : typ
 -------------------------------------------------------- # S-type-decl
 C |- (TypeDecl x e) --> C + symbols with x -> (type typ)
 
-x_1 notin C.symbols  C |- e_1 : (type typ_1)  C |- e_2 : (type typ_2) ...  typ_2 != void ...
+x_1 notin C.symbols  C |-_t e_1 : typ_1  C |- e_2 : typ_2 ...  typ_2 != void ...
 p = (ProcTy typ_1 typ_2 ...)  C + return = typ + symbols with x_1 -> p, x_2 -> typ_2 ... |- e : void
 ---------------------------------------------------------------------------------------------------- # S-proc-decl
 C |- (ProcDecl x_1 e_1 (Params (ParamDecl x_2 e_2)*) e_3) --> C + symbols with x_1 -> p
