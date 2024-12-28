@@ -295,16 +295,17 @@ proc genExpr(c; tree; val: NodeIndex) =
     c.genExpr(tree, b)
     c.instr(opcBitOr)
   of BitXor:
-    c.genBinaryArithOp(tree, val, opcBitXor, opcBitXor, opcNop)
+    c.genBinaryOp(tree, val, opcBitXor, opcBitXor, opcNop)
   of Shl:
     let (typ, a, b) = triplet(tree, val)
     c.genExpr(tree, a)
     c.genExpr(tree, b)
     c.instr(opcShl)
     let t = parseType(tree, typ)
-    c.mask(t) # also cut off the upper bits for signed integers
-    if t.kind == t0kInt:
-      c.signExtend(t)
+    case t.kind
+    of t0kInt:  c.signExtend(t)
+    of t0kUInt: c.mask(t)
+    else:       unreachable()
   of Shr:
     let (typ, a, b) = triplet(tree, val)
     c.genExpr(tree, a)
