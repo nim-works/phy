@@ -1,0 +1,15 @@
+discard """
+  output: "(Done)"
+"""
+(TypeDefs
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0) 0 (Locals)
+    (List
+      (Block (Params)
+        (Drop
+          (BitXor (Int 4) (IntVal 0) (IntVal 0)))
+        (Drop
+          (BitXor (UInt 8) (IntVal 0) (IntVal 0)))
+        (Return)))))

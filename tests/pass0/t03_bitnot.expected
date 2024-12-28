@@ -1,0 +1,17 @@
+.type t0 () -> void
+.start t0 p0
+  LdImmInt 0
+  BitNot
+  Drop
+  LdImmInt 0
+  BitNot
+  Drop
+  LdImmInt 0
+  BitNot
+  Drop
+  LdImmInt 0
+  BitNot
+  Mask 32
+  Drop
+  Ret
+.end
