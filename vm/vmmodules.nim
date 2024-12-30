@@ -165,11 +165,11 @@ proc link*(env: var VmEnv, host: Table[string, VmCallback],
           tab[i] = (lkRedirect, exported[name])
         elif name in host:
           # the import imports a host procedure
-          let i = lookup.mgetOrPut(name, env.callbacks.len)
-          if i == env.callbacks.len: # is it a new table entry?
+          let cb = lookup.mgetOrPut(name, env.callbacks.len)
+          if cb == env.callbacks.len: # is it a new table entry?
             env.callbacks.add host[name]
 
-          tab[i] = (lkImportHost, i.uint32)
+          tab[i] = (lkImportHost, cb.uint32)
         else:
           # the import cannot be resolved, turn the procedure entry into
           # a stub

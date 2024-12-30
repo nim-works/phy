@@ -282,7 +282,8 @@ proc genExpr(c; tree; val: NodeIndex) =
     let typ = parseType(tree, tree.child(val, 0))
     c.genExpr(tree, tree.child(val, 1))
     c.instr(opcBitNot)
-    c.mask(typ) # discard the unused higher bits
+    if typ.kind == t0kUInt:
+      c.mask(typ)
   of BitAnd:
     let (_, a, b) = tree.triplet(val)
     c.genExpr(tree, a)
@@ -294,16 +295,17 @@ proc genExpr(c; tree; val: NodeIndex) =
     c.genExpr(tree, b)
     c.instr(opcBitOr)
   of BitXor:
-    c.genBinaryArithOp(tree, val, opcBitXor, opcBitXor, opcNop)
+    c.genBinaryOp(tree, val, opcBitXor, opcBitXor, opcNop)
   of Shl:
     let (typ, a, b) = triplet(tree, val)
     c.genExpr(tree, a)
     c.genExpr(tree, b)
     c.instr(opcShl)
     let t = parseType(tree, typ)
-    c.mask(t) # also cut off the upper bits for signed integers
-    if t.kind == t0kInt:
-      c.signExtend(t)
+    case t.kind
+    of t0kInt:  c.signExtend(t)
+    of t0kUInt: c.mask(t)
+    else:       unreachable()
   of Shr:
     let (typ, a, b) = triplet(tree, val)
     c.genExpr(tree, a)
