@@ -158,12 +158,13 @@ proc run*(env: var VmEnv, stack: HOslice[uint], prc: ProcIndex,
   of yrkStubCalled, yrkUser:
     unreachable() # shouldn't happen
 
-proc run*(env: var VmEnv, stack: HOslice[uint], prc: ProcIndex): string =
+proc run*(env: var VmEnv, stack: HOslice[uint], prc: ProcIndex,
+          cl: RootRef = nil): string =
   ## Runs the nullary procedure with index `prc` and returns the VM's result
   ## formatted as an S-expression.
   var thread = vm.initThread(env, prc, stack, @[])
 
-  let res = run(env, thread, nil)
+  let res = run(env, thread, cl)
   env.dispose(thread)
 
   # render the result:
