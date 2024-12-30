@@ -266,6 +266,11 @@ proc main(args: openArray[string]) =
         target = parseEnum[Language](arg)
       of "show":
         gShow.incl parseEnum[Language](arg)
+      of "":
+        # a `--` means "program arguments follow"
+        if cmd != Eval:
+          error "providing execution arguments requires eval mode"
+        break
       else:
         error "unknown option: " & key
     of cmdArgument:
@@ -399,7 +404,11 @@ proc main(args: openArray[string]) =
         # we have type high-level type information
         stdout.write run(env, stack, entry.unsafeGet, typ)
       else:
+        # program arguments are only supported for non-source-language
+        # programs at the moment
+        let cl = HostEnv(params: opts.remainingArgs())
+
         # we don't have high-level type information
-        stdout.write run(env, stack, entry.unsafeGet)
+        stdout.write run(env, stack, entry.unsafeGet, cl)
 
 main(getExecArgs())
