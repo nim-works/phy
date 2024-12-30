@@ -8,6 +8,12 @@ import
     vmenv
   ]
 
+type
+  HostEnv* = ref object of RootObj
+    ## Dynamic type of the object passed to the VM callbacks.
+    params*: seq[string]
+      ## the program's command-line parameters
+
 proc c_fopen(name, mode: cstring): CFilePtr {.
   importc: "fopen", header: "<stdio.h>".}
 
@@ -164,3 +170,28 @@ proc hostProcedures*(includeTest: bool): Table[string, VmCallback] =
     if not tmp.valid:
       return CallbackResult(code: cecError)
     ret strtod(tmp.p, nil)
+
+  # "pe" stands for "program environment"
+  hostProc "pe.paramCount":
+    ret HostEnv(cl).params.len
+  hostProc "pe.paramStr":
+    # 1st parameter: parameter index
+    # 2nd parameter: guest pointer to the destination character array (or nil)
+    # 3rd parameter: number of characters in the destination array
+    # returns: number of characters written. -1 signals an error
+    let
+      e   = HostEnv(cl)
+      arg = args[0].intVal
+    if arg >= 0 and arg < e.params.len:
+      if args[1].uintVal == 0:
+        # only return the required amount of space
+        ret e.params[arg].len
+      else:
+        let
+          dst = toHost(args[1].addrVal, args[2].uintVal)
+          num = min(args[2].intVal, e.params[arg].len)
+        if num > 0:
+          copyMem(dst, addr e.params[arg][0], num)
+        ret num
+    else:
+      ret -1
