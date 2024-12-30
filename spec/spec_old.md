@@ -1,5 +1,8 @@
 ## Phy Specification
 
+> Note: this document is outdated an no longer authoritative. It's kept around
+> for some of its ideas/directions, which haven't all been formalized yet.
+
 This document describes the semantics of the source language.
 
 A *program* consists of a single *module*. A *module* consists of zero or more

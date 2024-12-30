@@ -101,4 +101,4 @@ jobs:
         run: bin/passtool verify passes lang30
 
       - name: "Check the source language grammar"
-        run: bin/passtool verify spec spec
+        run: bin/passtool verify spec specification
