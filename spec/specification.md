@@ -185,7 +185,7 @@ a single *typing judgement*, whereas a premise may be either a
 *typing judgment* or *side condition*.
 
 Type expressions use a separate set of rules. They're identified by the
-conclusion being a judgments of the form `C |-_t x : typ`.
+conclusion being a judgment of the form `C |-_t x : typ`.
 
 ##### Primitive Types
 
@@ -454,7 +454,7 @@ Mutable state is modeled via locations.
 `e[x/y]` means "`e` with all occurrences of name `x` replaced with `y`".
 
 It is assumed that all identifiers referring to procedures were replaced with
-`(proc r [x p]* body)` prior to evaluation, where `x` and `typ` are the names
+`(proc r [x p]* body)` prior to evaluation, where `x` and `p` are the names
 and types of the procedure's parameters, `r` is the procedure's return type,
 and `body` is the procedure's body.
 
