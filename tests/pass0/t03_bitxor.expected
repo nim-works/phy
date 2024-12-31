@@ -1,0 +1,12 @@
+.type t0 () -> void
+.start t0 p0
+  LdImmInt 0
+  LdImmInt 0
+  BitXor
+  Drop
+  LdImmInt 0
+  LdImmInt 0
+  BitXor
+  Drop
+  Ret
+.end

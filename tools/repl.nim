@@ -2,6 +2,7 @@
 
 import
   std/[
+    options,
     streams,
     strutils
   ],
@@ -38,6 +39,7 @@ import
     vmexec
   ],
   vm/[
+    utils,
     vmenv,
     vmmodules,
     vmvalidation
@@ -144,20 +146,28 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
     m = m.apply(pass_stackAlloc.lower(m, 8))
     m = m.apply(pass_inlineTypes.lower(m))
 
-    # generate the bytecode:
-    var env = initVm(1024, 1024 * 1024)
-    link(env, hostProcedures(includeTest = false), [translate(m)])
+    let module = translate(m)
 
-    # make sure the bytecode and environment is correct:
-    let errors = validate(env)
+    # make sure the module is correct:
+    let errors = validate(module)
     if errors.len > 0:
       for it in errors.items:
         echo it
       echo "validation failure"
       return
 
+    var mem: MemoryConfig
+    if (let v = readMemConfig(module); v.isSome):
+      mem = v.unsafeGet
+    else:
+      unreachable("memory config invalid; there's probably a bug in source2il")
+
+    var env = initVm(mem.total, mem.total)
+    link(env, hostProcedures(includeTest = false), [module])
+
     # eval and print:
-    echo run(env, ProcIndex(env.procs.high), typ)
+    echo run(env, hoSlice(mem.stackStart, mem.stackStart + mem.stackSize),
+             ProcIndex(env.procs.high), typ)
   else:
     echo "Error: unexpected node: ", tree[NodeIndex(0)].kind
 

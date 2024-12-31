@@ -282,7 +282,8 @@ proc genExpr(c; tree; val: NodeIndex) =
     let typ = parseType(tree, tree.child(val, 0))
     c.genExpr(tree, tree.child(val, 1))
     c.instr(opcBitNot)
-    c.mask(typ) # discard the unused higher bits
+    if typ.kind == t0kUInt:
+      c.mask(typ)
   of BitAnd:
     let (_, a, b) = tree.triplet(val)
     c.genExpr(tree, a)
@@ -294,16 +295,17 @@ proc genExpr(c; tree; val: NodeIndex) =
     c.genExpr(tree, b)
     c.instr(opcBitOr)
   of BitXor:
-    c.genBinaryArithOp(tree, val, opcBitXor, opcBitXor, opcNop)
+    c.genBinaryOp(tree, val, opcBitXor, opcBitXor, opcNop)
   of Shl:
     let (typ, a, b) = triplet(tree, val)
     c.genExpr(tree, a)
     c.genExpr(tree, b)
     c.instr(opcShl)
     let t = parseType(tree, typ)
-    c.mask(t) # also cut off the upper bits for signed integers
-    if t.kind == t0kInt:
-      c.signExtend(t)
+    case t.kind
+    of t0kInt:  c.signExtend(t)
+    of t0kUInt: c.mask(t)
+    else:       unreachable()
   of Shr:
     let (typ, a, b) = triplet(tree, val)
     c.genExpr(tree, a)
@@ -660,8 +662,23 @@ proc translate*(module: PackedTree[NodeKind]): VmModule =
       result.ehTable.add prc.ehTable
     else:
       # must be a host procedure
-      result.host.add module.getString(module.child(def, 1))
+      result.names.add module.getString(module.child(def, 1))
 
       result.procs.add ProcHeader(kind: pkCallback,
                                   typ: module[def, 0].typ)
-      result.procs[i].code.a = result.host.high.uint32
+      result.procs[i].code.a = result.names.high.uint32
+
+  # add the exports, if any:
+  if module.len(NodeIndex 0) == 4: # is there an export list?
+    let exports = module.next(procs)
+    for it in module.items(exports):
+      var ex = Export(name: result.names.len.uint32,
+                      id:   module[it, 1].id.uint32)
+      ex.kind =
+        case module[it, 1].kind
+        of Proc:   expProc
+        of Global: expGlobal
+        else:      unreachable()
+
+      result.exports.add ex
+      result.names.add module.getString(module.child(it, 0))

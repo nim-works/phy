@@ -1,0 +1,20 @@
+discard """
+  description: "
+    Ensure that procedure imports for which an exported procedure exist are
+    resolved properly
+  "
+  output: "(Done 1)"
+"""
+.type P1 () -> int
+.start P1 p
+  LdImmInt 1
+  Ret
+.end
+
+.export proc p "p.exported"
+.import P1 imported "p.exported"
+
+.start P1 main
+  Call imported 0
+  Ret
+.end

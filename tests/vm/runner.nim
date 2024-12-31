@@ -4,15 +4,21 @@ import
   std/[
     os,
     streams,
-    strutils
+    strutils,
+    tables
   ],
   vm/[
     assembler,
     vm,
     vmenv,
+    vmmodules,
     vmtypes,
     vmvalidation
   ]
+
+proc test(env: var VmEnv, args: openArray[Value], _: RootRef): CallbackResult =
+  ## A VM callback, created for the purpose of testing.
+  CallbackResult(code: cecValue, value: args[0])
 
 # 1MB max memory for the VM should be plenty enough for the tests
 var
@@ -32,7 +38,7 @@ else:
 # read all lines and pass them to the assembler:
 while not s.atEnd:
   try:
-    asmbl.process(s.readLine(), env)
+    asmbl.process(s.readLine())
     inc line
   except AssemblerError, ValueError:
     stderr.writeLine("In line " & $line & ": " & getCurrentExceptionMsg())
@@ -40,12 +46,21 @@ while not s.atEnd:
 
 s.close()
 
-# make sure the environment is valid:
-let errors = validate(env)
+# make sure the assembled module is correct:
+let
+  module = asmbl.close()
+  errors = validate(module)
 if errors.len > 0:
   for it in errors.items:
     stderr.writeLine(it)
   quit(1)
+
+link(env, toTable({"test": test}), [module])
+
+if env.procs.len == 0:
+  # there's nothing to execute, but don't treat this as an error
+  stdout.write("<no procedures>")
+  quit(0)
 
 var
   res: YieldReason

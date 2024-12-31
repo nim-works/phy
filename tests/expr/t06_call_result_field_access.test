@@ -1,0 +1,12 @@
+discard """
+  description: "
+    A call expression can be used directly as a field access operand
+  "
+  output: "1: int"
+"""
+(Module
+  (ProcDecl p (TupleTy (IntTy)) (Params)
+    (Return (TupleCons 1)))
+  (ProcDecl main (IntTy) (Params)
+    (Return
+      (FieldAccess (Call p) 0))))

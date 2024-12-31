@@ -1,0 +1,9 @@
+discard """
+  output: "(Done 0)"
+"""
+.type P1 () -> int
+.start P1 main
+  LdImmFloat -1
+  FloatToUInt 8
+  Ret
+.end

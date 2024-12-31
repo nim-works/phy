@@ -1,5 +1,8 @@
 ## Phy Specification
 
+> Note: this document is outdated an no longer authoritative. It's kept around
+> for some of its ideas/directions, which haven't all been formalized yet.
+
 This document describes the semantics of the source language.
 
 A *program* consists of a single *module*. A *module* consists of zero or more
@@ -154,6 +157,9 @@ There is always a *current* scope.
 
 *Closing a scope* means replacing the current scope with its parent.
 
+Unless explicitly noted otherwise, by default, an expression always opens a
+new scope for itself and its sub-expressions.
+
 ### Expressions
 
 At the moment, a few names are automatically part of a scope: `+`, `-`, `==`,
@@ -205,14 +211,13 @@ expr += (If cond:<expr> body:<expr> else:<expr>?)
 the `body` expression, otherwise the `else` expression -- if there's no `else`
 expression, it is assumed to be `unit`.
 
-For both `body` and `else`, a new scope is opened for the expressions and
-closed afterwards.
+The `cond` expression doesn't open a new scope for itself.
 
 Let `A` be the type of `body` and `B` be type of `else` (which is `unit`, if
 there's no `else`). An error is reported if:
 * `cond` is a not a boolean expression, or
 * `A` is not the same type as `B`, and `A` is not a subtype of `B` nor is `B` a
-  subtype of `A` 
+  subtype of `A`
 
 The type of the `If` expression is the common type between `A` and `B`.
 
@@ -372,6 +377,9 @@ expression is any type outside of `unit` or `void`.
 
 The type of the expression list is inferred as `void` if any non-trailing
 expression is `void`, otherwise the type is that of the trailing expression.
+
+Expressions appearing as an *immediate* sub-expression of the expression list
+do not open a new scope for themselves.
 
 **Expression kind**: same as that of the trailing expression
 **Uses**: nothing

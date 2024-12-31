@@ -9,10 +9,11 @@
 import
   std/[algorithm, sequtils, tables],
   passes/[builders, ir, spec, trees],
-  phy/[reporting, tree_parser, types],
+  phy/[reporting, tree_parser, type_rendering, types],
   vm/[utils]
 
 from std/strutils import `%`
+from vm/vmalloc import AddressBias
 
 import passes/spec_source except NodeKind
 
@@ -58,6 +59,8 @@ type
     procList*: seq[ProcInfo]
     globals: Builder[NodeKind]
       ## the in-progress global variable section
+    exports: Builder[NodeKind]
+      ## the in-progress export section
 
     procTypeCache: Table[SemType, uint32]
       ## caches the ID of IL signature types generated for procedure types.
@@ -69,8 +72,6 @@ type
 
     # procedure context:
     retType: SemType
-    returnParam: uint32
-      ## the index of the out parameter, if one is required
     locals: seq[SemType]
       ## all locals part of the procedure
     params: seq[tuple[typ: SemType, local: uint32]]
@@ -338,19 +339,14 @@ func numILParams(typ: SemType): int =
   ## Returns the number of parameters the IL signature type generated from
   ## `typ` is going to have.
   assert typ.kind == tkProc
-  typ.elems.len - 1 + ord(typ.elems[0].kind in AggregateTypes)
+  typ.elems.len - 1
 
 proc rawGenProcType(c; typ: SemType): uint32 =
   ## Generates the IL representation for the procedure signature type `typ`
   ## and adds it to `c`.
   assert typ.kind == tkProc
   let params = mapIt(typ.elems.toOpenArray(1, typ.elems.high)):
-    if it.kind in AggregateTypes:
-      # XXX: due to lack of support in the IL, aggregate values need to be
-      #      passed by address at the moment
-      c.typeToIL(pointerType)
-    else:
-      c.typeToIL(it)
+    c.typeToIL(it)
 
   template addParams() =
     for p in params.items:
@@ -361,16 +357,6 @@ proc rawGenProcType(c; typ: SemType): uint32 =
     c.addType ProcTy:
       c.types.subTree Void: discard
       addParams()
-  of AggregateTypes:
-    # aggregate types are passed via an out parameter.
-    # ``() -> T`` becomes ``(int) -> unit``
-    let
-      ret = c.typeToIL(prim(tkUnit))
-      arg = c.typeToIL(prim(tkInt))
-    c.addType ProcTy:
-      c.types.add Node(kind: Type, val: ret)
-      addParams()
-      c.types.add Node(kind: Type, val: arg)
   else:
     let typId = c.typeToIL(typ.elems[0])
     c.addType ProcTy:
@@ -450,6 +436,18 @@ proc capture(c; e: sink Expr; stmts): IrNode =
   stmts.add e.stmts
   stmts.add newAsgn(result, e.expr)
 
+proc inlineLvalue(c; e: sink Expr; stmts): IrNode =
+  ## Returns `e` as an l-value IL expression, committing `e` to a temporary
+  ## first if needed.
+  case e.expr.kind
+  of Local, At, Field, Deref:
+    stmts.add e.stmts
+    result = e.expr
+  else:
+    # IL r-value expressions cannot be used where an l-value expression is
+    # expected; going through a temporary solves this
+    result = c.capture(e, stmts)
+
 proc fitExpr(c; e: sink Expr, target: SemType): Expr =
   ## Makes sure `e` fits into the `target` type, returning the expression
   ## with the appropriate conversion operation applied. If the type of `e`
@@ -498,13 +496,16 @@ proc fitExprStrict(c; e: sink Expr, typ: SemType): Expr =
     result = e # all good
   else:
     c.error("expected expression of type $1 but got type $2" %
-            [$typ.kind, $e.typ.kind])
+            [$typ, $e.typ])
     # turn into an error expression:
     result = Expr(stmts: e.stmts, typ: errorType())
 
 proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType
 
-proc exprToIL(c; t: InTree, n: NodeIndex): Expr =
+proc openExprToIL(c; t: InTree, n: NodeIndex): Expr =
+  ## Analyzes the given expression and generates the IL code for it. Symbols
+  ## introduced by the analysis *escape* into the enclosing scope, hence the
+  ## procedure's name.
   result.expr = IrNode(kind: None)
   (result.typ, result.attribs) = exprToIL(c, t, n, result.expr, result.stmts)
   # verify some postconditions:
@@ -513,11 +514,11 @@ proc exprToIL(c; t: InTree, n: NodeIndex): Expr =
   assert result.typ.kind in {tkVoid, tkError} or result.expr.kind != None,
          "non-void `Expr` must have a trailing expression"
 
-proc scopedExprToIL(c; t; n: NodeIndex): Expr =
+proc exprToIL(c; t; n: NodeIndex): Expr =
   ## Analyzes the given expression and generates the IL for it. Analysis
   ## happens within a new scope, which is discarded afterwards.
   c.openScope()
-  result = c.exprToIL(t, n)
+  result = c.openExprToIL(t, n)
   c.closeScope()
 
 template lenCheck(t; n: NodeIndex, expected: int) =
@@ -616,12 +617,7 @@ proc userCallToIL(c; t; n: NodeIndex, expr; stmts): SemType =
         # capture the value to ensure a correct evaluation order between the
         # argument expressions
         let tmp = c.capture(arg, stmts)
-        if arg.typ.kind in AggregateTypes:
-          # XXX: due to lack of support in the IL, aggregate values need to be
-          #      passed by address at the moment
-          call.add newAddr(tmp)
-        else:
-          call.add tmp
+        call.add tmp
 
         inc i
 
@@ -648,14 +644,6 @@ proc userCallToIL(c; t; n: NodeIndex, expr; stmts): SemType =
       stmts.add call
       # mark the non-exceptional call exit as unreachable:
       stmts.add newUnreachable()
-    of AggregateTypes:
-      # the value is not returned normally, but passed via an out parameter
-      let tmp = c.newTemp(callee.typ.elems[0])
-      call.add newAddr(tmp)
-      stmts.add newDrop(call)
-
-      # return the temporary as the expression
-      expr = tmp
     else:
       expr = call
 
@@ -798,12 +786,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       expr = newLocal(ent.id.uint32)
       result = c.locals[ent.id] + {Lvalue, Mutable}
     of ekParam:
-      if c.params[ent.id].typ.kind in AggregateTypes:
-        # aggregate parameters use pass-by-address
-        expr = newDeref(c.typeToIL(c.params[ent.id].typ),
-                        newLocal(c.params[ent.id].local))
-      else:
-        expr = newLocal(c.params[ent.id].local)
+      expr = newLocal(c.params[ent.id].local)
       result = c.params[ent.id].typ + {Lvalue}
     of ekProc:
       # expand to a procedure address (`ProcVal`), which is always correct;
@@ -819,10 +802,8 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
   of SourceKind.And, SourceKind.Or:
     let
       (a, b) = t.pair(n)
-      ea  = c.fitExprStrict(c.exprToIL(t, a), prim(tkBool))
-      # the second operand is evaluated conditionally, and it's thus placed
-      # within its own scope
-      eb  = c.fitExprStrict(c.scopedExprToIL(t, b), prim(tkBool))
+      ea  = c.fitExprStrict(c.openExprToIL(t, a), prim(tkBool))
+      eb  = c.fitExprStrict(c.exprToIL(t, b), prim(tkBool))
       tmp = c.newTemp(prim(tkBool))
 
     if t[n].kind == SourceKind.And:
@@ -842,20 +823,20 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
   of SourceKind.If:
     let
       (p, b) = t.pair(n) # predicate and body, always present
-      cond = exprToIL(c, t, p)
+      cond = openExprToIL(c, t, p)
     if cond.typ.kind != tkBool:
       c.error("`If` condition must be a boolean expression")
 
     let
-      body = scopedExprToIL(c, t, b)
-      els = if t.len(n) == 3: scopedExprToIL(c, t, t.child(n, 2))
+      body = exprToIL(c, t, b)
+      els = if t.len(n) == 3: exprToIL(c, t, t.child(n, 2))
             else:             unitExpr
       typ = commonType(body.typ, els.typ)
       (fb, fe) =
         case typ.kind
         of tkError:
           c.error("if ($1) and else ($2) branches cannot be unified into a single type" %
-                  [$body.typ.kind, $els.typ.kind])
+                  [$body.typ, $els.typ])
           (body, els)
         else:
           (c.fitExpr(body, typ), c.fitExpr(els, typ))
@@ -978,7 +959,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       let idx = t.getInt(b)
       if idx >= 0 and idx < tup.typ.elems.len:
         result = tup.typ.elems[idx] + tup.attribs
-        expr = newFieldExpr(inline(tup, stmts), idx.int)
+        expr = newFieldExpr(inlineLvalue(c, tup, stmts), idx.int)
       else:
         c.error("tuple has no element with index " & $idx)
         result = errorType() + {Lvalue, Mutable}
@@ -1017,11 +998,6 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
     case e.typ.kind
     of tkError:
       discard "do nothing"
-    of AggregateTypes:
-      # special handling for aggregate types: store through the out parameter
-      stmts.add newAsgn(newDeref(c.typeToIL(e.typ), newLocal(c.returnParam)),
-                        e.expr)
-      stmts.add newReturn(UnitNode)
     else:
       stmts.add newReturn(e.expr)
 
@@ -1036,7 +1012,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       if not seenVoidExpr:
         body
     for i, si in t.pairs(n):
-      let e = c.exprToIL(t, si)
+      let e = c.openExprToIL(t, si)
       voidGuard:
         stmts.add e.stmts
       if i == last:
@@ -1055,7 +1031,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
             stmts.add newDrop(e.expr)
         else:
           c.error("non-trailing expressions must be unit or void, got: $1" %
-                    [$e.typ.kind])
+                    [$e.typ])
           voidGuard:
             stmts.add newDrop(e.expr) # error correction
   of SourceKind.Decl:
@@ -1071,33 +1047,52 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
                      types: initBuilder[NodeKind](TypeDefs),
                      procs: initBuilder[NodeKind](ProcDefs),
                      globals: initBuilder[NodeKind](GlobalDefs),
+                     exports: initBuilder[NodeKind](List),
                      # start with the top-level scope
                      scopes: @[default(Scope)])
 
   template c: untyped = result
 
+  # XXX: the maximum amount of heap memory is currently static and allocated
+  #      up-front
   const
-    AddressBias = 4096
-    # XXX: the maximum amount of heap memory is currently static and allocated
-    #      up-front
-    HeapSize = 1024 * 1024 * 4 # 4 MiB
+    StackSize = 1024 * 4        # 4 KiB
+    HeapSize  = 1024 * 1024 * 4 # 4 MiB
+    HeapStart = AddressBias + StackSize + 8
+
+  # note: the virtual address range below ``AddressBias`` is reserved.
+  # Memory layout:
+  # +----------+-------+------+------+
+  # | reserved | stack | mgmt | heap |
+  # +----------+-------+------+------+
+  # The 'mgmt' section stores the data necessary for managing the heap.
 
   # globals and their meaning:
-  # * 0: immutable pointer to the start of the stack
-  # * 1: immutable pointer to the start of the heap
-  # * 2: mutable pointer to the start of the free heap
+  # * 0: size of the stack size
+  # * 1: address of the start of the heap
+  # * 2: address of the end of the heap
+  # * 3: address of the heap management data
   c.globals.subTree GlobalDef:
     c.globals.add Node(kind: UInt, val: 8)
-    c.globals.add Node(kind: IntVal, val: AddressBias + 8 + HeapSize)
+    c.globals.add Node(kind: IntVal, val: StackSize)
   c.globals.subTree GlobalDef:
     c.globals.add Node(kind: UInt, val: 8)
-    c.globals.add Node(kind: IntVal, val: AddressBias + 8)
-  # XXX: globals cannot be mutable at the moment, and so the heap pointer
-  #      global stores the address of a mutable cell which stores the actual
-  #      value
+    c.globals.add Node(kind: IntVal, val: HeapStart)
   c.globals.subTree GlobalDef:
     c.globals.add Node(kind: UInt, val: 8)
-    c.globals.add Node(kind: IntVal, val: AddressBias)
+    c.globals.add Node(kind: IntVal, val: HeapStart + HeapSize)
+  c.globals.subTree GlobalDef:
+    c.globals.add Node(kind: UInt, val: 8)
+    c.globals.add Node(kind: IntVal, val: HeapStart - 8)
+
+  c.exports.subTree Export:
+    c.exports.add Node(kind: StringVal, val: c.literals.pack("stack_size"))
+    c.exports.add Node(kind: Global, val: 0)
+  # the end-of-heap pointer is taken to also represent the amount of total
+  # guest memory (which is not entirely correct, due to the address bias)
+  c.exports.subTree Export:
+    c.exports.add Node(kind: StringVal, val: c.literals.pack("total_memory"))
+    c.exports.add Node(kind: Global, val: 2)
 
   # add the built-in allocator and seq procedures
   # XXX: these need to be provided by a system-like module in the future
@@ -1106,25 +1101,25 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
     discard addProc(result, typ, parseSexp[NodeKind](body % args, c.literals))
 
   # the allocator uses a simple bump-pointer allocation scheme where memory
-  # is never freed for re-use. When heap memory is exhausted, an
+  # is never freed for re-use. When the heap memory is exhausted, an
   # exception/panic is raised
   const AllocBody = """
     (ProcDef (Type $1)
       (Params (Local 0))
       (Locals (Type $2) (Type $2))
       (Stmts
-        (If (Eq (Type $2) (Load (Type $2) (Copy (Global 2))) (IntVal 0))
+        (If (Eq (Type $2) (Load (Type $2) (Copy (Global 3))) (IntVal 0))
           (Asgn (Local 1) (Copy (Global 1)))
-          (Asgn (Local 1) (Load (Type $2) (Copy (Global 2)))))
+          (Asgn (Local 1) (Load (Type $2) (Copy (Global 3)))))
         (If
           (Le (Type $2)
             (Add (Type $2)
               (Copy (Local 0))
               (Copy (Local 1)))
-            (Copy (Global 0)))
+            (Copy (Global 2)))
           (Stmts
             (Store (Type $2)
-              (Copy (Global 2))
+              (Copy (Global 3))
               (Add (Type $2)
                 (Copy (Local 1))
                 (Copy (Local 0))))
@@ -1141,6 +1136,7 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
       (Locals (Type $2))
       (Return (IntVal 0)))
   """
+  procTy = SemType(kind: tkProc, elems: @[prim(tkUnit), pointerType])
   addProc procTy, DeallocBody,
           [$c.genProcType(procTy), $c.typeToIL(prim(tkInt))]
 
@@ -1162,6 +1158,9 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
         )
       )
   """
+  procTy = SemType(kind: tkProc,
+                   elems: @[pointerType, pointerType, prim(tkInt),
+                            prim(tkInt)])
   addProc procTy, ReallocBody,
           [$c.genProcType(procTy), $c.typeToIL(prim(tkInt))]
 
@@ -1258,28 +1257,17 @@ proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
     bu.add finish(move c.types)
     bu.add finish(move c.globals)
     bu.add finish(move c.procs)
+    let exports = finish(move c.exports)
+    if exports.len > 1: # don't add an empty export list
+      bu.add exports
 
   initTree[NodeKind](finish(bu), c.literals)
 
 proc exprToIL*(c; t): SemType =
   ## Translates the given source language expression to the highest-level IL
   ## and turns it into a procedure. Also returns the type of the expression.
-  var e = c.scopedExprToIL(t, NodeIndex(0))
+  var e = c.exprToIL(t, NodeIndex(0))
   result = e.typ
-
-  if e.typ.kind in AggregateTypes:
-    # XXX: to properly handle non-primitive returns, the expression is
-    #      currently analysed twice
-    c.resetProcContext() # undo the effects
-    c.locals.add prim(tkInt) # add the pointer parameter
-    c.returnParam = 0
-    c.retType = e.typ
-    # crudely wrap the expression in a Return:
-    let t =
-      initTree(@[TreeNode[SourceKind](kind: SourceKind.Return, val: 1)] & t.nodes,
-               t.literals)
-    # analyse again:
-    e = c.scopedExprToIL(t, NodeIndex(0))
 
   defer:
     c.resetProcContext()
@@ -1312,6 +1300,11 @@ proc exprToIL*(c; t): SemType =
           use(e.expr, c.literals, bu)
 
   c.procList.add ProcInfo(typ: procType(result))
+  # add the procedure as an export, to be able to look it up from the outside
+  c.exports.subTree Export:
+    let id = c.procList.high
+    c.exports.add Node(kind: StringVal, val: c.literals.pack("expr." & $id))
+    c.exports.add Node(kind: Proc, val: id.uint32)
 
 proc declToIL*(c; t; n: NodeIndex) =
   ## Translates the given source language declaration to the target IL.
@@ -1350,18 +1343,10 @@ proc declToIL*(c; t; n: NodeIndex) =
 
       # add the local and register the entity regadless of whether there was
       # an error
-      if procTy.elems[i + 1].kind in AggregateTypes:
-        c.locals.add pointerType # the parameter is of pointer type internally
-      else:
-        c.locals.add procTy.elems[i + 1]
+      c.locals.add procTy.elems[i + 1]
 
       c.params.add (procTy.elems[i + 1], c.locals.high.uint32)
       c.addDecl(name, Entity(kind: ekParam, id: c.params.high))
-
-    if c.retType.kind in AggregateTypes:
-      # needs an extra pointer parameter
-      c.locals.add prim(tkInt)
-      c.returnParam = uint32(c.locals.len - 1)
 
     # analyse the body:
     let e = c.exprToIL(t, t.child(n, 3))
@@ -1388,6 +1373,14 @@ proc declToIL*(c; t; n: NodeIndex) =
         convert(it, c.literals, bu)
 
     c.procs.add finish(bu)
+    # add the user-defined procedure as an export, to be able to look it up
+    # from the outside
+    c.exports.subTree Export:
+      # prefix with `module.` so that the name cannot collide with foreign
+      # procedure names (which use their own prefix)
+      c.exports.add Node(kind: StringVal,
+                         val: c.literals.pack("module." & name))
+      c.exports.add Node(kind: Proc, val: c.procList.high.uint32)
   of SourceKind.TypeDecl:
     let name = t.getString(t.child(n, 0))
     if c.lookup(name).kind != ekNone:

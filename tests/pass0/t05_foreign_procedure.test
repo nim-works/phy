@@ -6,7 +6,7 @@ discard """
   (ProcTy (Int 8)))
 (GlobalDefs)
 (ProcDefs
-  (Foreign (Type 0) "core.test")
+  (Import (Type 0) "core.test")
   (ProcDef (Type 1) 0 (Locals)
     (List
       (Block (Params)
