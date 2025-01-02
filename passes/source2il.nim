@@ -21,6 +21,7 @@ type
   SourceKind = spec_source.NodeKind
   InTree     = PackedTree[SourceKind]
   Node       = TreeNode[NodeKind]
+  NodeSeq    = seq[Node]
 
   EntityKind = enum
     ekNone        ## signals "non-existent"
@@ -59,8 +60,8 @@ type
     numTypes: int
     aliases: seq[SemType]
       ## the list of type aliases
-    procs: Builder[NodeKind]
-      ## the in-progress procedure section
+    procs: seq[NodeSeq]
+      ## all IL procedure definitions
     procList*: seq[ProcInfo]
     globals: Builder[NodeKind]
       ## the in-progress global variable section
@@ -77,6 +78,9 @@ type
 
     scopes: seq[Scope]
       ## the stack of scopes. The last item always represents the current scope
+
+    entry*: int
+      ## index of the module's entry procedure. -1 means that there's none
 
     # procedure context:
     retType: SemType
@@ -178,6 +182,16 @@ func openScope(c) =
 func closeScope(c) =
   ## Closes the current scope and makes its parent the current one.
   c.scopes.shrink(c.scopes.len - 1)
+
+template buildTree(kind: NodeKind, body: untyped): seq[Node] =
+  ## Injects a builder named `bu` into the scope of `body` and returns
+  ## the builder's nodes after evaluating `body`.
+  if true:
+    var bu {.inject.} = initBuilder(kind)
+    body
+    finish(bu)
+  else:
+    unreachable()
 
 template addType(c; kind: NodeKind, body: untyped): uint32 =
   c.types.subTree kind:
@@ -1241,11 +1255,11 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   ## Creates a new empty module translation/analysis context.
   result = ModuleCtx(reporter: reporter,
                      types: initBuilder[NodeKind](TypeDefs),
-                     procs: initBuilder[NodeKind](ProcDefs),
                      globals: initBuilder[NodeKind](GlobalDefs),
                      exports: initBuilder[NodeKind](List),
                      # start with the top-level scope
-                     scopes: @[default(Scope)])
+                     scopes: @[default(Scope)],
+                     entry: -1)
 
   template c: untyped = result
 
@@ -1452,7 +1466,9 @@ proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
   bu.subTree Module:
     bu.add finish(move c.types)
     bu.add finish(move c.globals)
-    bu.add finish(move c.procs)
+    bu.subTree ProcDefs:
+      for it in c.procs.items:
+        bu.add it
     let exports = finish(move c.exports)
     if exports.len > 1: # don't add an empty export list
       bu.add exports
@@ -1475,9 +1491,7 @@ proc exprToIL*(c; t): SemType =
     procTy    = procType(result)
     signature = c.genProcType(procTy)
 
-  template bu: untyped = c.procs
-
-  bu.subTree ProcDef:
+  let body = buildTree ProcDef:
     bu.add Node(kind: Type, val: signature)
     bu.subTree Params:
       for i in 0..<numILParams(procTy):
@@ -1495,7 +1509,9 @@ proc exprToIL*(c; t): SemType =
         bu.subTree Return:
           use(e.expr, c.literals, bu)
 
-  c.procList.add ProcInfo(typ: procType(result))
+  c.procs.add body
+  c.procList.add ProcInfo(typ: procTy)
+  c.entry = c.procList.high
   # add the procedure as an export, to be able to look it up from the outside
   c.exports.subTree Export:
     let id = c.procList.high
@@ -1526,9 +1542,10 @@ proc declToIL*(c; t; n: NodeIndex) =
 
     let signature = c.genProcType(procTy)
 
-    # register the proc before analysing/translating the body
-    c.procList.add ProcInfo(typ: procTy)
-    c.addDecl(name, Entity(kind: ekProc, id: c.procList.high))
+    # register the proc before analysing/translating the body. The real IL
+    # body is filled in once complete
+    let self = c.addProc(procTy, @[])
+    c.addDecl(name, Entity(kind: ekProc, id: self))
 
     c.openScope()
     # add the parameters to the scope:
@@ -1552,7 +1569,8 @@ proc declToIL*(c; t; n: NodeIndex) =
     if e.typ.kind != tkVoid:
       c.error("a procedure body must be a 'void' expression")
       c.removeDecl(name) # remove again
-      c.procList.del(c.procList.high)
+      c.procs.delete(self)
+      c.procList.delete(self)
       return
 
     var bu = initBuilder[NodeKind](ProcDef)
@@ -1568,7 +1586,8 @@ proc declToIL*(c; t; n: NodeIndex) =
       for it in e.stmts.items:
         convert(it, c.literals, bu)
 
-    c.procs.add finish(bu)
+    c.procs[self] = finish(bu)
+    c.entry = self
     # add the user-defined procedure as an export, to be able to look it up
     # from the outside
     c.exports.subTree Export:
@@ -1576,7 +1595,7 @@ proc declToIL*(c; t; n: NodeIndex) =
       # procedure names (which use their own prefix)
       c.exports.add Node(kind: StringVal,
                          val: c.literals.pack("module." & name))
-      c.exports.add Node(kind: Proc, val: c.procList.high.uint32)
+      c.exports.add Node(kind: Proc, val: self.uint32)
   of SourceKind.TypeDecl:
     let name = t.getString(t.child(n, 0))
     if c.lookup(name).kind != ekNone:
