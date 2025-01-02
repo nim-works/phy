@@ -326,6 +326,7 @@ proc typeToIL(c; typ: SemType): uint32 =
       pointerType = c.typeToIL(pointerType)
     c.addType Record:
       c.types.add Node(kind: Immediate, val: size(typ).uint32)
+      c.types.add Node(kind: Immediate, val: 8)
       # the length field:
       c.types.subTree Field:
         c.types.add Node(kind: Immediate, val: 0)
@@ -382,12 +383,14 @@ proc genPayloadType(c; typ: SemType): uint32 =
     elem = c.typeToIL(typ)
 
   let arrayType = c.addType Array:
-    c.types.add Node(kind: Immediate, val: 1)
+    c.types.add Node(kind: Immediate, val: 1) # size
+    c.types.add Node(kind: Immediate, val: 8) # alignment
     c.types.add Node(kind: Immediate, val: 0)
     c.types.add Node(kind: Type, val: elem)
 
   c.addType Record:
-    c.types.add Node(kind: Immediate, val: 9) # size of int
+    c.types.add Node(kind: Immediate, val: 9)
+    c.types.add Node(kind: Immediate, val: 8)
     # the capacity field:
     c.types.subTree Field:
       c.types.add Node(kind: Immediate, val: 0)
