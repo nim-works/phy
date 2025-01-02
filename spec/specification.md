@@ -241,7 +241,7 @@ Mutability is part of the type system. `All[typ]` means "matches `(mut typ)`
 and `typ`", which makes it writing deduction rules applicable to expression of
 both mutable and immutable type easier.
 
-`built_ins` is a set of names: `{==, <=, <, +, -, true, false}`.
+`built_ins` is a set of names: `{==, <=, <, +, -, *, div, true, false}`.
 
 ```
 
@@ -515,6 +515,22 @@ int_sub(val_1, val_2) = {}
 ---------------------------------------- # E-sub-int-overflow
 (Call - val_1 val_2)  ~~>  (Unreachable)
 
+val = int_mul(n_1, n_2)
+-------------------------- # E-mul-int
+(Call * n_1 n_2)  ~~>  val
+
+int_mul(n_1, n_2) = {}
+------------------------------------ # E-mul-int-overflow
+(Call * n_1 n_2)  ~~>  (Unreachable)
+
+val = int_div(n_1, n_2)
+---------------------------- # E-div-int
+(Call div n_1 n_2)  ~~>  val
+
+int_div(n_1, n_2) = {}
+-------------------------------------- # E-div-int-overflow
+(Call div n_1 n_2)  ~~>  (Unreachable)
+
 val_3 = float_add(val_1, val_2)
 -------------------------------- # E-add-float
 (Call + val_1 val_2)  ~~>  val_3
@@ -597,11 +613,22 @@ C; B[(Unreachable)]  -->  C; (Unreachable)
 
 Arithmetic functions:
 ```
+trunc(r) = +i (where r >= 0 ^ i in N ^ |r| - 1 < i <= |r|)
+         = -i (where r <  0 ^ i in N ^ |r| - 1 < i <= |r|)
+# ^^ round towards zero
+
 int_add(n_1, n_2) = n_1 + n_2  (where -2^63 <= n_1 - n_2 < 2^63)
                   = {}         (otherwise)
 
 int_sub(n_1, n_2) = n_1 - n_2  (where -2^63 <= n_1 - n_2 < 2^63)
                   = {}         (otherwise)
+
+int_mul(n_1, n_2) = n_1 * n_2  (where -2^63 <= n_1 * n_2 < 2^63)
+                  = {}         (otherwise)
+
+int_div(n_1, 0)   = {}
+int_div(n_1, n_2) = {}                (where n_1 = -2^63 ^ n_2 = -1)
+                  = trunc(n_1 / n_2)  (otherwise)
 
 float_add(real_1, real_2) = ?
 float_sub(real_1, real_2) = ?
