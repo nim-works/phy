@@ -560,12 +560,8 @@ length = |val|
 --------------------------- # E-builtin-len
 (Call len val)  ~~>  length
 
-val_3 = val_1 & val_2
-------------------------------------- # E-builtin-concat
-(Call concat val_1 val_2)  ~~>  val_3
-
-# TODO: & is a currently a magic operator that concatenates an array with an
-#       element. It needs to be defined properly
+---------------------------------------------------------------- # E-builtin-concat
+(Call concat (array val_1*) val_2)  ~~>  (array val_1 ... val_2)
 ```
 
 The impure notions of reduction are:
