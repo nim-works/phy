@@ -88,6 +88,8 @@ type
       ## all locals part of the procedure
     params: seq[tuple[typ: SemType, local: uint32]]
       ## the parameters for the procedure
+    cleanup: seq[IrNode]
+      ## the stack of destructor calls to emit at scope exits
 
   ExprFlag {.pure.} = enum
     Lvalue ## the expression is an lvalue. The flags absence implies
@@ -620,6 +622,7 @@ proc getTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
 
 proc resetProcContext(c) =
   c.locals.setLen(0) # re-use the memory
+  c.cleanup.setLen(0)
 
 proc newTemp(c; typ: SemType): IrNode =
   ## Allocates a new temporary of `typ` type.
@@ -741,9 +744,24 @@ proc openExprToIL(c; t: InTree, n: NodeIndex): Expr =
 proc exprToIL(c; t; n: NodeIndex): Expr =
   ## Analyzes the given expression and generates the IL for it. Analysis
   ## happens within a new scope, which is discarded afterwards.
+  let start = c.cleanup.len
   c.openScope()
   result = c.openExprToIL(t, n)
   c.closeScope()
+  if start < c.cleanup.len:
+    if result.typ.kind != tkVoid:
+      if Lvalue notin result.attribs:
+        # the expressions needs to be evaluated *before* the cleanup is
+        # performed. By convention, the value is owned, so no full copy is needed
+        let tmp = c.newTemp(result.typ)
+        result.stmts.add newAsgn(tmp, result.expr)
+        result.expr = tmp
+
+      # pop all cleanup statements from the stack and emit them
+      for i in countdown(c.cleanup.high, start):
+        result.stmts.add c.cleanup[i]
+
+    c.cleanup.shrink(start)
 
 template lenCheck(t; n: NodeIndex, expected: int) =
   ## Exits the current analysis procedure with an error, if `n` doesn't have
@@ -956,6 +974,11 @@ proc localDeclToIL(c; t; n: NodeIndex, stmts) =
 
   let local = c.newTemp(e.typ)
   stmts.add newAsgn(local, use(c, e, stmts))
+
+  # register for destruction after analyzing the initializer, so that non-
+  # linear control-flow (e.g., a return) doesn't destroy the local
+  if not isTriviallyCopyable(e.typ):
+    c.cleanup.add c.genDestroy(local, e.typ)
 
   # verify that the name isn't in use already *after* analyzing the
   # initializer; the expression could introduce an entity with the same name
@@ -1208,8 +1231,16 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
 
     # apply the necessary to-supertype conversions:
     e = c.fitExpr(e, c.retType)
-
-    stmts.add newReturn(use(c, e, stmts))
+    if c.cleanup.len > 0:
+      # needs an intermediate temporary to ensure that the evaluation order
+      # stays correct
+      let tmp = c.capture(e, stmts)
+      for i in countdown(c.cleanup.high, 0):
+        stmts.add c.cleanup[i]
+      stmts.add newReturn(tmp)
+    else:
+      # can return directly
+      stmts.add newReturn(use(c, e, stmts))
 
     result = prim(tkVoid) + {}
   of SourceKind.Unreachable:
