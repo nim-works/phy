@@ -42,6 +42,11 @@ type
 
   Scope = Table[string, Entity]
 
+  TypeAttachedOp = enum
+    ## Type-attached operators.
+    opDestroy
+    opCopy
+
   ModuleCtx* = object
     ## The translation/analysis context for a single module.
     reporter: ref ReportContext[string]
@@ -61,6 +66,9 @@ type
       ## the in-progress global variable section
     exports: Builder[NodeKind]
       ## the in-progress export section
+
+    typeOps: Table[(TypeAttachedOp, SemType), uint32]
+      ## caches the generated type-attached operators (i.e., procedures)
 
     procTypeCache: Table[SemType, uint32]
       ## caches the ID of IL signature types generated for procedure types.
@@ -405,6 +413,196 @@ proc addProc(c; typ: sink SemType, def: seq[Node]): int =
   c.procs.add def
   c.procList.add ProcInfo(typ: typ)
   result = c.procList.high
+
+proc getTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32
+
+proc genDestroy(c; e: sink IrNode, typ: SemType): IrNode =
+  newDrop(newCall(c.getTypeBoundOp(opDestroy, typ), e))
+
+proc genPayloadAccess(c; e: sink IrNode, typ: SemType): IrNode =
+  newDeref(c.genPayloadType(typ), newFieldExpr(e, 1))
+
+proc genSeqAccess(c; e, idx: sink IrNode, typ: SemType): IrNode =
+  newAt(newFieldExpr(c.genPayloadAccess(e, typ), 1), idx)
+
+proc genCapAccess(c; e: sink IrNode, typ: SemType): IrNode =
+  newFieldExpr(c.genPayloadAccess(e, typ), 0)
+
+proc newIntOp(c; op: NodeKind, a, b: sink IrNode): IrNode =
+  newBinaryOp(op, c.typeToIL(prim(tkInt)), a, b)
+
+proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
+  ## Synthesizes and emits the `op` type-bound operator for `typ`. Returns the
+  ## ID of the synthesized procedure; no caching is performed.
+  var
+    procTy: SemType
+    params: seq[uint32]
+    locals: seq[SemType]
+    body: IrNode
+
+  case op
+  of opDestroy:
+    # destroy(x: T) -> unit
+    procTy = SemType(kind: tkProc, elems: @[prim(tkUnit), typ])
+    params.add 0
+    locals.add typ # parameter
+    body = IrNode(kind: Stmts)
+    let src = newLocal(0)
+    # note: being trivially copyable implies being trivially destructible (and
+    # vice versa)
+
+    case typ.kind
+    of tkSeq:
+      let elem = typ.elems[0]
+      if not isTriviallyCopyable(elem):
+        # destroy the elements one by one
+        let idx = newLocal(1)
+        locals.add prim(tkInt) # idx local
+        var loopBody = IrNode(kind: Stmts)
+        loopBody.add newIf(c.newIntOp(Eq, idx, newFieldExpr(src, 0)),
+                           newBreak(1))
+        loopBody.add c.genDestroy(c.genSeqAccess(src, idx, typ), elem)
+        loopBody.add newAsgn(idx, c.newIntOp(Add, idx, newIntVal(1)))
+        body.add IrNode(kind: Loop, children: @[loopBody])
+
+      body.add newReturn(newCall(DeallocProc, newFieldExpr(src, 1)))
+    of tkTuple:
+      for i, it in typ.elems.pairs:
+        if not isTriviallyCopyable(it):
+          body.add c.genDestroy(newFieldExpr(src, i), it)
+
+      body.add newReturn(newIntVal(0))
+    of tkUnion:
+      # the grammar doesn't allow for field expressions as the selector, so an
+      # intermediate temporary is required
+      locals.add prim(tkInt)
+      body.add newAsgn(newLocal(1), newFieldExpr(src, 0))
+      var caseStmt = newCase(c.typeToIL(prim(tkInt)), newLocal(1))
+      for i, it in typ.elems.pairs:
+        if isTriviallyCopyable(it):
+          # nothing to destroy; emit an empty branch
+          caseStmt.add newChoice(newIntVal(i),
+            newBreak(0))
+        else:
+          caseStmt.add newChoice(newIntVal(i),
+            c.genDestroy(newFieldExpr(newFieldExpr(src, 1), i), it))
+
+      body.add caseStmt
+      body.add newReturn(newIntVal(0))
+    else:
+      unreachable()
+  of opCopy:
+    # copy(x: T) -> T
+    procTy = SemType(kind: tkProc, elems: @[typ, typ])
+    params.add 0
+    locals.add typ # parameter
+    locals.add typ # result
+    let
+      src = newLocal(0)
+      dst = newLocal(1)
+
+    case typ.kind
+    of tkSeq:
+      let
+        srcLen = newFieldExpr(src, 0)
+        dstLen = newFieldExpr(dst, 0)
+
+      var then = IrNode(kind: Stmts)
+      then.add newAsgn(dstLen, newIntVal(0))
+      then.add newAsgn(newFieldExpr(dst, 1), newIntVal(0))
+      then.add newReturn(dst)
+
+      var els = IrNode(kind: Stmts)
+      els.add newAsgn(dstLen, srcLen)
+      # the size of the payload is sizeof(capacity) + sizeof(element) * length
+      els.add newAsgn(newFieldExpr(dst, 1), newCall(AllocProc,
+        newBinaryOp(Add, c.typeToIL(prim(tkInt)),
+          newBinaryOp(Mul, c.typeToIL(prim(tkInt)),
+            srcLen,
+            newIntVal(size(typ.elems[0]))),
+          newIntVal(size(prim(tkInt))))))
+
+      els.add newAsgn(c.genCapAccess(dst, typ), srcLen)
+
+      # set up the loop counter:
+      let counter = newLocal(2)
+      locals.add prim(tkInt)
+      els.add newAsgn(counter, newIntVal(0))
+
+      var loopBody = IrNode(kind: Stmts)
+      loopBody.add newIf(c.newIntOp(Eq, counter, srcLen), newBreak(1))
+
+      let
+        srcElem = c.genSeqAccess(src, counter, typ)
+        dstElem = c.genSeqAccess(dst, counter, typ)
+
+      if isTriviallyCopyable(typ.elems[0]):
+        # XXX: using a memcopy to copy all elements at once would most likely
+        #      be faster
+        loopBody.add newAsgn(dstElem, srcElem)
+      else:
+        loopBody.add newAsgn(dstElem,
+          newCall(c.getTypeBoundOp(opCopy, typ.elems[0]), srcElem))
+
+      loopBody.add newAsgn(counter, c.newIntOp(Add, counter, newIntVal(1)))
+
+      els.add IrNode(kind: Loop, children: @[loopBody])
+      els.add newReturn(dst)
+      body = newIf(c.newIntOp(Eq, srcLen, newIntVal(0)), then, els)
+    of tkTuple:
+      body = IrNode(kind: Stmts)
+      # copy each tuple element from the source to the destination:
+      for i, it in typ.elems.pairs:
+        if isTriviallyCopyable(it):
+          body.add newAsgn(newFieldExpr(dst, i),
+            newFieldExpr(src, i))
+        else:
+          body.add newAsgn(newFieldExpr(dst, i),
+            newCall(c.getTypeBoundOp(opCopy, it), newFieldExpr(src, i)))
+
+      body.add newReturn(dst)
+    of tkUnion:
+      body = IrNode(kind: Stmts)
+      # copy the tag:
+      body.add newAsgn(newFieldExpr(dst, 0), newFieldExpr(src, 0))
+      # copy the value:
+      locals.add prim(tkInt)
+      # case statements in the target IL don't allow a field access as the
+      # selector, so an intermediate temporary is needed
+      body.add newAsgn(newLocal(2), newFieldExpr(dst, 0))
+      var caseStmt = newCase(c.typeToIL(prim(tkInt)), newLocal(2))
+      for i, it in typ.elems.pairs:
+        var val = newFieldExpr(newFieldExpr(src, 1), i)
+        if not isTriviallyCopyable(it):
+          val = newCall(c.getTypeBoundOp(opCopy, it), val)
+        caseStmt.add newChoice(newIntVal(i),
+          newAsgn(newFieldExpr(newFieldExpr(dst, 1), i), val))
+
+      body.add caseStmt
+      body.add newReturn(dst)
+    else:
+      unreachable() # no copy procedure needed
+
+  # assemble the final definition and add it to the module:
+  var bu = initBuilder(ProcDef)
+  bu.add Node(kind: Type, val: c.genProcType(procTy))
+  bu.subTree Params:
+    for it in params.items:
+      bu.add Node(kind: Local, val: it)
+  bu.subTree Locals:
+    for it in locals.items:
+      bu.add Node(kind: Type, val: c.typeToIL(it))
+  convert(body, c.literals, bu)
+  result = c.addProc(procTy, finish(bu)).uint32
+
+proc getTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
+  ## Returns the cached type-bound operator `op` for `typ`, or creates and
+  ## caches it first.
+  c.typeOps.withValue (op, typ), val:
+    result = val[]
+  do:
+    result = c.genTypeBoundOp(op, typ)
+    c.typeOps[(op, typ)] = result
 
 proc resetProcContext(c) =
   c.locals.setLen(0) # re-use the memory

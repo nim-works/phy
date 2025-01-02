@@ -129,3 +129,20 @@ proc commonType*(a, b: SemType): SemType =
     b
   else:
     errorType()
+
+proc isTriviallyCopyable*(typ: SemType): bool =
+  ## Whether a value of `typ` can be trivially copied (that is, via a
+  ## single block copy).
+  case typ.kind
+  of tkError, tkUnit, tkBool, tkInt, tkFloat, tkProc:
+    true
+  of tkSeq:
+    false
+  of tkUnion, tkTuple:
+    # trivially copyable only if all element types are
+    for it in typ.elems.items:
+      if not isTriviallyCopyable(it):
+        return false
+    true
+  of tkVoid:
+    unreachable()
