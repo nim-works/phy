@@ -29,6 +29,7 @@ expr     ::= <ident>
           |  <intVal>
           |  <floatVal>
           |  (TupleCons <expr>*)
+          |  (Seq <texpr> <expr>*)
           |  (Call <expr>+)
           |  (FieldAccess <expr> <intVal>)
           |  (And <expr> <expr>)
@@ -49,6 +50,7 @@ texpr    ::= <ident>
           |  (TupleTy <texpr>*)
           |  (UnionTy <texpr>+)
           |  (ProcTy <texpr>+)
+          |  (SeqTy <texpr>)
 
 param_decl ::= (ParamDecl <ident> <texpr>)
 decl       ::= (ProcDecl <ident> <texpr> (Params <param_decl>*) <expr>)
@@ -92,6 +94,7 @@ c   ::= n                           # corresponds to `(IntVal n)`
 l   ::= ...                         # first-class location
 val ::= <c>
      |  <l>
+     |  (array <val>+)              # array value
      |  (tuple <val>+)              # tuple value
      |  (proc <typ> [x <typ>]* <e>) # procedural value
 typ ::= void                        # corresponds to `(VoidTy)`
@@ -104,6 +107,7 @@ typ ::= void                        # corresponds to `(VoidTy)`
      |  (TupleTy <typ>+)
      |  (UnionTy <typ>+)
      |  (ProcTy  <typ>+)
+     |  (SeqTy   <typ>)
 le  ::= x                   # | subset of expressions where all non-lvalue
      |  (FieldAccess le n)  # | operands were already evaluated
 e   ::= x | val | typ | ... # includes all expressions from the abstract syntax
@@ -233,6 +237,10 @@ C |-_t (UnionTy e+) : (UnionTy typ ...)
 C |-_t res : typ_1   C |-_t e : typ_2 ...  typ_2 != void ...
 ------------------------------------------------------------ # S-proc-type
 C |-_t (ProcTy res e*) : (ProcTy typ_1 typ_2 ...)
+
+C |-_t e : typ  typ != void
+------------------------------ # S-seq-type
+C |-_t (SeqTy e) : (SeqTy typ)
 ```
 
 ##### Expressions
@@ -275,6 +283,10 @@ C |- x : typ
 C |- e : All[typ] ...  typ != void ...
 --------------------------------------- # S-tuple
 C |- (TupleCons e+) : (TupleTy typ ...)
+
+C |-_t e_1 : typ_1  C |- e_2 : All[typ_2] ...  typ_2 <:= typ_1 ...
+------------------------------------------------------------------ # S-seq-cons
+C |- (Seq e_1 e_2*) : (SeqTy typ_1)
 
 C |- e : All[typ]   C.return <:= typ
 ------------------------------------ # S-return
@@ -477,6 +489,7 @@ E  ::= []
     |  (Asgn E' n)
     |  (Asgn le E)
     |  (TupleCons val* E e*)
+    |  (Seq typ val* E e*)
     |  (Call val* E e*)
     |  (Call x val* E e*)
     |  (If E e e)
@@ -545,6 +558,10 @@ C; (FieldAccess l i)  ~~>  C; val_i
 val_2 = copy(C, val_1) ...
 ------------------------------------------------ # E-tuple-cons
 C; (TupleCons val_1+)  ~~>  C; (tuple val_2 ...)
+
+val_2 = copy(C, val_1) ...
+---------------------------------------------- # E-seq-cons
+C; (Seq typ val_1+)  ~~>  C; (array val_2 ...)
 
 l notin C.locs
 -------------------------------------------------------------- # E-let-introduce
@@ -625,6 +642,7 @@ copy (C, val) -> val
 copy(C, c)                        = c
 copy(C, l)                        = copy(C, C.locs(l))
 copy(C, (proc typ_r [x typ]^n e)) = (proc typ_r [x typ]^n e)
+copy(C, (array val^n))            = (array val^n)
 copy(C, (tuple val^n))            = (tuple val^n)
 ```
 
