@@ -107,8 +107,7 @@ const
     "<": ekBuiltinProc,
     "not": ekBuiltinProc,
     "len": ekBuiltinProc,
-    "add": ekBuiltinProc,
-    "clear": ekBuiltinProc,
+    "concat": ekBuiltinProc,
     "true": ekBuiltinVal,
     "false": ekBuiltinVal
   }.toTable
@@ -686,14 +685,12 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
           c.error("'len' operand must be of sequence type")
         expr = newFieldExpr(inline(e, stmts), 0)
         result = prim(tkInt)
-      of "add":
+      of "concat":
         lenCheck(t, n, 3)
         let s    = c.exprToIL(t, t.child(n, 1))
         var elem = c.exprToIL(t, t.child(n, 2))
         if s.typ.kind != tkSeq:
-          c.error("'add' expects sequence operand")
-        elif s.attribs * {Mutable, Lvalue} < {Mutable, Lvalue}:
-          c.error("'add' expects mutable lvalue sequence operand")
+          c.error("'concat' expects sequence operand")
         else:
           # fit to the element type
           elem = c.fitExpr(elem, s.typ.elems[0])
@@ -702,35 +699,20 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
           c.error("void expression is not allowed in this context")
           elem.typ = errorType()
 
-        let
-          tmp   = c.newTemp(prim(tkInt))
-          deref = newDeref(c.typeToIL(s.typ), tmp)
-
-        # the lvalue is captured because we need to compute/take the address of
-        # both seq fields
-        stmts.add newAsgn(tmp, newAddr(inline(s, stmts)))
+        # duplicate the sequence and then append the element to the duplicate.
+        # This is inefficient, of course, but it's also simple
+        let tmp = c.newTemp(s.typ)
+        # TODO: this needs to be a full copy, not just a shallow one
+        stmts.add newAsgn(tmp, inline(s, stmts))
         stmts.add newAsgn(
           newDeref(c.typeToIL(elem.typ),
-            newCall(PrepareAddProc, @[newAddr(newFieldExpr(deref, 0)),
-                                      newAddr(newFieldExpr(deref, 1)),
+            newCall(PrepareAddProc, @[newAddr(newFieldExpr(tmp, 0)),
+                                      newAddr(newFieldExpr(tmp, 1)),
                                       newIntVal(size(elem.typ))])),
           inline(elem, stmts))
 
-        expr = UnitNode
-        result = prim(tkUnit)
-      of "clear":
-        lenCheck(t, n, 2)
-        let s = c.exprToIL(t, t.child(n, 1))
-        if s.typ.kind != tkSeq:
-          c.error("'clear' expects sequence operand")
-        elif s.attribs * {Mutable, Lvalue} < {Mutable, Lvalue}:
-          c.error("'clear' expects mutable lvalue sequence operand")
-
-        # set the length back to zero, but leave the capacity as is
-        stmts.add newAsgn(newFieldExpr(inline(s, stmts), 0), newIntVal(0))
-
-        expr = UnitNode
-        result = prim(tkUnit)
+        expr = tmp
+        result = s.typ
       else:
         unreachable()
       return
