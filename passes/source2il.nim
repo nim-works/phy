@@ -1505,8 +1505,13 @@ proc declToIL*(c; t; n: NodeIndex) =
     if e.typ.kind != tkVoid:
       c.error("a procedure body must be a 'void' expression")
       c.removeDecl(name) # remove again
-      c.procs.delete(self)
-      c.procList.delete(self)
+      # the procedure cannot be removed from the lists again, as that would
+      # invalidate the IDs of the following procedures. Leaving the slot empty
+      # is also wrong, so it's filled with an import of a non-existent foreign
+      # procedure
+      c.procs[self] = buildTree Import:
+        bu.add Node(kind: Type, val: c.genProcType(procTy))
+        bu.add Node(kind: StringVal, val: c.literals.pack("error"))
       return
 
     var bu = initBuilder[NodeKind](ProcDef)
