@@ -891,7 +891,7 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
         let e = c.exprToIL(t, t.child(n, 1))
         if e.typ.kind != tkSeq:
           c.error("'len' operand must be of sequence type")
-        expr = newFieldExpr(inline(e, stmts), 0)
+        expr = newFieldExpr(inlineLvalue(c, e, stmts), 0)
         result = prim(tkInt)
       of "concat":
         lenCheck(t, n, 3)
