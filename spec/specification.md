@@ -352,6 +352,14 @@ C |- e_1 : All[typ_1]  C |- e_2 : All[typ_1]  typ in {int, float}
 ----------------------------------------------------------------- # S-builtin-lt
 C |- (Call < e_1 e_2) : bool
 
+C |- e : All[typ]  typ = (SeqTy ...)
+------------------------------------ # S-builtin-len
+C |- (Call len e) : int
+
+C |- e_1 : All[typ_1]  typ_1 = (SeqTy typ_2)  C |- e_2 : All[typ_3]  typ_3 <:= typ_2
+------------------------------------------------------------------------------------ # S-builtin-concat
+C |- (Call concat e_1 e_2) : typ_1
+
 C |- e_1 : All[typ_1]  typ_1 = (ProcTy typ_r typ_p*)  C |- e_2 : All[typ_a] ...  typ_a <:= typ_p ...
 ---------------------------------------------------------------------------------------------------- # S-call
 C |- (Call e_1 e_2*) : typ_r
@@ -547,6 +555,17 @@ val_3 = le(val_1, val_2)
 val_3 = lt(val_1, val_2)
 -------------------------------- # E-builtin-lt
 (Call < val_1 val_2)  ~~>  val_3
+
+length = |val|
+--------------------------- # E-builtin-len
+(Call len val)  ~~>  length
+
+val_3 = val_1 & val_2
+------------------------------------- # E-builtin-concat
+(Call concat val_1 val_2)  ~~>  val_3
+
+# TODO: & is a currently a magic operator that concatenates an array with an
+#       element. It needs to be defined properly
 ```
 
 The impure notions of reduction are:
