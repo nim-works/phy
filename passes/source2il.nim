@@ -617,12 +617,23 @@ proc newTemp(c; typ: SemType): IrNode =
     result = newLocal(c.locals.len.uint32)
     c.locals.add typ
 
-proc wrap(e: sink Expr, dest: IrNode): IrNode =
+proc use(c; e: sink Expr; stmts): IrNode =
+  ## Adds `e`'s statements to `stmts` and returns the usage-context specific
+  ## version of the expression.
+  stmts.add e.stmts
+  if Lvalue in e.attribs and not isTriviallyCopyable(e.typ):
+    newCall(c.getTypeBoundOp(opCopy, e.typ), e.expr)
+  else:
+    e.expr
+
+proc wrap(c; e: sink Expr, dest: IrNode): IrNode =
   ## Turns `e` into a statement list. The expression part is turned into an
   ## assignment to `dest`, but only if not a void expression.
-  result = IrNode(kind: Stmts, children: e.stmts)
-  if e.typ.kind != tkVoid:
-    result.add newAsgn(dest, e.expr)
+  result = IrNode(kind: Stmts)
+  if e.typ.kind == tkVoid:
+    result.children = e.stmts
+  else:
+    result.add newAsgn(dest, use(c, e, result.children))
 
 proc inline(e: sink Expr, stmts): IrNode =
   ## Adds the statement part of `e` to `stmts` and returns the expression part.
@@ -633,8 +644,7 @@ proc capture(c; e: sink Expr; stmts): IrNode =
   ## Commits expression `e` to a fresh temporary. This is part of the
   ## expression-list lowering machinery.
   result = c.newTemp(e.typ)
-  stmts.add e.stmts
-  stmts.add newAsgn(result, e.expr)
+  stmts.add newAsgn(result, use(c, e, stmts))
 
 proc inlineLvalue(c; e: sink Expr; stmts): IrNode =
   ## Returns `e` as an l-value IL expression, committing `e` to a temporary
@@ -791,7 +801,7 @@ proc notToIL(c; t; n: NodeIndex, expr; stmts): SemType =
 
   if arg.typ.kind == tkBool:
     # a single argument, so no capture is necessary
-    expr = newNot(inline(arg, stmts))
+    expr = newNot(use(c, arg, stmts))
     result = prim(tkBool)
   else:
     c.error("expected 'bool' expression")
@@ -900,14 +910,13 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
         # duplicate the sequence and then append the element to the duplicate.
         # This is inefficient, of course, but it's also simple
         let tmp = c.newTemp(s.typ)
-        # TODO: this needs to be a full copy, not just a shallow one
-        stmts.add newAsgn(tmp, inline(s, stmts))
+        stmts.add newAsgn(tmp, use(c, s, stmts))
         stmts.add newAsgn(
           newDeref(c.typeToIL(elem.typ),
             newCall(PrepareAddProc, @[newAddr(newFieldExpr(tmp, 0)),
                                       newAddr(newFieldExpr(tmp, 1)),
                                       newIntVal(size(elem.typ))])),
-          inline(elem, stmts))
+          use(c, elem, stmts))
 
         expr = tmp
         result = s.typ
@@ -932,7 +941,7 @@ proc localDeclToIL(c; t; n: NodeIndex, stmts) =
     e.expr = IrNode(kind: None)
 
   let local = c.newTemp(e.typ)
-  stmts.add newAsgn(local, inline(e, stmts))
+  stmts.add newAsgn(local, use(c, e, stmts))
 
   # verify that the name isn't in use already *after* analyzing the
   # initializer; the expression could introduce an entity with the same name
@@ -991,15 +1000,15 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
 
     if t[n].kind == SourceKind.And:
       # (And a b) -> (If a b False)
-      stmts.add newIf(inline(ea, stmts),
-                      wrap(eb, tmp),
+      stmts.add newIf(use(c, ea, stmts),
+                      wrap(c, eb, tmp),
                       newAsgn(tmp, newIntVal(0)))
 
     else:
       # (Or a b) -> (If a True b)
-      stmts.add newIf(inline(ea, stmts),
+      stmts.add newIf(use(c, ea, stmts),
                       newAsgn(tmp, newIntVal(1)),
-                      wrap(eb, tmp))
+                      wrap(c, eb, tmp))
 
     expr = tmp
     result = prim(tkBool) + {}
@@ -1025,7 +1034,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
           (c.fitExpr(body, typ), c.fitExpr(els, typ))
       tmp = c.newTemp(typ)
 
-    stmts.add newIf(inline(cond, stmts), wrap(fb, tmp), wrap(fe, tmp))
+    stmts.add newIf(use(c, cond, stmts), wrap(c, fb, tmp), wrap(c, fe, tmp))
     expr = tmp
     result = typ + {}
   of SourceKind.While:
@@ -1159,7 +1168,16 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       dst.expr = IrNode(kind: None)
 
     let src = c.fitExpr(c.exprToIL(t, b), dst.typ)
-    stmts.add newAsgn(inline(dst, stmts), inline(src, stmts))
+    if isTriviallyCopyable(dst.typ):
+      stmts.add newAsgn(inline(dst, stmts), use(c, src, stmts))
+    else:
+      # in order to properly handle self-assignments, first create the
+      # copy/clone and only then destroy the destination's value
+      let
+        dstExpr = inline(dst, stmts)
+        copy = c.capture(src, stmts)
+      stmts.add c.genDestroy(dstExpr, dst.typ)
+      stmts.add newAsgn(dstExpr, copy)
 
     expr = UnitNode
     result = prim(tkUnit) + {}
@@ -1177,12 +1195,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
     # apply the necessary to-supertype conversions:
     e = c.fitExpr(e, c.retType)
 
-    stmts.add e.stmts
-    case e.typ.kind
-    of tkError:
-      discard "do nothing"
-    else:
-      stmts.add newReturn(e.expr)
+    stmts.add newReturn(use(c, e, stmts))
 
     result = prim(tkVoid) + {}
   of SourceKind.Unreachable:
