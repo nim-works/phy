@@ -486,25 +486,49 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, expr, stmts): SemType =
     eA = exprToIL(c, t, a)
     eB = exprToIL(c, t, b)
 
-  let op =
-    case name
-    of "+": Add
-    of "-": Sub
-    else:   unreachable()
-
   if tkError in {eA.typ.kind, eB.typ.kind}:
     result = errorType()
   elif eA.typ != eB.typ:
     c.error("arguments have mismatching types")
     result = errorType()
-  elif eA.typ.kind notin {tkInt, tkFloat}:
-    c.error("arguments must be of 'int' or 'float' type")
-    result = errorType()
   else:
-    expr = newBinaryOp(op, c.typeToIL(eA.typ),
-                       c.capture(eA, stmts),
-                       c.capture(eB, stmts))
-    result = eA.typ
+    proc check(c; op: NodeKind, a, b: sink IrNode, stmts): IrNode {.nimcall.} =
+      ## Emits a checked arithmetic operation and returns the local storing the
+      ## result.
+      let flag = c.newTemp(prim(tkBool))
+      result = c.newTemp(prim(tkInt))
+      stmts.add newAsgn(result,
+        newCheckedOp(op, c.typeToIL(prim(tkInt)), a, b, flag))
+      # abort execution if an overflow occurrs
+      stmts.add newIf(
+        newBinaryOp(Eq, c.typeToIL(prim(tkBool)), flag, newIntVal(1)),
+        newUnreachable())
+
+    result = eA.typ # later turned into an error type if wrong
+    let
+      valA = c.capture(eA, stmts)
+      valB = c.capture(eB, stmts)
+    case name
+    of "+":
+      case result.kind
+      of tkInt:
+        expr = check(c, AddChck, valA, valB, stmts)
+      of tkFloat:
+        expr = newBinaryOp(Add, c.typeToIL(result), valA, valB)
+      else:
+        c.error("arguments must be of 'int' or 'float' type")
+        result = errorType()
+    of "-":
+      case result.kind
+      of tkInt:
+        expr = check(c, SubChck, valA, valB, stmts)
+      of tkFloat:
+        expr = newBinaryOp(Sub, c.typeToIL(result), valA, valB)
+      else:
+        c.error("arguments must be of 'int' or 'float' type")
+        result = errorType()
+    else:
+      unreachable()
 
 proc relToIL(c; t; n: NodeIndex, name: string, expr; stmts): SemType =
   ## Analyzes and emits the IL for a relational operation.
