@@ -2,17 +2,29 @@
 ## runners.
 
 import
+  std/[
+    options
+  ],
   phy/[
+    type_rendering,
     types
   ],
   vm/[
     vmalloc,
     vmenv,
+    vmmodules,
     vm,
     utils
   ]
 
 import vm/vmtypes except tkVoid, tkInt, tkFloat, tkProc
+
+type
+  MemoryConfig* = object
+    ## The guest memory configuration.
+    total*: uint
+    stackStart*: uint
+    stackSize*: uint
 
 proc readInt(p: HostPointer, size: range[1..8]): int64 =
   copyMem(addr result, p, size)
@@ -79,58 +91,61 @@ proc valueToString(env: var VmEnv, a: VirtualAddr, typ: SemType): string =
     # render as an ellipsis for now. Proper rendering requires access to
     # the procedure names, which we don't have at the moment
     result.add "..."
+  of tkSeq:
+    result = "["
+    let
+      len = readInt(p, 8)
+      data = readInt(cast[HostPointer](addr p[8]), 8) + 8
+    for i in 0..<len:
+      if i > 0:
+        result.add ", "
+      result.add valueToString(env, VirtualAddr(data + size(typ.elems[0]) * i),
+                               typ.elems[0])
+    result.add "]"
   of tkVoid, tkError:
     unreachable()
 
-proc typeToString(typ: SemType): string =
-  case typ.kind
-  of tkVoid:  "void"
-  of tkUnit:  "unit"
-  of tkBool:  "bool"
-  of tkInt:   "int"
-  of tkFloat: "float"
-  of tkTuple:
-    var res = "("
-    for i, it in typ.elems.pairs:
-      if i > 0:
-        res.add ", "
-      res.add typeToString(it)
+proc readMemConfig*(m: VmModule): Option[MemoryConfig] =
+  ## Reads the guest memory configuration from `m` by looking for the
+  ## `stack_start`, `stack_size`, and `total_memory` global variables.
+  ## A default is used for the values where the respective global is
+  ## not present. If the configuration is invalid, ``none`` is returned.
+  var
+    stackStart = 0'u64
+    stackSize  = 1024'u64
+    total      = stackSize
 
-    if typ.elems.len == 1:
-      res.add ","
-    res.add ")"
-    res
-  of tkUnion:
-    var res = "union("
-    for i, it in typ.elems.pairs:
-      if i > 0:
-        res.add ", "
-      res.add typeToString(it)
-    res.add ")"
-    res
-  of tkProc:
-    var res = "proc("
-    for i, it in typ.elems.toOpenArray(1, typ.elems.high).pairs:
-      if i > 0:
-        res.add ", "
-      res.add typeToString(it)
-    res.add ") -> "
-    res.add typeToString(typ.elems[0])
-    res
-  of tkError:
-    unreachable()
+  for it in m.exports.items:
+    if it.kind == expGlobal and m.globals[it.id].typ == vtInt:
+      case m.names[it.name]
+      of "stack_start":
+        stackStart = m.globals[it.id].val.uintVal
+      of "stack_size":
+        stackSize = m.globals[it.id].val.uintVal
+      of "total_memory":
+        total = m.globals[it.id].val.uintVal
 
-proc run*(env: var VmEnv, prc: ProcIndex, typ: SemType): string =
+  if stackStart >= total or stackStart + stackSize > total or
+      stackStart + stackSize < stackStart or
+      total > high(uint):
+    none MemoryConfig
+  else:
+    some MemoryConfig(total: uint(total),
+                      stackStart: uint(stackStart),
+                      stackSize: uint(stackSize))
+
+proc run*(env: var VmEnv, stack: HOslice[uint], prc: ProcIndex,
+          typ: SemType): string =
   ## Runs the nullary procedure with index `prc`, and returns the result
   ## rendered as a string. `typ` is the type of the resulting value.
   var thread: VmThread
   if typ.kind in AggregateTypes:
-    # reserve enough stack space:
-    let start = uint size(typ)
+    # reserve enough stack space for the result:
+    let modified = hoSlice(stack.a + uint(size(typ)), stack.b)
     # pass the address of the destination as the first parameter
-    thread = vm.initThread(env, prc, hoSlice(start, 1024), @[Value(toVirt 0)])
+    thread = vm.initThread(env, prc, modified, @[Value(toVirt stack.a)])
   else:
-    thread = vm.initThread(env, prc, 1024, @[])
+    thread = vm.initThread(env, prc, stack, @[])
 
   let res = run(env, thread, nil)
   env.dispose(thread)
@@ -154,10 +169,10 @@ proc run*(env: var VmEnv, prc: ProcIndex, typ: SemType): string =
   of yrkStubCalled, yrkUser:
     unreachable() # shouldn't happen
 
-proc run*(env: var VmEnv, prc: ProcIndex): string =
+proc run*(env: var VmEnv, stack: HOslice[uint], prc: ProcIndex): string =
   ## Runs the nullary procedure with index `prc` and returns the VM's result
   ## formatted as an S-expression.
-  var thread = vm.initThread(env, prc, 1024, @[])
+  var thread = vm.initThread(env, prc, stack, @[])
 
   let res = run(env, thread, nil)
   env.dispose(thread)

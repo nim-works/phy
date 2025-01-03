@@ -1,0 +1,26 @@
+discard """
+  description: "
+    Ensure that the locations have the correct alignment and layout
+  "
+  output: "(Done)"
+"""
+(TypeDefs
+  (Blob 1 1)
+  (Blob 1 2)
+  (Blob 1 4)
+  (Blob 1 8)
+  (Blob 17 4)
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 5)
+    (Locals (Type 4) (Type 3) (Type 0) (Type 2) (Type 0) (Type 1))
+    (List
+      (Block (Params)
+        (Drop (Addr (Local 0)))
+        (Drop (Addr (Local 1)))
+        (Drop (Addr (Local 2)))
+        (Drop (Addr (Local 3)))
+        (Drop (Addr (Local 4)))
+        (Drop (Addr (Local 5)))
+        (Return)))))

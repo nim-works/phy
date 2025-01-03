@@ -1,0 +1,46 @@
+;$sexp
+(TypeDefs
+  (Record 4 4
+    (Field 0 (Int 4)))
+  (ProcTy (Void) (UInt 8))
+  (ProcTy (Void) (Int 4) (UInt 8))
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 2)
+    (Locals (Int 4) (Type 0) (UInt 8))
+    (List
+      (Block
+        (Params (Local 0) (Local 2))
+        (Store (Type 0)
+          (Copy (Local 2))
+          (Copy (Local 1)))
+        (Return))))
+  (ProcDef (Type 1)
+    (Locals (UInt 8))
+    (List
+      (Block
+        (Params (Local 0))
+        (Call (Proc 0) (IntVal 100)
+          (Copy (Local 0)))
+        (Return))))
+  (ProcDef (Type 3)
+    (Locals (Type 0) (Type 0) (Type 0) (Type 0))
+    (List
+      (Block (Params)
+        (Call (Proc 0) (IntVal 100)
+          (Addr (Local 1)))
+        (Asgn (Local 0)
+          (Copy (Local 1)))
+        (Call (Proc 0) (IntVal 100)
+          (Addr (Local 2)))
+        (Store (Type 0)
+          (Addr (Local 0))
+          (Copy (Local 2)))
+        (CheckedCall (Proc 0) (IntVal 100)
+          (Addr (Local 3))
+          (Goto 1) (Unwind)))
+      (Block (Params)
+        (Asgn (Local 0)
+          (Copy (Local 3)))
+        (Return)))))

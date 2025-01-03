@@ -7,7 +7,6 @@ discard """
 (TypeDefs (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 0) (Locals) (Continuations
-    (Continuation (Params))
-  ))
-)
+  (ProcDef (Type 0) 0 (Locals)
+    (List
+      (Block (Params) (Return)))))

@@ -5,18 +5,16 @@ discard """
   (ProcTy (Int 8)))
 (GlobalDefs)
 (ProcDefs
-  (ProcDef (Type 0) (Locals)
-    (Continuations
-      (Continuation (Params) 0
-        (Continue 1 (IntVal 100)))
-      (Continuation (Params (Int 8)))))
-  (ProcDef (Type 0)
+  (ProcDef (Type 0) 0 (Locals)
+    (List
+      (Block (Params)
+        (Return (IntVal 100)))))
+  (ProcDef (Type 0) 0
     (Locals (Int 8))
-    (Continuations
-      (Continuation (Params) 0
+    (List
+      (Block (Params)
         (CheckedCallAsgn (Local 0) (Type 0) (ProcVal 0)
-          (Continue 1) (Unwind)))
-      (Continuation (Params) 0
-        (Continue 2
-          (Copy (Local 0))))
-      (Continuation (Params (Int 8))))))
+          (Goto 1) (Unwind)))
+      (Block (Params)
+        (Return
+          (Copy (Local 0)))))))

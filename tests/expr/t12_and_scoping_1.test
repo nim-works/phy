@@ -1,0 +1,13 @@
+discard """
+  description: "
+    Declarations in the first operand expression are visible to the second
+    operand.
+  "
+  output: "true: bool"
+"""
+(Exprs
+  (And
+    (Exprs
+      (Decl b true)
+      true)
+    b))

@@ -1,0 +1,4 @@
+discard """
+  output: "0: int"
+"""
+(Call len (Seq (IntTy)))

@@ -4,6 +4,7 @@
 
 import
   std/[
+    options,
     os,
     parseopt,
     streams,
@@ -15,8 +16,10 @@ import
   generated/[
     lang0_checks,
     lang1_checks,
+    lang2_checks,
     lang3_checks,
     lang4_checks,
+    lang5_checks,
     lang25_checks,
     lang30_checks,
     source_checks
@@ -26,9 +29,13 @@ import
     debugutils,
     source2il,
     pass0,
-    pass1,
-    pass3,
-    pass4,
+    pass_aggregateParams,
+    pass_aggregatesToBlob,
+    pass_flattenPaths,
+    pass_inlineTypes,
+    pass_legalizeBlobOps,
+    pass_localsToBlob,
+    pass_stackAlloc,
     pass25,
     pass30,
     trees
@@ -57,8 +64,10 @@ type
     langBytecode = "vm"
     lang0 = "L0"
     lang1 = "L1"
+    lang2 = "L2"
     lang3 = "L3"
     lang4 = "L4"
+    lang5 = "L5"
     lang25 = "L25"
     lang30 = "L30"
     langSource = "source"
@@ -85,6 +94,9 @@ Commands:
   e                           similar to 'c', but also runs the generated
                               bytecode and echoes the result
 """
+  PointerSize = 8
+    ## the byte-width of pointer values
+    # TODO: this size needs to be configurable from the outside
 
 var
   gShow: set[Language]
@@ -114,8 +126,10 @@ proc syntaxCheck(code: PackedTree[spec.NodeKind], lang: Language) =
   case lang
   of lang0:  syntaxCheck(code, lang0_checks, module)
   of lang1:  syntaxCheck(code, lang1_checks, module)
+  of lang2:  syntaxCheck(code, lang2_checks, module)
   of lang3:  syntaxCheck(code, lang3_checks, module)
   of lang4:  syntaxCheck(code, lang4_checks, module)
+  of lang5:  syntaxCheck(code, lang5_checks, module)
   of lang25: syntaxCheck(code, lang25_checks, module)
   of lang30: syntaxCheck(code, lang30_checks, module)
   else:      unreachable()
@@ -141,9 +155,9 @@ proc print(tree: PackedTree[spec.NodeKind], lang: Language) =
     stdout.writeLine(pretty(tree, tree.child(1)))
     stdout.writeLine(pretty(tree, tree.child(2)))
 
-proc print(env: VmEnv) =
+proc print(m: VmModule) =
   genericPrint(langBytecode):
-    stdout.write(disassemble(env))
+    stdout.write(disassemble(m))
 
 proc sourceToIL(text: string): (PackedTree[spec.NodeKind], SemType) =
   ## Given an S-expression representation of the source language (`text`),
@@ -184,8 +198,8 @@ proc sourceToIL(text: string): (PackedTree[spec.NodeKind], SemType) =
     quit(2)
 
   result[1] =
-    if ctx.procList.len > 0: ctx.procList[^1].typ.elems[0]
-    else:                    prim(tkError)
+    if ctx.entry != -1: ctx.procList[ctx.entry].typ.elems[0]
+    else:               prim(tkError)
   result[0] = ctx.close()
 
 proc compile(tree: var PackedTree[spec.NodeKind], source, target: Language) =
@@ -198,22 +212,30 @@ proc compile(tree: var PackedTree[spec.NodeKind], source, target: Language) =
       assert false, "cannot be handled here: " & $current
     of lang1:
       syntaxCheck(tree, lang1_checks, module)
-      # TODO: don't hardcode the pointer size
-      tree = tree.apply(pass1.lower(tree, 8))
+      tree = tree.apply(pass_inlineTypes.lower(tree))
       current = lang0
+    of lang2:
+      syntaxCheck(tree, lang2_checks, module)
+      tree = tree.apply(pass_stackAlloc.lower(tree, PointerSize))
+      current = lang1
     of lang3:
       syntaxCheck(tree, lang3_checks, module)
-      # TODO: don't hardcode the pointer size
-      tree = tree.apply(pass3.lower(tree, 8))
-      current = lang1
+      tree = tree.apply(pass_aggregatesToBlob.lower(tree, PointerSize))
+      tree = tree.apply(pass_localsToBlob.lower(tree))
+      tree = tree.apply(pass_legalizeBlobOps.lower(tree))
+      current = lang2
     of lang4:
       syntaxCheck(tree, lang4_checks, module)
-      tree = tree.apply(pass4.lower(tree))
+      tree = tree.apply(pass_aggregateParams.lower(tree, PointerSize))
       current = lang3
+    of lang5:
+      syntaxCheck(tree, lang5_checks, module)
+      tree = tree.apply(pass_flattenPaths.lower(tree))
+      current = lang4
     of lang25:
       syntaxCheck(tree, lang25_checks, module)
       tree = tree.apply(pass25.lower(tree))
-      current = lang4
+      current = lang5
     of lang30:
       syntaxCheck(tree, lang30_checks, module)
       tree = tree.apply(pass30.lower(tree))
@@ -285,7 +307,7 @@ proc main(args: openArray[string]) =
   s.close()
 
   var
-    env = initVm(1024, 1024 * 1024) # 1MB of memory
+    module: VmModule
     code: PackedTree[spec.NodeKind]
     typ: SemType
 
@@ -297,10 +319,12 @@ proc main(args: openArray[string]) =
 
     for line in splitLines(text, false):
       try:
-        a.process(line, env)
+        a.process(line)
       except AssemblerError as e:
         error input & "(" & $lineN & ", 1): " & e.msg
       inc lineN
+
+    module = a.close()
   else:
     var newSource = source
 
@@ -321,7 +345,7 @@ proc main(args: openArray[string]) =
       # compile to L0 code and then translate to bytecode
       compile(code, newSource, lang0)
       syntaxCheck(code, lang0)
-      link(env, hostProcedures(gRunner), [pass0.translate(code)])
+      module = pass0.translate(code)
       # the bytecode is verified later
     else:
       compile(code, newSource, target)
@@ -330,29 +354,52 @@ proc main(args: openArray[string]) =
 
   if target == langBytecode:
     # make sure the environment is correct:
-    let errors = validate(env)
+    let errors = validate(module)
     if errors.len > 0:
-      echo "Validation of the VM environment failed"
+      echo "VM module validation failed"
       for it in errors.items:
         echo "Error: ", it
       quit(1)
 
-    print(env)
+    print(module)
 
     # handle the eval command:
     if cmd == Eval:
-      if env.procs.len == 0:
+      var mem: MemoryConfig
+      if (let v = readMemConfig(module); v.isSome):
+        mem = v.unsafeGet
+      else:
+        error "invalid memory configuration"
+
+      # look for the procedure to start evaluation with:
+      var entry = none ProcIndex
+      if source == langSource:
+        # use the last exported procedure, if any
+        for i in countdown(module.exports.high, 0):
+          if module.exports[i].kind == expProc:
+            entry = some module.exports[i].id.ProcIndex
+            break
+      elif module.procs.len > 0:
+        # simply use the last procedure
+        entry = some module.procs.high.ProcIndex
+
+      if entry.isNone:
         if gRunner:
           discard "okay, silently ignore"
           return
         else:
           error "there's nothing to run"
 
+      # reserve the maximum amount of memory up-front
+      var env = initVm(mem.total, mem.total)
+      link(env, hostProcedures(gRunner), [module])
+      let stack = hoSlice(mem.stackStart, mem.stackStart + mem.stackSize)
+
       if source == langSource:
         # we have type high-level type information
-        stdout.write run(env, env.procs.high.ProcIndex, typ)
+        stdout.write run(env, stack, entry.unsafeGet, typ)
       else:
         # we don't have high-level type information
-        stdout.write run(env, env.procs.high.ProcIndex)
+        stdout.write run(env, stack, entry.unsafeGet)
 
 main(getExecArgs())

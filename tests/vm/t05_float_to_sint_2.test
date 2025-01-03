@@ -1,0 +1,10 @@
+discard """
+  description: ""
+  output: "(Done 127)"
+"""
+.type P1 () -> int
+.start P1 main
+  LdImmFloat 200
+  FloatToSInt 8
+  Ret
+.end

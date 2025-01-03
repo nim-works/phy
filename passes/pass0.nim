@@ -20,9 +20,6 @@ type
   PassCtx = object
     # inputs:
     types: NodeIndex
-    signatures: ptr Table[uint32, TypeId]
-      ## maps signature type IDs to their VM equivalent. A pointer in order to
-      ## get around unnecessary copies
 
     # productions:
     code: seq[Instr]
@@ -33,8 +30,6 @@ type
     # per-procedure temporary state:
     current: int
       ## index of the current continuation
-    sp: int32
-      ## the local variable storing the stack pointer
     patch: seq[tuple[cont: int, instr: int]]
     ehPatch: seq[tuple[cont: int, instr: int]]
     starts: seq[int]
@@ -69,15 +64,13 @@ func id(n: TreeNode[NodeKind]): int32 {.inline.} =
   assert n.kind in {Local, Global, Proc, ProcVal}
   cast[int32](n.val)
 
-func typ(n: TreeNode[NodeKind]): uint32 {.inline.} =
+func typ(n: TreeNode[NodeKind]): TypeId {.inline.} =
   assert n.kind == Type
-  n.val
+  # there's a 1-to-1 mapping between IL and VM types, and thus the IL
+  # type ID can be used directly as the VM type ID
+  TypeId(n.val)
 
-proc parseType(tree; types: NodeIndex, n: NodeIndex): Type0 =
-  var n = n
-  if tree[n].kind == Type:
-    n = tree.child(types, tree[n].typ) # follow the indirection
-
+proc parseType(tree; n: NodeIndex): Type0 =
   case tree[n].kind
   of Int:   Type0(kind: t0kInt, size: tree[n].val.int)
   of UInt:  Type0(kind: t0kUInt, size: tree[n].val.int)
@@ -179,8 +172,7 @@ proc genCall(c; tree; call: NodeIndex,
 
     # the proc value is pushed to the stack last
     c.genExpr(tree, tree.child(call, start + 1))
-    c.instr(opcIndCall, int32 c.signatures[][tree[call, start].typ],
-            numArgs(1))
+    c.instr(opcIndCall, int32 tree[call, start].typ, numArgs(1))
 
 proc signExtend(c; typ: Type0) =
   if typ.size < 8:
@@ -195,7 +187,7 @@ proc genBinaryOp(c; tree; op: NodeIndex,
   ## Generates the code for a two-operand operation, with the opcode picked
   ## based on the type.
   let (typ, a, b) = triplet(tree, op)
-  result = parseType(tree, c.types, typ)
+  result = parseType(tree, typ)
   c.genExpr(tree, a)
   c.genExpr(tree, b)
   case result.kind
@@ -214,7 +206,7 @@ proc genCheckedBinary(c; tree; op: NodeIndex, opc: Opcode) =
   let (typ, a, b) = triplet(tree, op)
   c.genExpr(tree, a)
   c.genExpr(tree, b)
-  c.instr(opc, int8(parseType(tree, c.types, typ).size * 8))
+  c.instr(opc, int8(parseType(tree, typ).size * 8))
   c.instr(opcPopLocal, tree[op, 3].id)
 
 proc loadLocal(c; local: int32) =
@@ -242,7 +234,7 @@ proc genExpr(c; tree; val: NodeIndex) =
     else:
       unreachable()
   of Load:
-    let typ = parseType(tree, c.types, tree.child(val, 0))
+    let typ = parseType(tree, tree.child(val, 0))
     c.genExpr(tree, tree.child(val, 1))
     # TODO: if the operand is an addition or subtraction with a constant
     #       value, combine the addition with the load instruction
@@ -262,17 +254,10 @@ proc genExpr(c; tree; val: NodeIndex) =
       of 4: c.instr(opcLdFlt32)
       of 8: c.instr(opcLdFlt64)
       else: unreachable()
-  of Addr:
-    c.loadLocal(c.sp)
-    let offset = tree.getInt(tree.child(val, 0))
-    if offset > 0:
-      # TODO: use ``opcAddImm`` for small values
-      c.loadInt(offset)
-      c.instr(opcAddInt)
   of Neg:
     let (typ, operand) = pair(tree, val)
     c.genExpr(tree, operand)
-    case parseType(tree, c.types, typ).kind
+    case parseType(tree, typ).kind
     of t0kInt:   c.instr(opcNegInt)
     of t0kFloat: c.instr(opcNegFloat)
     of t0kUInt:  unreachable()
@@ -294,10 +279,11 @@ proc genExpr(c; tree; val: NodeIndex) =
   of SubChck:
     c.genCheckedBinary(tree, val, opcSubChck)
   of BitNot:
-    let typ = parseType(tree, c.types, tree.child(val, 0))
+    let typ = parseType(tree, tree.child(val, 0))
     c.genExpr(tree, tree.child(val, 1))
     c.instr(opcBitNot)
-    c.mask(typ) # discard the unused higher bits
+    if typ.kind == t0kUInt:
+      c.mask(typ)
   of BitAnd:
     let (_, a, b) = tree.triplet(val)
     c.genExpr(tree, a)
@@ -309,21 +295,22 @@ proc genExpr(c; tree; val: NodeIndex) =
     c.genExpr(tree, b)
     c.instr(opcBitOr)
   of BitXor:
-    c.genBinaryArithOp(tree, val, opcBitXor, opcBitXor, opcNop)
+    c.genBinaryOp(tree, val, opcBitXor, opcBitXor, opcNop)
   of Shl:
     let (typ, a, b) = triplet(tree, val)
     c.genExpr(tree, a)
     c.genExpr(tree, b)
     c.instr(opcShl)
-    let t = parseType(tree, c.types, typ)
-    c.mask(t) # also cut off the upper bits for signed integers
-    if t.kind == t0kInt:
-      c.signExtend(t)
+    let t = parseType(tree, typ)
+    case t.kind
+    of t0kInt:  c.signExtend(t)
+    of t0kUInt: c.mask(t)
+    else:       unreachable()
   of Shr:
     let (typ, a, b) = triplet(tree, val)
     c.genExpr(tree, a)
     c.genExpr(tree, b)
-    case parseType(tree, c.types, typ).kind
+    case parseType(tree, typ).kind
     of t0kInt:  c.instr(opcAshr)
     of t0kUInt: c.instr(opcShr)
     else:       unreachable()
@@ -339,8 +326,8 @@ proc genExpr(c; tree; val: NodeIndex) =
   of Reinterp:
     # reinterpret the bit pattern as another type
     let
-      dtyp = parseType(tree, c.types, tree.child(val, 0))
-      styp = parseType(tree, c.types, tree.child(val, 1))
+      dtyp = parseType(tree, tree.child(val, 0))
+      styp = parseType(tree, tree.child(val, 1))
     # sanity checks:
     assert dtyp.kind != styp.kind
     assert dtyp.size == styp.size
@@ -367,8 +354,8 @@ proc genExpr(c; tree; val: NodeIndex) =
   of Conv:
     # numeric conversion
     let
-      dtyp = parseType(tree, c.types, tree.child(val, 0))
-      styp = parseType(tree, c.types, tree.child(val, 1))
+      dtyp = parseType(tree, tree.child(val, 0))
+      styp = parseType(tree, tree.child(val, 1))
 
     c.genExpr(tree, tree.child(val, 2))
     case dtyp.kind
@@ -445,7 +432,7 @@ proc genEh(c; tree; exit: NodeIndex) =
   case tree[exit].kind
   of Unwind:
     discard "attach nothing"
-  of Continue:
+  of Goto:
     # register an EH mapping:
     c.ehTable.add (c.code.high.uint32, 0'u32) # patched later
     c.ehPatch.add (tree[exit, 0].imm.int, c.ehTable.high)
@@ -455,30 +442,26 @@ proc genEh(c; tree; exit: NodeIndex) =
 proc genExit(c; tree; exit: NodeIndex) =
   ## Generates the code for a continuation exit.
   case tree[exit].kind
-  of Continue:
-    case tree.len(exit)
-    of 1:
-      c.exit(tree[exit, 0].imm)
-    of 2:
-      # continue with argument can only mean return
-      c.genExpr(tree, tree.child(exit, 1))
-      c.instr(opcRet)
-    else:
-      unreachable()
+  of Goto:
+    c.exit(tree[exit, 0].imm)
+  of Return:
+    if tree.len(exit) == 1:
+      c.genExpr(tree, tree.child(exit, 0))
+    c.instr(opcRet)
   of Loop:
     c.jump(opcJmp, tree[exit, 0].imm)
   of Raise:
     c.genExpr(tree, tree.child(exit, 0))
     c.instr(opcRaise)
     c.genEh(tree, tree.child(exit, 1))
-  of SelectBool:
+  of Branch:
     let (sel, a, b) = triplet(tree, exit)
     c.genExpr(tree, sel)
     c.jump(opcBranch, tree[a, 0].imm)
     c.exit(tree[b, 0].imm)
   of Select:
     let
-      typ = parseType(tree, c.types, tree.child(exit, 0))
+      typ = parseType(tree, tree.child(exit, 0))
       val = tree.child(exit, 1) # the value to select the target with
     for it in tree.items(exit, 2, ^2):
       c.genChoice(tree, typ, val, it)
@@ -529,7 +512,7 @@ proc genStmt(c; tree; n: NodeIndex) =
   of Store:
     let
       (tn, a, b) = triplet(tree, n)
-      typ = parseType(tree, c.types, tn)
+      typ = parseType(tree, tn)
     # TODO: if `a` is an addition/subtraction, merge its static operand into
     #       the store instruction, if possible
     c.genExpr(tree, a)
@@ -572,65 +555,43 @@ proc gen(c; tree; n: NodeIndex) =
   of Except:
     c.instr(opcExcept)
     # assign the passed-along value to the provided local
-    c.instr(opcPopLocal, tree[n, 0].id)
-  of Continuation:
-    discard "no special instruction needed"
+    c.instr(opcPopLocal, tree[tree.child(n, 0), 0].id)
+  of Block:
+    # assign the passed-along values to the provided locals
+    for i in countdown(tree.len(tree.child(n, 0)) - 1, 0):
+      c.instr(opcPopLocal, tree[tree.child(n, 0), i].id)
   else:
     unreachable()
 
-  for it in tree.items(n, 2, ^2):
+  for it in tree.items(n, 1, ^2):
     genStmt(c, tree, it)
 
   c.genExit(tree, tree.last(n))
 
-proc translate(tree; types, def: NodeIndex,
-               signatures: Table[uint32, TypeId]): ProcResult =
+proc translate(tree; types, def: NodeIndex): ProcResult =
   ## Translates the single procedure body `body` to VM bytecode. `types`
   ## provides the type environment.
-  let (typ, locals, conts) = tree.triplet(def)
+  let
+    (_, stack, locals) = tree.triplet(def)
+    blocks = tree.next(locals)
 
-  var c = PassCtx(types: types, signatures: addr signatures)
+  var c = PassCtx(types: types)
   # allocate and setup the local variables:
   c.locals.setLen(tree.len(locals))
   for i, it in tree.pairs(locals):
-    let typ = parseType(tree, c.types, it)
+    let typ = parseType(tree, it)
     c.locals[i] = (if typ.kind == t0kFloat: vtFloat else: vtInt)
 
-  # put all parameters into locals:
-  let typedef = tree.child(types, tree[typ].val.int)
-  for i in countdown(tree.len(typedef) - 1, 1):
-    c.instr(opcPopLocal, int32(i - 1))
-
-  # compute the maximum amount of required stack space:
-  var maxStack = 0
-  for it in tree.items(conts):
-    if tree.len(it) > 1: # ignore the return continuation
-      maxStack = max(tree[it, 1].imm, maxStack)
-
-  # setup the stack pointer, if one is required:
-  if maxStack > 0:
-    # XXX: instead of allocating the maximum amount of stack space up-front,
-    #      the stack could also be grown/shrunken on a per-continuation base,
-    #      which would reduce stack-space requirements in case of nested
-    #      calls
-    # XXX: maybe move stack-management to a higher-level IL?
-    c.locals.add(vtInt)
-    c.sp = c.locals.high.int32
-    c.instr(opcStackAlloc, int32 maxStack)
-    c.instr(opcPopLocal, c.sp)
+  # allocate the frame:
+  if tree[stack].imm > 0:
+    c.instr(opcStackAlloc, int32 tree[stack].imm)
 
   # generate the code for the continuations. They're expected to be in correct
   # order:
-  c.starts.newSeq(tree.len(conts))
-  for i, it in tree.pairs(conts):
-    if tree.len(it) > 1:
-      c.start(i)
-      c.gen(tree, it)
-    else:
-      # a continuation with only a parameter list is the "return" continuation
-      if tree.len(tree.child(it, 0)) == 0:
-        c.start(i)
-        c.instr(opcRet)
+  c.starts.newSeq(tree.len(blocks))
+  for i, it in tree.pairs(blocks):
+    c.start(i)
+    c.gen(tree, it)
 
   result = ProcResult(code: c.code, locals: c.locals, ehTable: c.ehTable,
                       constants: c.constants)
@@ -645,12 +606,9 @@ proc translate*(module: PackedTree[NodeKind]): VmModule =
   ## Translates a complete module to the VM bytecode and the associated
   ## environmental data.
   let (types, globals, procs) = module.triplet(NodeIndex(0))
-  var signatures: Table[uint32, TypeId]
 
   for id, typ in module.pairs(types):
     case module[typ].kind
-    of Int, UInt, Float:
-      discard "nothing to do"
     of ProcTy:
       let start = result.types.params.len
       # the first type (i.e., return type) needs special handling:
@@ -660,13 +618,9 @@ proc translate*(module: PackedTree[NodeKind]): VmModule =
       # the rest must be type references:
       for it in module.items(typ, result.types.params.len - start):
         const Map = [t0kInt: tkInt, t0kUInt: tkInt, t0kFloat: tkFloat]
-        result.types.params.add Map[parseType(module, types, it).kind]
+        result.types.params.add Map[parseType(module, it).kind]
 
       result.types.types.add start.uint32 .. result.types.params.high.uint32
-      # TODO: change the lang0 grammar such that only signatures are allowed
-      #       in the type section, which would result in a 1-to-1 mapping
-      #       between IL type IDs and VM type IDs, making the map obsolete
-      signatures[id.uint32] = result.types.types.high.TypeId
     else:
       unreachable()
 
@@ -674,7 +628,7 @@ proc translate*(module: PackedTree[NodeKind]): VmModule =
   for def in module.items(globals):
     let (typ, val) = module.pair(def)
     result.globals.add:
-      case parseType(module, types, typ).kind
+      case parseType(module, typ).kind
       of t0kFloat:
         TypedValue(val: cast[Value](getFloat(module, val)), typ: vtFloat)
       of t0kInt, t0kUInt:
@@ -684,7 +638,7 @@ proc translate*(module: PackedTree[NodeKind]): VmModule =
   # generate the code for the procedures and add them to the environment:
   for i, def in module.pairs(procs):
     if module[def].kind == ProcDef:
-      var prc = translate(module, types, def, signatures)
+      var prc = translate(module, types, def)
 
       if prc.constants.len > 0:
         # patch the LdConst instructions:
@@ -698,7 +652,7 @@ proc translate*(module: PackedTree[NodeKind]): VmModule =
         result.constants.add prc.constants
 
       result.procs.add ProcHeader(kind: pkDefault,
-                                  typ: signatures[module[def, 0].typ])
+                                  typ: module[def, 0].typ)
       result.procs[i].code = slice(result.code, prc.code)
       result.code.add prc.code
       result.procs[i].locals = hoSlice(result.locals, prc.locals)
@@ -708,8 +662,23 @@ proc translate*(module: PackedTree[NodeKind]): VmModule =
       result.ehTable.add prc.ehTable
     else:
       # must be a host procedure
-      result.host.add module.getString(module.child(def, 1))
+      result.names.add module.getString(module.child(def, 1))
 
       result.procs.add ProcHeader(kind: pkCallback,
-                                  typ: signatures[module[def, 0].typ])
-      result.procs[i].code.a = result.host.high.uint32
+                                  typ: module[def, 0].typ)
+      result.procs[i].code.a = result.names.high.uint32
+
+  # add the exports, if any:
+  if module.len(NodeIndex 0) == 4: # is there an export list?
+    let exports = module.next(procs)
+    for it in module.items(exports):
+      var ex = Export(name: result.names.len.uint32,
+                      id:   module[it, 1].id.uint32)
+      ex.kind =
+        case module[it, 1].kind
+        of Proc:   expProc
+        of Global: expGlobal
+        else:      unreachable()
+
+      result.exports.add ex
+      result.names.add module.getString(module.child(it, 0))

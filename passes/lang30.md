@@ -26,21 +26,21 @@ choice -= (Choice <intVal> <goto>)
 choice += (Choice <intVal> <single_stmt>)
         | (Choice <floatVal> <single_stmt>)
 
-stmt -= (Join   <cont_name>)
-      | (Except <cont_name> <local>)
+stmt -= (Join   <block_name>)
+      | (Except <block_name> <local>)
       | <exit>
       | <goto>
 
 stmt += (Block <single_stmt>)
       | (Loop <single_stmt>)
-      | (If <value> <single_stmt> <single_stmt>?)
-      | (Case <type> <simple> <choice>+)
-      | (CheckedCall <proc> <value>*)
-      | (CheckedCall <type> <value>+)
-      | (CheckedCallAsgn <local> <proc> <value>*)
-      | (CheckedCallAsgn <local> <type> <value>+)
-      | (Return <value>?)
-      | (Raise <value>)
+      | (If <expr> <single_stmt> <single_stmt>?)
+      | (Case <type_id> <simple> <choice>+)
+      | (CheckedCall <proc> <expr>*)
+      | (CheckedCall <type_id> <expr>+)
+      | (CheckedCallAsgn <local> <proc> <expr>*)
+      | (CheckedCallAsgn <local> <type_id> <expr>+)
+      | (Return <expr>?)
+      | (Raise <expr>)
       | (Unreachable)
 ```
 

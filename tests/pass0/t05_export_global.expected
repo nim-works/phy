@@ -1,0 +1,3 @@
+.type t0 () -> int
+.global g0 int 100
+.export global g0 "exported"

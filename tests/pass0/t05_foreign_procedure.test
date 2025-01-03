@@ -2,15 +2,13 @@ discard """
   output: "(Done 100)"
 """
 (TypeDefs
-  (Int 8)
-  (ProcTy (Type 0) (Type 0))
-  (ProcTy (Type 0)))
+  (ProcTy (Int 8) (Int 8))
+  (ProcTy (Int 8)))
 (GlobalDefs)
 (ProcDefs
-  (Foreign (Type 1) "core.test")
-  (ProcDef (Type 2) (Locals)
-    (Continuations
-      (Continuation (Params) 0
-        (Continue 1
-          (Call (Proc 0) (IntVal 100))))
-      (Continuation (Params (Type 0))))))
+  (Import (Type 0) "core.test")
+  (ProcDef (Type 1) 0 (Locals)
+    (List
+      (Block (Params)
+        (Return
+          (Call (Proc 0) (IntVal 100)))))))

@@ -1,5 +1,5 @@
 .type t0 () -> int
-.global g0 1
+.global g0 int 1
 .start t0 p0
   GetGlobal g0
   Ret

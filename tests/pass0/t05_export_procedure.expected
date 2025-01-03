@@ -1,0 +1,6 @@
+.type t0 () -> int
+.start t0 p0
+  LdImmInt 100
+  Ret
+.end
+.export proc p0 "exported"
