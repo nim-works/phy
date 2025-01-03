@@ -43,6 +43,8 @@ proc typeToString*(typ: SemType): string =
     res.add ") -> "
     res.add typeToString(typ.elems[0])
     res
+  of tkSeq:
+    "seq(" & typeToString(typ.elems[0]) & ")"
   of tkError:
     # diagnostic messages should not show error types, therefore rendering is
     # not implemented for them. If control-flow reaches here, it usually means

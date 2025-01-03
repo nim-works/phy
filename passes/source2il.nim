@@ -21,6 +21,7 @@ type
   SourceKind = spec_source.NodeKind
   InTree     = PackedTree[SourceKind]
   Node       = TreeNode[NodeKind]
+  NodeSeq    = seq[Node]
 
   EntityKind = enum
     ekNone        ## signals "non-existent"
@@ -42,6 +43,10 @@ type
 
   Scope = Table[string, Entity]
 
+  TypeAttachedOp = enum
+    ## Type-attached operators.
+    opCopy
+
   ModuleCtx* = object
     ## The translation/analysis context for a single module.
     reporter: ref ReportContext[string]
@@ -54,13 +59,16 @@ type
     numTypes: int
     aliases: seq[SemType]
       ## the list of type aliases
-    procs: Builder[NodeKind]
-      ## the in-progress procedure section
+    procs: seq[NodeSeq]
+      ## all IL procedure definitions
     procList*: seq[ProcInfo]
     globals: Builder[NodeKind]
       ## the in-progress global variable section
     exports: Builder[NodeKind]
       ## the in-progress export section
+
+    typeOps: Table[(TypeAttachedOp, SemType), uint32]
+      ## caches the generated type-attached operators (i.e., procedures)
 
     procTypeCache: Table[SemType, uint32]
       ## caches the ID of IL signature types generated for procedure types.
@@ -69,6 +77,9 @@ type
 
     scopes: seq[Scope]
       ## the stack of scopes. The last item always represents the current scope
+
+    entry*: int
+      ## index of the module's entry procedure. -1 means that there's none
 
     # procedure context:
     retType: SemType
@@ -106,6 +117,8 @@ const
     "<=": ekBuiltinProc,
     "<": ekBuiltinProc,
     "not": ekBuiltinProc,
+    "len": ekBuiltinProc,
+    "concat": ekBuiltinProc,
     "true": ekBuiltinVal,
     "false": ekBuiltinVal
   }.toTable
@@ -118,6 +131,12 @@ const
   pointerType = prim(tkInt)
     ## the type inhabited by pointer values. The constant is used as a
     ## placeholder until a dedicated pointer type is introduced
+
+  # the allocator and generic seq procedures currently use static IDs
+  AllocProc = 0
+  DeallocProc {.used.} = 1
+  ReallocProc {.used.} = 2
+  PrepareAddProc = 4
 
 using
   c: var ModuleCtx
@@ -162,6 +181,16 @@ func openScope(c) =
 func closeScope(c) =
   ## Closes the current scope and makes its parent the current one.
   c.scopes.shrink(c.scopes.len - 1)
+
+template buildTree(kind: NodeKind, body: untyped): seq[Node] =
+  ## Injects a builder named `bu` into the scope of `body` and returns
+  ## the builder's nodes after evaluating `body`.
+  if true:
+    var bu {.inject.} = initBuilder(kind)
+    body
+    finish(bu)
+  else:
+    unreachable()
 
 template addType(c; kind: NodeKind, body: untyped): uint32 =
   c.types.subTree kind:
@@ -245,6 +274,9 @@ proc evalType(c; t; n: NodeIndex): SemType =
       list.add c.expectNot(c.evalType(t, it), tkVoid)
 
     SemType(kind: tkProc, elems: list)
+  of SourceKind.SeqTy:
+    SemType(kind: tkSeq,
+            elems: @[c.expectNot(c.evalType(t, t.child(n, 0)), tkVoid)])
   of Ident:
     let
       name = t.getString(n)
@@ -308,6 +340,21 @@ proc typeToIL(c; typ: SemType): uint32 =
     # a proc type is used to represent both procedure signatures and the type
     # of procedural values. For values, the underlying storage type is a uint
     c.addType Node(kind: UInt, val: 8)
+  of tkSeq:
+    let
+      lengthType  = c.typeToIL(prim(tkInt))
+      pointerType = c.typeToIL(pointerType)
+    c.addType Record:
+      c.types.add Node(kind: Immediate, val: size(typ).uint32)
+      c.types.add Node(kind: Immediate, val: 8)
+      # the length field:
+      c.types.subTree Field:
+        c.types.add Node(kind: Immediate, val: 0)
+        c.types.add Node(kind: Type, val: lengthType)
+      # the payload field:
+      c.types.subTree Field:
+        c.types.add Node(kind: Immediate, val: 8)
+        c.types.add Node(kind: Type, val: pointerType)
 
 func numILParams(typ: SemType): int =
   ## Returns the number of parameters the IL signature type generated from
@@ -346,12 +393,176 @@ proc genProcType(c; typ: SemType): uint32 =
     result = rawGenProcType(c, typ)
     c.procTypeCache[typ] = result
 
+proc genPayloadType(c; typ: SemType): uint32 =
+  ## Generates and emits the payload type for a sequence with the given
+  ## element type (`typ`). Returns the ID of the payload type.
+  # TODO: cache the type description, so that it's only emitted once per
+  #       element type
+  let
+    intType = c.typeToIL(prim(tkInt))
+    elem = c.typeToIL(typ)
+
+  let arrayType = c.addType Array:
+    c.types.add Node(kind: Immediate, val: 1) # size
+    c.types.add Node(kind: Immediate, val: 8) # alignment
+    c.types.add Node(kind: Immediate, val: 0)
+    c.types.add Node(kind: Type, val: elem)
+
+  c.addType Record:
+    c.types.add Node(kind: Immediate, val: 9)
+    c.types.add Node(kind: Immediate, val: 8)
+    # the capacity field:
+    c.types.subTree Field:
+      c.types.add Node(kind: Immediate, val: 0)
+      c.types.add Node(kind: Type, val: intType)
+    # the data field:
+    c.types.subTree Field:
+      c.types.add Node(kind: Immediate, val: 8)
+      c.types.add Node(kind: Type, val: arrayType)
+
 proc addProc(c; typ: sink SemType, def: seq[Node]): int =
   ## Adds a procedure with signature `typ` and definition `def` to the
   ## context, returning the ID to address it with.
   c.procs.add def
   c.procList.add ProcInfo(typ: typ)
   result = c.procList.high
+
+proc getTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32
+
+proc genPayloadAccess(c; e: sink IrNode, typ: SemType): IrNode =
+  newDeref(c.genPayloadType(typ), newFieldExpr(e, 1))
+
+proc genSeqAccess(c; e, idx: sink IrNode, typ: SemType): IrNode =
+  newAt(newFieldExpr(c.genPayloadAccess(e, typ), 1), idx)
+
+proc genCapAccess(c; e: sink IrNode, typ: SemType): IrNode =
+  newFieldExpr(c.genPayloadAccess(e, typ), 0)
+
+proc newIntOp(c; op: NodeKind, a, b: sink IrNode): IrNode =
+  newBinaryOp(op, c.typeToIL(prim(tkInt)), a, b)
+
+proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
+  ## Synthesizes and emits the `op` type-bound operator for `typ`. Returns the
+  ## ID of the synthesized procedure; no caching is performed.
+  var
+    procTy: SemType
+    params: seq[uint32]
+    locals: seq[SemType]
+    body: IrNode
+
+  case op
+  of opCopy:
+    # copy(x: T) -> T
+    procTy = SemType(kind: tkProc, elems: @[typ, typ])
+    params.add 0
+    locals.add typ # parameter
+    locals.add typ # result
+    let
+      src = newLocal(0)
+      dst = newLocal(1)
+
+    case typ.kind
+    of tkSeq:
+      let
+        srcLen = newFieldExpr(src, 0)
+        dstLen = newFieldExpr(dst, 0)
+
+      var then = IrNode(kind: Stmts)
+      then.add newAsgn(dstLen, newIntVal(0))
+      then.add newAsgn(newFieldExpr(dst, 1), newIntVal(0))
+      then.add newReturn(dst)
+
+      var els = IrNode(kind: Stmts)
+      els.add newAsgn(dstLen, srcLen)
+      # the size of the payload is sizeof(capacity) + sizeof(element) * length
+      els.add newAsgn(newFieldExpr(dst, 1), newCall(AllocProc,
+        newBinaryOp(Add, c.typeToIL(prim(tkInt)),
+          newBinaryOp(Mul, c.typeToIL(prim(tkInt)),
+            srcLen,
+            newIntVal(size(typ.elems[0]))),
+          newIntVal(size(prim(tkInt))))))
+
+      els.add newAsgn(c.genCapAccess(dst, typ), srcLen)
+
+      # set up the loop counter:
+      let counter = newLocal(2)
+      locals.add prim(tkInt)
+      els.add newAsgn(counter, newIntVal(0))
+
+      var loopBody = IrNode(kind: Stmts)
+      loopBody.add newIf(c.newIntOp(Eq, counter, srcLen), newBreak(1))
+
+      let
+        srcElem = c.genSeqAccess(src, counter, typ)
+        dstElem = c.genSeqAccess(dst, counter, typ)
+
+      if isTriviallyCopyable(typ.elems[0]):
+        # XXX: using a memcopy to copy all elements at once would most likely
+        #      be faster
+        loopBody.add newAsgn(dstElem, srcElem)
+      else:
+        loopBody.add newAsgn(dstElem,
+          newCall(c.getTypeBoundOp(opCopy, typ.elems[0]), srcElem))
+
+      loopBody.add newAsgn(counter, c.newIntOp(Add, counter, newIntVal(1)))
+
+      els.add IrNode(kind: Loop, children: @[loopBody])
+      els.add newReturn(dst)
+      body = newIf(c.newIntOp(Eq, srcLen, newIntVal(0)), then, els)
+    of tkTuple:
+      body = IrNode(kind: Stmts)
+      # copy each tuple element from the source to the destination:
+      for i, it in typ.elems.pairs:
+        if isTriviallyCopyable(it):
+          body.add newAsgn(newFieldExpr(dst, i),
+            newFieldExpr(src, i))
+        else:
+          body.add newAsgn(newFieldExpr(dst, i),
+            newCall(c.getTypeBoundOp(opCopy, it), newFieldExpr(src, i)))
+
+      body.add newReturn(dst)
+    of tkUnion:
+      body = IrNode(kind: Stmts)
+      # copy the tag:
+      body.add newAsgn(newFieldExpr(dst, 0), newFieldExpr(src, 0))
+      # copy the value:
+      locals.add prim(tkInt)
+      # case statements in the target IL don't allow a field access as the
+      # selector, so an intermediate temporary is needed
+      body.add newAsgn(newLocal(2), newFieldExpr(dst, 0))
+      var caseStmt = newCase(c.typeToIL(prim(tkInt)), newLocal(2))
+      for i, it in typ.elems.pairs:
+        var val = newFieldExpr(newFieldExpr(src, 1), i)
+        if not isTriviallyCopyable(it):
+          val = newCall(c.getTypeBoundOp(opCopy, it), val)
+        caseStmt.add newChoice(newIntVal(i),
+          newAsgn(newFieldExpr(newFieldExpr(dst, 1), i), val))
+
+      body.add caseStmt
+      body.add newReturn(dst)
+    else:
+      unreachable() # no copy procedure needed
+
+  # assemble the final definition and add it to the module:
+  var bu = initBuilder(ProcDef)
+  bu.add Node(kind: Type, val: c.genProcType(procTy))
+  bu.subTree Params:
+    for it in params.items:
+      bu.add Node(kind: Local, val: it)
+  bu.subTree Locals:
+    for it in locals.items:
+      bu.add Node(kind: Type, val: c.typeToIL(it))
+  convert(body, c.literals, bu)
+  result = c.addProc(procTy, finish(bu)).uint32
+
+proc getTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
+  ## Returns the cached type-bound operator `op` for `typ`, or creates and
+  ## caches it first.
+  c.typeOps.withValue (op, typ), val:
+    result = val[]
+  do:
+    result = c.genTypeBoundOp(op, typ)
+    c.typeOps[(op, typ)] = result
 
 proc resetProcContext(c) =
   c.locals.setLen(0) # re-use the memory
@@ -366,12 +577,23 @@ proc newTemp(c; typ: SemType): IrNode =
     result = newLocal(c.locals.len.uint32)
     c.locals.add typ
 
-proc wrap(e: sink Expr, dest: IrNode): IrNode =
+proc use(c; e: sink Expr; stmts): IrNode =
+  ## Adds `e`'s statements to `stmts` and returns the usage-context specific
+  ## version of the expression.
+  stmts.add e.stmts
+  if Lvalue in e.attribs and not isTriviallyCopyable(e.typ):
+    newCall(c.getTypeBoundOp(opCopy, e.typ), e.expr)
+  else:
+    e.expr
+
+proc wrap(c; e: sink Expr, dest: IrNode): IrNode =
   ## Turns `e` into a statement list. The expression part is turned into an
   ## assignment to `dest`, but only if not a void expression.
-  result = IrNode(kind: Stmts, children: e.stmts)
-  if e.typ.kind != tkVoid:
-    result.add newAsgn(dest, e.expr)
+  result = IrNode(kind: Stmts)
+  if e.typ.kind == tkVoid:
+    result.children = e.stmts
+  else:
+    result.add newAsgn(dest, use(c, e, result.children))
 
 proc inline(e: sink Expr, stmts): IrNode =
   ## Adds the statement part of `e` to `stmts` and returns the expression part.
@@ -382,8 +604,7 @@ proc capture(c; e: sink Expr; stmts): IrNode =
   ## Commits expression `e` to a fresh temporary. This is part of the
   ## expression-list lowering machinery.
   result = c.newTemp(e.typ)
-  stmts.add e.stmts
-  stmts.add newAsgn(result, e.expr)
+  stmts.add newAsgn(result, use(c, e, stmts))
 
 proc inlineLvalue(c; e: sink Expr; stmts): IrNode =
   ## Returns `e` as an l-value IL expression, committing `e` to a temporary
@@ -540,7 +761,7 @@ proc notToIL(c; t; n: NodeIndex, expr; stmts): SemType =
 
   if arg.typ.kind == tkBool:
     # a single argument, so no capture is necessary
-    expr = newNot(inline(arg, stmts))
+    expr = newNot(use(c, arg, stmts))
     result = prim(tkBool)
   else:
     c.error("expected 'bool' expression")
@@ -625,6 +846,40 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
         result = relToIL(c, t, n, name, expr, stmts)
       of "not":
         result = notToIL(c, t, n, expr, stmts)
+      of "len":
+        lenCheck(t, n, 2)
+        let e = c.exprToIL(t, t.child(n, 1))
+        if e.typ.kind != tkSeq:
+          c.error("'len' operand must be of sequence type")
+        expr = newFieldExpr(inlineLvalue(c, e, stmts), 0)
+        result = prim(tkInt)
+      of "concat":
+        lenCheck(t, n, 3)
+        let s    = c.exprToIL(t, t.child(n, 1))
+        var elem = c.exprToIL(t, t.child(n, 2))
+        if s.typ.kind != tkSeq:
+          c.error("'concat' expects sequence operand")
+        else:
+          # fit to the element type
+          elem = c.fitExpr(elem, s.typ.elems[0])
+
+        if elem.typ.kind == tkVoid:
+          c.error("void expression is not allowed in this context")
+          elem.typ = errorType()
+
+        # duplicate the sequence and then append the element to the duplicate.
+        # This is inefficient, of course, but it's also simple
+        let tmp = c.newTemp(s.typ)
+        stmts.add newAsgn(tmp, use(c, s, stmts))
+        stmts.add newAsgn(
+          newDeref(c.typeToIL(elem.typ),
+            newCall(PrepareAddProc, @[newAddr(newFieldExpr(tmp, 0)),
+                                      newAddr(newFieldExpr(tmp, 1)),
+                                      newIntVal(size(elem.typ))])),
+          use(c, elem, stmts))
+
+        expr = tmp
+        result = s.typ
       else:
         unreachable()
       return
@@ -646,7 +901,7 @@ proc localDeclToIL(c; t; n: NodeIndex, stmts) =
     e.expr = IrNode(kind: None)
 
   let local = c.newTemp(e.typ)
-  stmts.add newAsgn(local, inline(e, stmts))
+  stmts.add newAsgn(local, use(c, e, stmts))
 
   # verify that the name isn't in use already *after* analyzing the
   # initializer; the expression could introduce an entity with the same name
@@ -705,15 +960,15 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
 
     if t[n].kind == SourceKind.And:
       # (And a b) -> (If a b False)
-      stmts.add newIf(inline(ea, stmts),
-                      wrap(eb, tmp),
+      stmts.add newIf(use(c, ea, stmts),
+                      wrap(c, eb, tmp),
                       newAsgn(tmp, newIntVal(0)))
 
     else:
       # (Or a b) -> (If a True b)
-      stmts.add newIf(inline(ea, stmts),
+      stmts.add newIf(use(c, ea, stmts),
                       newAsgn(tmp, newIntVal(1)),
-                      wrap(eb, tmp))
+                      wrap(c, eb, tmp))
 
     expr = tmp
     result = prim(tkBool) + {}
@@ -739,7 +994,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
           (c.fitExpr(body, typ), c.fitExpr(els, typ))
       tmp = c.newTemp(typ)
 
-    stmts.add newIf(inline(cond, stmts), wrap(fb, tmp), wrap(fe, tmp))
+    stmts.add newIf(use(c, cond, stmts), wrap(c, fb, tmp), wrap(c, fe, tmp))
     expr = tmp
     result = typ + {}
   of SourceKind.While:
@@ -804,6 +1059,49 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       # it's the unit value
       expr = UnitNode
       result = prim(tkUnit) + {}
+  of SourceKind.Seq:
+    let
+      typ = c.expectNot(c.evalType(t, t.child(n, 0)), tkVoid)
+      length = t.len(n) - 1
+    var elems = newSeq[IrNode](length)
+
+    # assign all elements to temporaries first, so that the payload is only
+    # allocated when control-flow reaches past the argument expressions
+    block:
+      var i = 0
+      for it in t.items(n, 1):
+        elems[i] = c.capture(c.fitExpr(c.exprToIL(t, it), typ), stmts)
+        inc i
+
+    result = SemType(kind: tkSeq, elems: @[typ]) + {}
+
+    let
+      tmp = c.newTemp(result.typ)
+      payloadField = newFieldExpr(tmp, 1)
+
+    # emit the length field assignment:
+    stmts.add newAsgn(newFieldExpr(tmp, 0), newIntVal(length))
+
+    # emit the payload field assignment:
+    if length > 0:
+      let size = size(prim(tkInt)) + size(typ) * length
+      # the size of the payload is sizeof(capacity) + sizeof(element) * length
+      stmts.add newAsgn(payloadField, newCall(AllocProc, newIntVal(size)))
+
+      let payloadExpr = newDeref(c.genPayloadType(typ), payloadField)
+      # emit the capacity assignment:
+      stmts.add newAsgn(newFieldExpr(payloadExpr, 0), newIntVal(length))
+
+      # emit the final assignments:
+      for i, it in elems.pairs:
+        stmts.add newAsgn(
+          newAt(newFieldExpr(payloadExpr, 1), newIntVal(i)),
+          it)
+    else:
+      # an empty sequence, set the payload pointer to zero (nil)
+      stmts.add newAsgn(payloadField, newIntVal(0))
+
+    expr = tmp
   of SourceKind.FieldAccess:
     let
       (a, b) = t.pair(n)
@@ -830,7 +1128,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       dst.expr = IrNode(kind: None)
 
     let src = c.fitExpr(c.exprToIL(t, b), dst.typ)
-    stmts.add newAsgn(inline(dst, stmts), inline(src, stmts))
+    stmts.add newAsgn(inline(dst, stmts), use(c, src, stmts))
 
     expr = UnitNode
     result = prim(tkUnit) + {}
@@ -847,13 +1145,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
 
     # apply the necessary to-supertype conversions:
     e = c.fitExpr(e, c.retType)
-
-    stmts.add e.stmts
-    case e.typ.kind
-    of tkError:
-      discard "do nothing"
-    else:
-      stmts.add newReturn(e.expr)
+    stmts.add newReturn(use(c, e, stmts))
 
     result = prim(tkVoid) + {}
   of SourceKind.Unreachable:
@@ -899,11 +1191,11 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   ## Creates a new empty module translation/analysis context.
   result = ModuleCtx(reporter: reporter,
                      types: initBuilder[NodeKind](TypeDefs),
-                     procs: initBuilder[NodeKind](ProcDefs),
                      globals: initBuilder[NodeKind](GlobalDefs),
                      exports: initBuilder[NodeKind](List),
                      # start with the top-level scope
-                     scopes: @[default(Scope)])
+                     scopes: @[default(Scope)],
+                     entry: -1)
 
   template c: untyped = result
 
@@ -1018,13 +1310,101 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   addProc procTy, ReallocBody,
           [$c.genProcType(procTy), $c.typeToIL(prim(tkInt))]
 
+  # grow(payload: pointer, capacity: int, stride: int) -> pointer
+  # reallocates the given payload if its capacity is less than the requested
+  # one. The new payload is returned
+  const GrowBody = """
+    (ProcDef (Type $1)
+      (Params (Local 0) (Local 1) (Local 2))
+      (Locals (Type $2) (Type $2) (Type $2))
+      (Stmts
+        (If
+          (Eq (Type $2)
+            (Copy (Local 0))
+            (IntVal 0))
+          (Asgn (Local 0)
+            (Call (Proc 0)
+              (Add (Type $2)
+                (IntVal $3)
+                (Mul (Type $2)
+                  (Copy (Local 1))
+                  (Copy (Local 2))))))
+          (If
+            (Not
+              (Lt (Type $2)
+                (Copy (Local 0))
+                (Copy (Local 1))))
+            (Asgn (Local 0)
+              (Call (Proc 2)
+                (Copy (Local 0))
+                (Add (Type $2)
+                  (IntVal $3)
+                  (Mul (Type $2)
+                    (Load (Type $2)
+                      (Copy (Local 0)))
+                    (Copy (Local 2))))
+                (Add (Type $2)
+                  (IntVal $3)
+                  (Mul (Type $2)
+                    (Copy (Local 1))
+                    (Copy (Local 2))))))))
+        (Store (Type $2)
+          (Copy (Local 0))
+          (Copy (Local 1)))
+        (Return (Copy (Local 0)))))
+  """
+  addProc procTy, GrowBody,
+          [$c.genProcType(procTy), $c.typeToIL(prim(tkInt)),
+           $size(prim(tkInt)) #[<- offset of payload's data field]#]
+
+  # prepareAdd(lenAddr: pointer, payloadAddr: pointer, stride: int) -> pointer
+  # increments the length and resizes the payload (via the grow procedure)
+  # when needed. The implementation works with all seq types in order to not
+  # having to synthesize a version for each used seq type
+  const PrepareAddBody = """
+    (ProcDef (Type $1)
+      (Params (Local 0) (Local 1) (Local 2))
+      (Locals (Type $2) (Type $2) (Type $2) (Type $2))
+      (Stmts
+        (Asgn (Local 3)
+          (Load (Type $2)
+            (Copy (Local 0))))
+        (Store (Type $2)
+          (Copy (Local 0))
+          (Add (Type $2)
+            (Copy (Local 3))
+            (IntVal 1)))
+        (Store (Type $2)
+          (Copy (Local 1))
+          (Call (Proc 3)
+            (Load (Type $2)
+              (Copy (Local 1)))
+            (Load (Type $2)
+              (Copy (Local 0)))
+            (Copy (Local 2))))
+        (Return
+          (Add (Type $2)
+            (Add (Type $2)
+              (Load (Type $2)
+                (Copy (Local 1)))
+              (IntVal $3))
+            (Mul (Type $2)
+              (Copy (Local 3))
+              (Copy (Local 2)))))))
+  """
+  addProc procTy, PrepareAddBody,
+          [$c.genProcType(procTy), $c.typeToIL(prim(tkInt)),
+           $size(prim(tkInt)) #[<- offset of payload's data field]#]
+
 proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
   ## Closes the module context and returns the accumulated translated code.
   var bu = initBuilder[NodeKind]()
   bu.subTree Module:
     bu.add finish(move c.types)
     bu.add finish(move c.globals)
-    bu.add finish(move c.procs)
+    bu.subTree ProcDefs:
+      for it in c.procs.items:
+        bu.add it
     let exports = finish(move c.exports)
     if exports.len > 1: # don't add an empty export list
       bu.add exports
@@ -1047,9 +1427,7 @@ proc exprToIL*(c; t): SemType =
     procTy    = procType(result)
     signature = c.genProcType(procTy)
 
-  template bu: untyped = c.procs
-
-  bu.subTree ProcDef:
+  let body = buildTree ProcDef:
     bu.add Node(kind: Type, val: signature)
     bu.subTree Params:
       for i in 0..<numILParams(procTy):
@@ -1067,7 +1445,9 @@ proc exprToIL*(c; t): SemType =
         bu.subTree Return:
           use(e.expr, c.literals, bu)
 
-  c.procList.add ProcInfo(typ: procType(result))
+  c.procs.add body
+  c.procList.add ProcInfo(typ: procTy)
+  c.entry = c.procList.high
   # add the procedure as an export, to be able to look it up from the outside
   c.exports.subTree Export:
     let id = c.procList.high
@@ -1098,9 +1478,10 @@ proc declToIL*(c; t; n: NodeIndex) =
 
     let signature = c.genProcType(procTy)
 
-    # register the proc before analysing/translating the body
-    c.procList.add ProcInfo(typ: procTy)
-    c.addDecl(name, Entity(kind: ekProc, id: c.procList.high))
+    # register the proc before analysing/translating the body. The real IL
+    # body is filled in once complete
+    let self = c.addProc(procTy, @[])
+    c.addDecl(name, Entity(kind: ekProc, id: self))
 
     c.openScope()
     # add the parameters to the scope:
@@ -1124,7 +1505,13 @@ proc declToIL*(c; t; n: NodeIndex) =
     if e.typ.kind != tkVoid:
       c.error("a procedure body must be a 'void' expression")
       c.removeDecl(name) # remove again
-      c.procList.del(c.procList.high)
+      # the procedure cannot be removed from the lists again, as that would
+      # invalidate the IDs of the following procedures. Leaving the slot empty
+      # is also wrong, so it's filled with an import of a non-existent foreign
+      # procedure
+      c.procs[self] = buildTree Import:
+        bu.add Node(kind: Type, val: c.genProcType(procTy))
+        bu.add Node(kind: StringVal, val: c.literals.pack("error"))
       return
 
     var bu = initBuilder[NodeKind](ProcDef)
@@ -1140,7 +1527,8 @@ proc declToIL*(c; t; n: NodeIndex) =
       for it in e.stmts.items:
         convert(it, c.literals, bu)
 
-    c.procs.add finish(bu)
+    c.procs[self] = finish(bu)
+    c.entry = self
     # add the user-defined procedure as an export, to be able to look it up
     # from the outside
     c.exports.subTree Export:
@@ -1148,7 +1536,7 @@ proc declToIL*(c; t; n: NodeIndex) =
       # procedure names (which use their own prefix)
       c.exports.add Node(kind: StringVal,
                          val: c.literals.pack("module." & name))
-      c.exports.add Node(kind: Proc, val: c.procList.high.uint32)
+      c.exports.add Node(kind: Proc, val: self.uint32)
   of SourceKind.TypeDecl:
     let name = t.getString(t.child(n, 0))
     if c.lookup(name).kind != ekNone:
