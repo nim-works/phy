@@ -350,29 +350,6 @@ Given type `tuple(T[0], .., T[n])` for `T`, the type of the expression is
 **Expression kind**: same as `tup`
 **Uses**: nothing
 
-#### Array Elimination
-
-```grammar
-expr += (At arr:<expr> index:<expr>)
-```
-
-Retrieves the `index`-th element of `arr`. The index is zero-based, meaning
-that 0 refers to the first element in `arr`.
-
-Let `T` be the type of `arr`, and let `I` be the type of `index`. An error is
-reported if:
-* `T` is not a `seq` type
-* `I` is not type `int`
-
-At run-time, a *panic* is raised during computation of the location `At`
-denotes when the integer `index` evaluates to is not in range `[0, N)`, where
-`N` is the number of elements in `arr` at the time the location is computed.
-
-The evaluation order for `At` is described [here](#lvalue-evaluation-order).
-
-**Expression kind**: same as `arr`
-**Uses**: `index`
-
 #### Expression Lists
 
 ```grammar
@@ -598,14 +575,3 @@ r-value expression of type `unit`.
 module ::= (Module <decl>*)
 top ::= <module>
 ```
-
-### Lvalue Evaluation Order
-
-In a usage context, lvalue expressions first have all sub-expressions appearing
-in usage positions evaluated, from inside-to-outside and left-to-right. Only
-afterwards is the location storing the object to read computed.
-
-### Panics
-
-A panic is a fault during program execution that cannot be recovered from.
-Raising a panic means that the program terminates immediately.

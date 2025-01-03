@@ -17,7 +17,7 @@ type
     While
     Call
     TupleCons
-    FieldAccess, At
+    FieldAccess
     Exprs
     Asgn
     Return
@@ -32,7 +32,7 @@ type
 
 const
   ExprNodes* = {IntVal, FloatVal, Ident, And, Or, If, While, Call, TupleCons,
-                FieldAccess, At, Asgn, Return, Unreachable, Exprs, Decl}
+                FieldAccess, Asgn, Return, Unreachable, Exprs, Decl}
   DeclNodes* = {ProcDecl, TypeDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 
