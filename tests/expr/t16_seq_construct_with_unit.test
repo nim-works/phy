@@ -1,0 +1,4 @@
+discard """
+  output: "[()]: seq(unit)"
+"""
+(Seq (UnitTy) (TupleCons))

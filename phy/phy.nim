@@ -198,8 +198,8 @@ proc sourceToIL(text: string): (PackedTree[spec.NodeKind], SemType) =
     quit(2)
 
   result[1] =
-    if ctx.procList.len > 0: ctx.procList[^1].typ.elems[0]
-    else:                    prim(tkError)
+    if ctx.entry != -1: ctx.procList[ctx.entry].typ.elems[0]
+    else:               prim(tkError)
   result[0] = ctx.close()
 
 proc compile(tree: var PackedTree[spec.NodeKind], source, target: Language) =
