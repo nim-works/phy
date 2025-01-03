@@ -102,6 +102,9 @@ const
   BuiltIns = {
     "+": ekBuiltinProc,
     "-": ekBuiltinProc,
+    "*": ekBuiltinProc,
+    "div": ekBuiltinProc,
+    "mod": ekBuiltinProc,
     "==": ekBuiltinProc,
     "<=": ekBuiltinProc,
     "<": ekBuiltinProc,
@@ -492,6 +495,11 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, expr, stmts): SemType =
     c.error("arguments have mismatching types")
     result = errorType()
   else:
+    template wantType(s: set[TypeKind], msg: string) =
+      if eA.typ.kind notin s:
+        c.error(msg)
+        return errorType()
+
     proc check(c; op: NodeKind, a, b: sink IrNode, stmts): IrNode {.nimcall.} =
       ## Emits a checked arithmetic operation and returns the local storing the
       ## result.
@@ -527,6 +535,28 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, expr, stmts): SemType =
       else:
         c.error("arguments must be of 'int' or 'float' type")
         result = errorType()
+    of "*":
+      wantType {tkInt}, "arguments must be of 'int' type"
+      expr = check(c, MulChck, valA, valB, stmts)
+    of "div":
+      wantType {tkInt}, "arguments must be of 'int' type"
+      # emit a division-by-zero guard:
+      stmts.add newIf(
+        newBinaryOp(Eq, c.typeToIL(eA.typ), valB, newIntVal(0)),
+        newUnreachable())
+      # emit an overflow guard:
+      stmts.add newIf(
+        newBinaryOp(Eq, c.typeToIL(eA.typ), valA, newIntVal(low(int64))),
+        newIf(newBinaryOp(Eq, c.typeToIL(eA.typ), valB, newIntVal(-1)),
+          newUnreachable()))
+      expr = newBinaryOp(Div, c.typeToIL(eA.typ), valA, valB)
+    of "mod":
+      wantType {tkInt}, "arguments must be of 'int' type"
+      # emit a division-by-zero guard:
+      stmts.add newIf(
+        newBinaryOp(Eq, c.typeToIL(eA.typ), valB, newIntVal(0)),
+        newUnreachable())
+      expr = newBinaryOp(Mod, c.typeToIL(eA.typ), valA, valB)
     else:
       unreachable()
 
@@ -643,7 +673,7 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
 
     if ent.kind == ekBuiltinProc:
       case name
-      of "+", "-":
+      of "+", "-", "*", "div", "mod":
         result = binaryArithToIL(c, t, n, name, expr, stmts)
       of "==", "<", "<=":
         result = relToIL(c, t, n, name, expr, stmts)
