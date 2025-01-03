@@ -1,0 +1,4 @@
+discard """
+  output: "runtime error: ecUnreachable"
+"""
+(Call (Ident "mod") (IntVal 1) (IntVal 0))

@@ -1,0 +1,4 @@
+discard """
+  output: "runtime error: ecUnreachable"
+"""
+(Call (Ident "*") (IntVal 3037000500) (IntVal 3037000500))

@@ -84,6 +84,17 @@ when not defined(debug):
 func signExtend*(val: uint64, shift: int8): uint64 {.inline.} =
   cast[uint64](ashr(cast[int64](val shl shift), shift))
 
+func mulCheckOverflow(a, b: int64, o: var int64): bool =
+  # implementation taken from Nim's compiler runtime library
+  let res = cast[int64](cast[uint64](a) * cast[uint64](b))
+  let floatProd = float64(a) * float64(b)
+  let resAsFloat = float64(res)
+  if resAsFloat == floatProd or
+     32.0 * abs(resAsFloat - floatProd) <= abs(floatProd):
+    o = res
+  else:
+    result = true
+
 proc findEh(c: VmEnv, t: VmThread, at: PrgCtr, frame: int): (int, uint32) =
   ## Searches for the EH instruction that is associated with `at`, starting in
   ## the call frame `frame`. The call stack is walked upwards until either an
@@ -298,6 +309,12 @@ proc run*(c: var VmEnv, t: var VmThread, cl: RootRef): YieldReason {.raises: [].
       let res = signExtend(a - b, 64 - imm8())
       push res
       push ord((res xor a) >= sign and (res xor not b) >= sign)
+    of opcMulChck:
+      let (b, a) = (pop(int64), pop(int64))
+      var res: int64
+      let overflow = mulCheckOverflow(a, b, res)
+      push res
+      push overflow
 
     of opcBitNot:   asgn 1, not operand(1).uintVal
     of opcBitAnd:   asgn 1, binaryOp(`and`, uint64)

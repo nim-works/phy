@@ -1,0 +1,4 @@
+discard """
+  output: "runtime error: ecUnreachable"
+"""
+(Call (Ident "*") (IntVal -9223372036854775808) (IntVal -1))

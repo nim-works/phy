@@ -35,7 +35,7 @@ type
     # checked signed integer arithmetic
     opcAddChck      ## a:int b:int width:imm8 -> res:int of:int
     opcSubChck      ## a:int b:int width:imm8 -> res:int of:int
-    # TODO: consider adding checked integer multiplication
+    opcMulChck      ## a:int b:int            -> res:int of:int
 
     # bit operations
     opcBitNot     ## a:int -> int

@@ -145,6 +145,9 @@ proc run(ctx: var ValidationState, env: VmModule, pos: PrgCtr, instr: Instr
     check imm8(instr) in 1..64, "width not in range 1..64"
     pop(vtInt); pop(vtInt)
     push(vtInt); push(vtInt)
+  of opcMulChck:
+    pop(vtInt); pop(vtInt)
+    push(vtInt); push(vtInt)
   of opcMask, opcSignExtend:
     pop(vtInt)
     push(vtInt)

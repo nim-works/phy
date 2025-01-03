@@ -1,0 +1,4 @@
+discard """
+  output: "0: int"
+"""
+(Call (Ident "mod") (IntVal 10) (IntVal 5))

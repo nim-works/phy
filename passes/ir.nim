@@ -21,7 +21,8 @@ type
     of Local, Proc, Type:
       id*: uint32
     of Field, At, Deref, Addr, Call, Stmts, Drop, Asgn, Break, Return, Loop,
-       If, Case, Choice, Add, Sub, Mul, Div, Mod, Not, Eq, Lt, Le:
+       If, Case, Choice, Add, Sub, Mul, Div, Mod, Not, Eq, Lt, Le,
+       AddChck, SubChck, MulChck:
       children*: seq[IrNode]
     else:
       discard
@@ -118,6 +119,14 @@ proc newBinaryOp*(op: NodeKind, typ: uint32, a, b: sink IrNode): IrNode =
   else:
     unreachable()
 
+proc newCheckedOp*(op: NodeKind, typ: uint32, a, b, dst: sink IrNode): IrNode =
+  case op
+  of AddChck, SubChck, MulChck:
+    assert dst.kind == Local
+    IrNode(kind: op, children: @[IrNode(kind: Type, id: typ), a, b, dst])
+  else:
+    unreachable()
+
 proc convert*(n: IrNode, lit: var Literals, bu: var Builder[NodeKind])
 
 proc use*(n: IrNode, lit: var Literals, bu: var Builder[NodeKind]) =
@@ -163,6 +172,12 @@ proc convert*(n: IrNode, lit: var Literals, bu: var Builder[NodeKind]) =
   of Addr:
     bu.subTree Addr:
       convert(n[0], lit, bu)
+  of AddChck, SubChck, MulChck:
+    bu.subTree n.kind:
+      convert(n[0], lit, bu)
+      use(n[1], lit, bu)
+      use(n[2], lit, bu)
+      convert(n[3], lit, bu)
   of Call:
     bu.subTree Call:
       for i, it in n.children.pairs:
