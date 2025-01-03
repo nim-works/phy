@@ -227,7 +227,8 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
 
   case op
   of opcNop, opcDrop, opcDup, opcSwap, opcAddInt, opcSubInt, opcMulInt,
-     opcDivInt, opcDivU, opcModInt, opcModU, opcNegInt, opcBitAnd, opcBitOr,
+     opcDivInt, opcDivU, opcModInt, opcModU, opcNegInt, opcMulChck,
+     opcBitAnd, opcBitOr,
      opcBitXor, opcBitNot, opcShr, opcAshr, opcShl, opcRet, opcAddFloat,
      opcSubFloat, opcMulFloat, opcDivFloat, opcNegFloat, opcEqInt, opcLtInt,
      opcLeInt, opcLtu, opcLeu, opcEqFloat, opcLtFloat, opcLeFloat, opcNot,
