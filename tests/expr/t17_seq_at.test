@@ -1,0 +1,10 @@
+discard """
+  output: "26: int"
+"""
+(Exprs
+  (Decl x (Seq (IntTy) 1 5 20))
+  (Call (Ident "+")
+    (At x 0)
+    (Call (Ident "+")
+      (At x 1)
+      (At x 2))))
