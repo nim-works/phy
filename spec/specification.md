@@ -108,9 +108,12 @@ typ ::= void                        # corresponds to `(VoidTy)`
      |  (UnionTy <typ>+)
      |  (ProcTy  <typ>+)
      |  (SeqTy   <typ>)
-le  ::= x                   # | subset of expressions where all non-lvalue
-     |  (FieldAccess le n)  # | operands were already evaluated
-e   ::= x | val | typ | ... # includes all expressions from the abstract syntax
+le  ::= <l>                  # | subset of expressions where all non-lvalue
+     |  (FieldAccess <le> n) # | operands were already evaluated
+e   ::= x                    # free variable
+     | <val>
+     | <typ>
+     |  ... # includes all expressions from the abstract syntax
 
 e += (Frame typ e) # a special expression for assisting with evaluation
 ```
