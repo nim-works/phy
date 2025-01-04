@@ -431,7 +431,8 @@ proc addProc(c; typ: sink SemType, def: seq[Node]): int =
 proc getTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32
 
 proc genPayloadAccess(c; e: sink IrNode, typ: SemType): IrNode =
-  newDeref(c.genPayloadType(typ), newFieldExpr(e, 1))
+  assert typ.kind == tkSeq
+  newDeref(c.genPayloadType(typ.elems[0]), newFieldExpr(e, 1))
 
 proc genSeqAccess(c; e, idx: sink IrNode, typ: SemType): IrNode =
   newAt(newFieldExpr(c.genPayloadAccess(e, typ), 1), idx)
