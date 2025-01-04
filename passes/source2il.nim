@@ -1062,6 +1062,39 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       expr = UnitNode
       result = prim(tkUnit) + {}
   of SourceKind.Seq:
+    if t[n, 0].kind == SourceKind.StringVal:
+      # it's a string constructor
+      result = SemType(kind: tkSeq, elems: @[prim(tkChar)]) + {}
+      let
+        str {.cursor.} = t.getString(t.child(n, 0))
+        elem = prim(tkChar)
+        tmp = c.newTemp(result.typ)
+        payloadField = newFieldExpr(tmp, 1)
+
+      # emit the length field assignment:
+      stmts.add newAsgn(newFieldExpr(tmp, 0), newIntVal(str.len))
+
+      # emit the payload field assignment:
+      if str.len > 0:
+        let size = size(prim(tkInt)) + size(elem) * str.len
+        stmts.add newAsgn(payloadField, newCall(AllocProc, newIntVal(size)))
+
+        let payloadExpr = newDeref(c.genPayloadType(elem), payloadField)
+        # emit the capacity assignment:
+        stmts.add newAsgn(newFieldExpr(payloadExpr, 0), newIntVal(str.len))
+
+        # assign the bytes one by one:
+        for i, it in str.pairs:
+          stmts.add newAsgn(
+            newAt(newFieldExpr(payloadExpr, 1), newIntVal(i)),
+            newIntVal(ord(it)))
+      else:
+        # an empty sequence, set the payload pointer to zero (nil)
+        stmts.add newAsgn(payloadField, newIntVal(0))
+
+      expr = tmp
+      return
+
     let
       typ = c.expectNot(c.evalType(t, t.child(n, 0)), tkVoid)
       length = t.len(n) - 1
