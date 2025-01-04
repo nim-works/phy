@@ -161,8 +161,12 @@ proc convert*(n: IrNode, lit: var Literals, bu: var Builder[NodeKind]) =
   of Local, Proc, Type:
     bu.add Node(kind: n.kind, val: n.id)
   of Addr:
-    bu.subTree Addr:
-      convert(n[0], lit, bu)
+    if n[0].kind == Deref:
+      # collapse `(Addr (Deref typ x))` to just `x`
+      use(n[0][1], lit, bu)
+    else:
+      bu.subTree Addr:
+        convert(n[0], lit, bu)
   of Call:
     bu.subTree Call:
       for i, it in n.children.pairs:
