@@ -523,7 +523,7 @@ E  ::= []
     |  (FieldAccess E n)
     |  (At E e)
     |  (At le E)
-    |  (Asgn E' n) # FIXME
+    |  (Asgn E' e)
     |  (Asgn le E)
     |  (With E n e)
     |  (With val n E)
