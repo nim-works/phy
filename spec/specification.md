@@ -25,11 +25,13 @@ numbers, and decimal numbers, respectively.
 ident    ::= (Ident <string>)
 intVal   ::= (IntVal <int>)
 floatVal ::= (FloatVal <float>)
+strVal   ::= (StringVal <string>)
 expr     ::= <ident>
           |  <intVal>
           |  <floatVal>
           |  (TupleCons <expr>*)
           |  (Seq <texpr> <expr>*)
+          |  (Seq <strVal>)
           |  (Call <expr>+)
           |  (FieldAccess <expr> <intVal>)
           |  (And <expr> <expr>)
@@ -87,6 +89,7 @@ the desugared form (the *language core*).
 ```
 c   ::= n                           # corresponds to `(IntVal n)`
      |  rational                    # corresponds to `(FloatVal rational)`
+     |  str                         # corresponds to `(StringVal str)`
      |  true                        # corresponds to `(Ident "true")`
      |  false                       # corresponds to `(Ident "false")`
      |  (TupleCons)                 # unit value
@@ -145,6 +148,7 @@ and `ProcTy` is significant, in `UnionTy` it is not. Formally:
 void  = void
 unit  = unit
 bool  = bool
+char  = char
 int   = int
 float = float
 
@@ -159,6 +163,7 @@ equal to b".
 # void is the bottom type; it's a subtype of all other types
 void <: unit
 void <: bool
+void <: char
 void <: int
 void <: float
 void <: (TupleTy typ+)
@@ -205,6 +210,10 @@ C |-_t (UnitTy) : unit
 
 --------------------- # S-bool-type
 C |-_t (BoolTy) : bool
+
+
+--------------------- # S-char-type
+C |-_t (CharTy) : char
 
 
 ------------------- # S-int-type
@@ -287,6 +296,10 @@ C |- (TupleCons e+) : (TupleTy typ ...)
 C |-_t e_1 : typ_1  C |- e_2 : All[typ_2] ...  typ_2 <:= typ_1 ...
 ------------------------------------------------------------------ # S-seq-cons
 C |- (Seq e_1 e_2*) : (SeqTy typ_1)
+
+
+------------------------------------------------------------------ # S-string-cons
+C |- (Seq str) : (SeqTy char)
 
 C |- e : All[typ]   C.return <:= typ
 ------------------------------------ # S-return
@@ -578,6 +591,10 @@ val_2 = copy(C, val_1) ...
 ---------------------------------------------- # E-seq-cons
 C; (Seq typ val_1+)  ~~>  C; (array val_2 ...)
 
+c in utf8_bytes(str)
+----------------------------------- # E-string-cons
+C; (Seq str)  ~~>  C; (array c ...)
+
 l notin C.locs
 -------------------------------------------------------------- # E-let-introduce
 C; (Let x val e)  ~~>  C + locs with l -> copy(C, val); e[x/l]
@@ -659,6 +676,12 @@ copy(C, l)                        = copy(C, C.locs(l))
 copy(C, (proc typ_r [x typ]^n e)) = (proc typ_r [x typ]^n e)
 copy(C, (array val^n))            = (array val^n)
 copy(C, (tuple val^n))            = (tuple val^n)
+```
+
+```
+utf8_bytes(str) = ?
+# TODO: the function is mostly self-explanatory, but it should be defined in
+#       a bit more detail nonetheless
 ```
 
 #### Type Safety
