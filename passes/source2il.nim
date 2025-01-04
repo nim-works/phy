@@ -298,6 +298,8 @@ proc typeToIL(c; typ: SemType): uint32 =
     c.addType Node(kind: Int, val: 1)
   of tkBool:
     c.addType Node(kind: Int, val: 1)
+  of tkChar:
+    c.addType Node(kind: UInt, val: 1)
   of tkInt, tkError:
     c.addType Node(kind: Int, val: 8)
   of tkFloat:
