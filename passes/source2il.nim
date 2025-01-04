@@ -46,6 +46,7 @@ type
   TypeAttachedOp = enum
     ## Type-attached operators.
     opCopy
+    opAt
 
   ModuleCtx* = object
     ## The translation/analysis context for a single module.
@@ -542,6 +543,25 @@ proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
       body.add newReturn(dst)
     else:
       unreachable() # no copy procedure needed
+  of opAt:
+    # at(s: seq(T), index: int) -> pointer
+    procTy = SemType(kind: tkProc, elems: @[pointerType, typ, prim(tkInt)])
+    params.add 0
+    params.add 1
+    locals.add typ
+    locals.add prim(tkInt)
+
+    let
+      s   = newLocal(0)
+      idx = newLocal(1)
+
+    body = IrNode(kind: Stmts)
+    body.add newIf(
+      c.newIntOp(Le, newIntVal(0), idx),
+      newIf(
+        c.newIntOp(Lt, idx, newFieldExpr(s, 0)),
+        newReturn(newAddr(c.genSeqAccess(s, idx, typ)))))
+    body.add newUnreachable()
 
   # assemble the final definition and add it to the module:
   var bu = initBuilder(ProcDef)
@@ -1120,6 +1140,34 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
     else:
       c.error("expected 'tuple' value")
       result = errorType() + {}
+  of SourceKind.At:
+    let
+      (a, b) = t.pair(n)
+      arr = c.exprToIL(t, a)
+      idx = c.exprToIL(t, b)
+
+    if arr.typ.kind notin {tkSeq, tkError}:
+      c.error("expected 'seq' value")
+    if idx.typ.kind notin {tkInt, tkError}:
+      c.error("index expression must be of type 'int'")
+
+    if arr.typ.kind == tkSeq:
+      result = arr.typ.elems[0] + arr.attribs
+
+      let at = c.getTypeBoundOp(opAt, arr.typ)
+      # keep the following things in mind:
+      # * the statements for the arr expression (i.e., its side effects),
+      #   need to come first
+      # * the result of the index expression needs to be captured, as it could
+      #   be impure and there might still be outermore side-effectful
+      #   expressions
+      # * checking the index and computing the address *must* be part of
+      #   the `expr`, otherwise side-effects from outermore index expressions
+      #   could render the array stale
+      expr = newDeref(c.typeToIL(result.typ),
+        newCall(at, @[c.inlineLvalue(arr, stmts), c.capture(idx, stmts)]))
+    else:
+      result = errorType() + arr.attribs
   of SourceKind.Asgn:
     let (a, b) = t.pair(n)
     var dst = c.exprToIL(t, a)
