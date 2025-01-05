@@ -1437,6 +1437,15 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     #      the implementation would simply be too error-prone at the moment
     #      (bound checks are fairly involved, see ``cgen``)
     discard
+  of mGetTypeInfoV2:
+    let t = tree[tree.argument(n, 0)].typ
+    if isFinal(env.types[t]):
+      # static type information
+      genAsgn(dest, c.getTypeInfoV2(env, t), stmts)
+    else:
+      # dynamic type information; query the object's type header
+      wrapAsgn:
+        c.genField(env, tree, NodePosition tree.argument(n, 0), -1, bu)
   else:
     # TODO: implement the remaining magics
     warn(c, tree[n].info, "magic not implemented: " & $tree[n, 1].magic)
@@ -2905,8 +2914,7 @@ proc main(args: openArray[string]) =
   defineSymbol(config, "noIntrinsicsBitOpts")
 
   config.astDiagToLegacyReport = cli_reporter.legacyReportBridge
-  # XXX: only arc is support at the moment
-  discard processSwitch("gc", "arc", passCmd2, config)
+  discard processSwitch("gc", "orc", passCmd2, config)
 
   # ---- the main part of compilation
   registerPass graph, semPass
