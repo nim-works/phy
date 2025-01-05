@@ -78,11 +78,6 @@ type
 
     sources: SourceMap
 
-  PartialProc = object
-    body: MirBody
-    nodes: seq[Node]
-    ctx: ProcContext
-
   Context = object
     graph: ModuleGraph
     lit: Literals
@@ -100,6 +95,14 @@ type
     rttiCache: Table[TypeId, uint32]
       ## caches the RTTIv2 globals created for types
 
+    procMap: Table[ProcedureId, uint32]
+      ## maps MIR procedure IDs to their corresponding IL procedure IDs. The MIR
+      ## procedure IDs cannot be used directly as IL procedure ID because the
+      ## partial procedure handling creates IL procedure that have no MIR
+      ## counterpart
+    nextProc: uint32
+      ## the ID to use for the next registered procedure
+
     globalsMap: Table[GlobalId, uint32]
       ## maps MIR globals and constants to IL globals
     constMap: Table[ConstId, uint32]
@@ -116,7 +119,7 @@ type
     nodes: seq[Node]
     typ {.requiresInit.}: TypeId
 
-  ProcMap = SeqMap[ProcedureId, seq[Node]]
+  ProcMap = SeqMap[uint32, seq[Node]]
 
 const
   MagicsToKeep = {mNewSeq, mSetLengthSeq, mAppendSeqElem,
@@ -203,11 +206,16 @@ proc newTemp(c; typ: TypeId): Expr =
   c.prc.temps.add typ
   result = makeExpr(@[node(Local, id)], typ)
 
+proc registerProc(c; prc: ProcedureId): uint32 =
+  result = c.procMap.mgetOrPut(prc, c.nextProc)
+  if result == c.nextProc: # is it a not-yet-seen procedure?
+    inc c.nextProc
+
 proc compilerProc(c; env: var MirEnv, name: string): Node =
   ## Requests the compilerproc with the given `name` and returns a reference
   ## to it.
   let p = c.graph.getCompilerProc(name)
-  result = node(Proc, env.procedures.add(p).uint32)
+  result = node(Proc, c.registerProc(env.procedures.add(p)))
 
 proc genType(c; env: TypeEnv, typ: TypeId): uint32
 
@@ -402,7 +410,7 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
         bu.subTree Copy:
           bu.add node(Global, c.constMap[tree[n].cnst])
   of mnkProcVal:
-    bu.add node(ProcVal, tree[n].prc.uint32)
+    bu.add node(ProcVal, c.registerProc(tree[n].prc))
   of mnkDeref, mnkDerefView:
     bu.subTree (if wantValue: Load else: Deref):
       bu.add typeRef(c, env, tree[n].typ)
@@ -1468,7 +1476,7 @@ proc genCall(c; env: var MirEnv; tree; n; dest: Expr, stmts; withEnv = false) =
     if tree[n, 1].kind == mnkProc:
       # a static call
       typ = env.types.add(env[tree[n, 1].prc].typ)
-      bu.add node(Proc, tree[n, 1].prc.uint32)
+      bu.add node(Proc, c.registerProc(tree[n, 1].prc))
     else:
       # a dynamic call
       typ = env.types.canonical(tree[n, 1].typ)
@@ -2178,6 +2186,53 @@ proc complete(c; env: MirEnv, typ: Node, prc: ProcContext, body: MirBody,
   bu.add content
   result = bu.finish()
 
+proc translateProc(c; env: var MirEnv, procType: TypeId,
+                   body: sink MirBody): seq[Node] =
+  c.prc.reset()
+  c.prc.sources = move body.source
+
+  var bias = 0
+  for id, it in body.locals.pairs:
+    if env.types.canonical(it.typ) == VoidType:
+      inc bias
+    else:
+      c.prc.localMap[id] = uint32(id.ord - bias)
+
+  let procTypeDesc = env.types.headerFor(procType, Canonical)
+
+  # gather the list of IL parameters
+  for (i, typ, flags) in env.types.params(procTypeDesc):
+    if env.types.canonical(typ) != VoidType:
+      c.prc.params.add c.prc.localMap[LocalId(i + 1)]
+      if pfByRef in flags:
+        c.prc.indirectLocals.incl LocalId(i + 1)
+
+  if procTypeDesc.kind == tkClosure:
+    # register the environment parameter
+    c.prc.params.add c.prc.localMap[LocalId(procTypeDesc.numParams() + 1)]
+
+  c.prc.nextLabel = body.nextLabel.uint32
+  c.prc.nextLocal = uint32(body.locals.nextId.ord - bias)
+  c.prc.active = true
+
+  # translate the body:
+  let content = block:
+    var bu = initBuilder[NodeKind](Stmts)
+    genAll(env, body.code, bu, c)
+
+    if c.prc.active:
+      # a return statement is required if control-flow falls through at the
+      # end
+      bu.subTree Return:
+        if body[LocalId 0].typ != VoidType:
+          bu.subTree Copy:
+            bu.add node(Local, c.prc.localMap[LocalId 0])
+
+    bu.finish()
+
+  let typ = c.genProcType(env, procType)
+  c.complete(env, typ, c.prc, body, content)
+
 proc replaceProcAst(config: ConfigRef, prc: PSym, with: PNode) =
   ## Replaces the ``PSym.ast`` of `prc` with the routine AST `with`,
   ## reparenting all symbols found in the body. This is crude, brittle, and
@@ -2220,7 +2275,7 @@ proc replaceProcAst(config: ConfigRef, prc: PSym, with: PNode) =
   prc.typ = copyType(with[namePos].sym.typ, with[namePos].sym.typ.itemId, prc)
   patch(prc.typ.n)
 
-proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[ProcedureId, PartialProc], graph: ModuleGraph, c; evt: sink BackendEvent) =
+proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[ProcedureId, Builder[NodeKind]], graph: ModuleGraph, c; evt: sink BackendEvent) =
   case evt.kind
   of bekDiscovered:
     case evt.entity.kind
@@ -2258,67 +2313,42 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
         bu.subTree Import:
           bu.add c.genProcType(env, env.types.add(prc.typ))
           bu.add node(StringVal, c.lit.pack(prc.extname))
-        bodies[evt.entity.prc] = finish(bu)
+        bodies[c.registerProc(evt.entity.prc)] = finish(bu)
+      else:
+        # register the procedure on discovery, to keep the IL IDs in roughly
+        # the same order as the MIR IDs. This is only relevant for
+        # debuggability
+        discard c.registerProc(evt.entity.prc)
 
     else:
       unreachable()
   of bekPartial:
+    # a new procedure is created for each fragment, # with a call to the new
+    # procedure then being appended to the partial procedure. This is much
+    # easier to implement than trying to append all fragments directly to the
+    # partial procedure
     if evt.id notin partial:
-      # XXX: an empty body is temporarily used in order to produced code that
-      #      passes ``pass25``
-      partial[evt.id] = PartialProc(nodes: @[node(Stmts, 1), node(Return, 0)])
+      partial[evt.id] = initBuilder(Stmts)
 
-    # TODO: implement the rest
+    var body = evt.body
+    apply(body, env) # apply the additional MIR passes
+
+    let
+      procType = env.types.add(evt.sym.typ)
+      r = c.translateProc(env, procType, body)
+    # important: do **not** inline `r`. The translateProc call may modify
+    # nextProc, which would then lead to the wrong slot being assigned to
+    bodies[c.nextProc] = r
+    inc c.nextProc
+
+    # add a call of the sub-procedure to the partial procedure:
+    partial[evt.id].add @[node(Call, 1), node(Proc, c.nextProc-1)]
   of bekProcedure:
     var body = evt.body
     apply(body, env) # apply the additional MIR passes
 
-    c.prc.reset()
-    c.prc.sources = move body.source
-
-    var bias = 0
-    for id, it in body.locals.pairs:
-      if env.types.canonical(it.typ) == VoidType:
-        inc bias
-      else:
-        c.prc.localMap[id] = uint32(id.ord - bias)
-
-    let
-      procType = env.types.add(evt.sym.typ)
-      procTypeDesc = env.types.headerFor(procType, Canonical)
-
-    # gather the list of IL parameters
-    for (i, typ, flags) in env.types.params(procTypeDesc):
-      if env.types.canonical(typ) != VoidType:
-        c.prc.params.add c.prc.localMap[LocalId(i + 1)]
-        if pfByRef in flags:
-          c.prc.indirectLocals.incl LocalId(i + 1)
-
-    if procTypeDesc.kind == tkClosure:
-      # register the environment parameter
-      c.prc.params.add c.prc.localMap[LocalId(procTypeDesc.numParams() + 1)]
-
-    c.prc.nextLabel = body.nextLabel.uint32
-    c.prc.nextLocal = uint32(body.locals.nextId.ord - bias)
-    c.prc.active = true
-
-    # translate the body:
-    let content = block:
-      var bu = initBuilder[NodeKind](Stmts)
-      genAll(env, body.code, bu, c)
-
-      if c.prc.active:
-        # a return statement is required if control-flow falls through at the
-        # end
-        bu.subTree Return:
-          if body[LocalId 0].typ != VoidType:
-            bu.subTree Copy:
-              bu.add node(Local, c.prc.localMap[LocalId 0])
-
-      bu.finish()
-
-    let typ = c.genProcType(env, procType)
-    bodies[evt.id] = c.complete(env, typ, c.prc, body, content)
+    let procType = env.types.add(evt.sym.typ)
+    bodies[c.registerProc(evt.id)] = c.translateProc(env, procType, body)
   else:
     discard
 
@@ -2547,7 +2577,7 @@ proc genConst(c; env; tree; n; dest: Expr, stmts) =
   of mnkFloatLit:
     putIntoDest node(FloatVal, c.lit.pack(env.getFloat(tree[n].number)))
   of mnkProcVal:
-    putIntoDest node(ProcVal, tree[n].prc.uint32)
+    putIntoDest node(ProcVal, c.registerProc(tree[n].prc))
   of mnkArrayConstr:
     for i, it in tree.args(n):
       let nDest = makeExpr tree[it].typ:
@@ -2778,8 +2808,8 @@ proc generateCode(graph: ModuleGraph): PackedTree[NodeKind] =
 
   var
     discovery: DiscoveryData
-    procs: SeqMap[ProcedureId, seq[Node]]
-    partial: Table[ProcedureId, PartialProc]
+    procs: ProcMap
+    partial: Table[ProcedureId, Builder[NodeKind]]
 
     mlist = graph.takeModuleList()
     c = Context(graph: graph)
@@ -2790,15 +2820,22 @@ proc generateCode(graph: ModuleGraph): PackedTree[NodeKind] =
     processEvent(env, procs, partial, graph, c, ac)
 
   for id, it in partial.mpairs:
+    # complete the statement list:
+    it.subTree Return: discard
+
+    var bu = initBuilder(ProcDef)
     # all partial procedure have signature ``proc()``. The main procedure does
     # too, therefore its type can be used here
-    let typ = c.genProcType(env, env.types.add(mlist.mainModule().init.typ))
-    procs[id] = c.complete(env, typ, it.ctx, it.body, it.nodes)
+    bu.add c.genProcType(env, env.types.add(mlist.mainModule().init.typ))
+    bu.subTree Params: discard
+    bu.subTree Locals: discard
+    bu.add finish(it)
+    procs[c.registerProc(id)] = finish(bu)
 
   # now that all live entities are known, emit the main procedure:
   block:
     let (id, body) = generateCodeForMain(c, env, mainModule(mlist), mlist)
-    procs[env.procedures.add(id)] = body
+    procs[c.registerProc(env.procedures.add(id))] = body
 
   # compute some statistics about the generated code:
   block:
@@ -2812,10 +2849,6 @@ proc generateCode(graph: ModuleGraph): PackedTree[NodeKind] =
         inc count
 
     echo "total: ", num, " average: ", (num / count)
-
-  # TODO: generate the main procedure, which is responsible for initializing
-  #       the globals/constants/data, initializing the allocator, and calling
-  #       the main module's procedure
 
   # assemble the final tree from the various fragments:
   var bu = initBuilder[NodeKind](NodeKind.Module)
