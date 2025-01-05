@@ -1,0 +1,6 @@
+discard """
+  output: "[1, 2, 3, 4]: seq(int)"
+"""
+(Exprs
+  (Decl x (Seq (IntTy) 1 2 3))
+  (Call concat x 4))

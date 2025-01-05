@@ -122,6 +122,7 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
       return
 
     let typ = ctx.exprToIL(tree)
+    let entry = ctx.entry
 
     let messages = reporter[].retrieve()
     for msg in messages.items:
@@ -167,7 +168,7 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
 
     # eval and print:
     echo run(env, hoSlice(mem.stackStart, mem.stackStart + mem.stackSize),
-             ProcIndex(env.procs.high), typ)
+             ProcIndex(entry), typ)
   else:
     echo "Error: unexpected node: ", tree[NodeIndex(0)].kind
 

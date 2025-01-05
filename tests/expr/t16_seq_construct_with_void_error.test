@@ -1,0 +1,4 @@
+discard """
+  reject: true
+"""
+(Seq (VoidTy) (Unreachable))

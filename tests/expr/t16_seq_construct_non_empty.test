@@ -1,0 +1,4 @@
+discard """
+  output: "[1, 2, 3]: seq(int)"
+"""
+(Seq (IntTy) 1 2 3)

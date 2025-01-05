@@ -1,0 +1,5 @@
+discard """
+  reject: true
+"""
+(Module
+  (TypeDecl x (SeqTy (VoidTy))))

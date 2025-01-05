@@ -21,7 +21,7 @@ type
     of Local, Proc, Type:
       id*: uint32
     of Field, At, Deref, Addr, Call, Stmts, Drop, Asgn, Break, Return, Loop,
-       If, Add, Sub, Mul, Div, Mod, Not, Eq, Lt, Le:
+       If, Case, Choice, Add, Sub, Mul, Div, Mod, Not, Eq, Lt, Le:
       children*: seq[IrNode]
     else:
       discard
@@ -55,11 +55,20 @@ proc newFloatVal*(val: float): IrNode =
 proc newLocal*(id: uint32): IrNode =
   IrNode(kind: Local, id: id)
 
+proc newTypeUse*(id: uint32): IrNode =
+  IrNode(kind: Type, id: id)
+
 proc newIf*(cond, then, els: sink IrNode): IrNode =
   IrNode(kind: If, children: @[cond, then, els])
 
 proc newIf*(cond, then: sink IrNode): IrNode =
   IrNode(kind: If, children: @[cond, then])
+
+proc newChoice*(val, then: sink IrNode): IrNode =
+  IrNode(kind: Choice, children: @[val, then])
+
+proc newCase*(typ: uint32, sel: sink IrNode): IrNode =
+  IrNode(kind: Case, children: @[newTypeUse(typ), sel])
 
 proc newAsgn*(dest, src: sink IrNode): IrNode =
   # allow none for the sake of error correction
@@ -69,6 +78,10 @@ proc newAsgn*(dest, src: sink IrNode): IrNode =
 proc newFieldExpr*(n: sink IrNode, index: int): IrNode =
   assert n.kind in {Field, At, Local, Deref, None}
   IrNode(kind: Field, children: @[n, newIntVal(index)])
+
+proc newAt*(lval, index: sink IrNode): IrNode =
+  assert lval.kind in {Field, At, Local, Deref, None}
+  IrNode(kind: At, children: @[lval, index])
 
 proc newDeref*(typ: uint32, n: sink IrNode): IrNode =
   IrNode(kind: Deref, children: @[IrNode(kind: Type, id: typ), n])
