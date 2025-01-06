@@ -1,0 +1,5 @@
+discard """
+  description: "'div' rounds towards zero"
+  output: "2: int"
+"""
+(Call (Ident "div") (IntVal 7) (IntVal 3))
