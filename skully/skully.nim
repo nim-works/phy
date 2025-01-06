@@ -1,5 +1,11 @@
 import
-  std/[importutils, os, strtabs, packedsets, tables],
+  std/[
+    importutils,
+    packedsets,
+    os,
+    strtabs,
+    tables
+  ],
   compiler/front/[
     options,
     cli_reporter,
@@ -82,8 +88,8 @@ type
     graph: ModuleGraph
     lit: Literals
 
-    typeMap: Table[TypeId, uint32]
-      ## maps MIR type IDs to the ID of the cached IL type
+    typeCache: Table[TypeId, uint32]
+      ## cache for the IL types resulting from MIR types
     types: OrderedTable[seq[Node], uint32]
       ## maps IL types to the associated ID (i.e., position in the typedefs
       ## tree). This is used for simple culling of structurally equal types
@@ -96,9 +102,9 @@ type
       ## caches the RTTIv2 globals created for types
 
     procMap: Table[ProcedureId, uint32]
-      ## maps MIR procedure IDs to their corresponding IL procedure IDs. The MIR
-      ## procedure IDs cannot be used directly as IL procedure ID because the
-      ## partial procedure handling creates IL procedure that have no MIR
+      ## maps MIR procedure IDs to their corresponding IL procedure IDs. The
+      ## MIR procedure IDs cannot be used directly as IL procedure ID because
+      ## the partial procedure handling creates IL procedure that have no MIR
       ## counterpart
     nextProc: uint32
       ## the ID to use for the next registered procedure
@@ -111,7 +117,7 @@ type
       ## the IL globals. address is the virtual address the underlying storage
       ## is located at
     globalsAddress: uint32
-      ## the virtual address at where the next global should be located at
+      ## the lower bound for virtual addresses of new global variable storage
 
     prc: ProcContext
 
@@ -157,7 +163,8 @@ func isPassByRef(env: TypeEnv; typ: TypeId, param: int): bool =
       return pfByRef in flags
   unreachable()
 
-iterator items(tree: MirTree, n: NodePosition, start: int, last: BackwardsIndex): NodePosition =
+iterator items(tree: MirTree, n: NodePosition, start: int,
+               last: BackwardsIndex): NodePosition =
   var it = tree.child(n, start)
   for _ in start .. (tree.len(n) - ord(last)):
     yield it
@@ -188,7 +195,7 @@ proc join(bu; label: uint32) =
 
 proc newGlobal(c; env: MirEnv, typ: TypeId): uint32 =
   let desc = env.types.headerFor(typ, Lowered)
-  # align the start address first:
+  # align the address first:
   c.globalsAddress = align(c.globalsAddress, desc.align.uint32)
   c.globals.add (typ, c.globalsAddress)
   # occupy the memory slot:
@@ -212,8 +219,9 @@ proc registerProc(c; prc: ProcedureId): uint32 =
     inc c.nextProc
 
 proc compilerProc(c; env: var MirEnv, name: string): Node =
-  ## Requests the compilerproc with the given `name` and returns a reference
-  ## to it.
+  ## Returns a ``Proc`` reference to the compilerproc with the given `name`.
+  ## The compilerproc is added to `c` and `env` first, if it hasn't been
+  ## already.
   let p = c.graph.getCompilerProc(name)
   result = node(Proc, c.registerProc(env.procedures.add(p)))
 
@@ -228,7 +236,7 @@ proc typeRef(c; env: MirEnv, typ: TypeId): Node =
 proc genFlexArrayType(c; env: TypeEnv; typ: TypeId): uint32 =
   ## Returns the IL type ID of an array type with unknown length.
   var bu = initBuilder[NodeKind](Array)
-  # size and number of elements don't matter, but use the minimum possible
+  # size and number of elements don't matter, but use the lowest possible
   # value to be safe
   bu.add node(Immediate, 1) # size
   bu.add node(Immediate, 0) # alignment
@@ -244,9 +252,9 @@ proc request(c: var ProcContext; label: LabelId): uint32 =
     c.labelMap[label] = result
 
 proc warn(c; src: SourceId, msg: string) =
-  # we're not reporting a user-provided warning, but there's no other warning
-  # report kind that fits, nor is it possible to introduce one without forking
-  # the compiler
+  # the warning is not a user-provided one, but there's no other warning report
+  # kind that fits, nor is it possible to introduce one without forking the
+  # compiler
   c.graph.config.localReport(c.prc.sources[src],
     SemReport(kind: rsemUserWarning, str: msg))
 
@@ -280,7 +288,7 @@ proc genField(c; env: MirEnv; e: Expr; pos: int32, bu) =
     block search:
       for (f, recf) in env.fields(desc):
         if env.headerFor(recf.typ, Canonical).kind == tkTaggedUnion:
-          # a tagged union field counts as two: one for the tag, and one for
+          # a tagged union field counts as two: one for the tag and one for
           # the union
           inc pos # skip the tag
           if findField(env, recf.typ, id, steps):
@@ -305,7 +313,8 @@ proc genField(c; env: MirEnv; e: Expr; pos: int32, bu) =
       return false
 
     if desc.kind == tkRecord and desc.base(env) != VoidType:
-      # account forthe base field (which is located at he start of the record)
+      # account for the base field (which is located at the start of the
+      # record)
       inc pos
 
     result = true
@@ -317,9 +326,11 @@ proc genField(c; env: MirEnv; e: Expr; pos: int32, bu) =
       id = env.types.lookupField(typ, pos)
       (typ, depth) = findType(env.types, typ, pos)
     var steps: seq[uint32]
-    # tagged unions are "inlined" in MIR record types, but not in IL types,
-    # requiring additional field access
     doAssert findField(env.types, typ, id, steps)
+    # a MIR field access doesn't translate to a single IL field access
+    # because:
+    # 1. parent type access is explicit in the Il
+    # 2. tagged unions are standalone records in the IL
 
     var nodes: seq[Node]
     for _ in 0..<(steps.len + depth):
@@ -346,7 +357,9 @@ proc genField(c; env: MirEnv; e: Expr; pos: int32, bu) =
 proc genProcType(c; env: MirEnv, typ: TypeId, ignoreClosure = false): Node
 proc gen(c; env: MirEnv, tree; n; wantsValue: bool): Expr
 
-proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: bool, bu) =
+proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition,
+                    wantValue: bool, bu) =
+  ## `wantValue` tells translation an rvalue expression is expected.
   template recurse(n: NodePosition, wantValue: bool) =
     c.translateValue(env, tree, n, wantValue, bu)
 
@@ -363,7 +376,8 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
 
   case tree[n].kind
   of mnkGlobal:
-    # all globals are pointers, and thus a load is required
+    # all globals are pointers (because the target IL doesn't support mutable
+    # global variables)
     bu.subTree (if wantValue: Load else: Deref):
       bu.add typeRef(c, env, tree[n].typ)
       bu.subTree Copy:
@@ -389,6 +403,7 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
       wrapCopy:
         bu.add node(Local, c.prc.localMap[tree[n].local])
   of mnkAlias:
+    # aliases are implemented as pointers
     bu.subTree (if wantValue: Load else: Deref):
       bu.add typeRef(c, env, tree[n].typ)
       bu.subTree Copy:
@@ -470,18 +485,19 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
       # ``distinct`` types); a no-op
       recurse(tree.child(n, 0), wantValue)
     else:
-      # it's either a down or up conversion
+      # either an object up- or down-conversion
       let diff = inheritanceDiff(env.types[a].skipTypes(skipPtrs),
                                  env.types[b].skipTypes(skipPtrs))
       if diff < 0:
-        # it's an object up conversion. The argument can either be a
-        # pointer-to-object or object
+        # it's an up conversion. The argument may be either a pointer-to-object
+        # or object
 
         proc emit(c; env; tree; n; diff: int, src: TypeId, bu) {.nimcall.} =
           if diff == 0:
-            if env.types.headerFor(src, Lowered).kind in PointerLike:
+            let desc = env.types.headerFor(src, Lowered)
+            if desc.kind in PointerLike:
               bu.subTree Deref:
-                bu.add typeRef(c, env, env.types.headerFor(src, Lowered).elem())
+                bu.add typeRef(c, env, desc.elem())
                 recurse(n, true)
             else:
               recurse(n, false)
@@ -513,6 +529,8 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition, wantValue: b
     unreachable($tree[n].kind)
 
 proc gen(c; env: MirEnv, tree; n; wantsValue: bool): Expr =
+  ## Translates the MIR value expression into IL code and returns it as an
+  ## `Expr`.
   var bu = initBuilder[NodeKind]()
   c.translateValue(env, tree, n, wantsValue, bu)
   result = makeExpr(finish(bu), tree[n].typ)
@@ -520,6 +538,7 @@ proc gen(c; env: MirEnv, tree; n; wantsValue: bool): Expr =
 
 proc takeAddr(e: Expr, bu) =
   if e.nodes[0].kind == Deref:
+    # drop the `Deref`
     bu.add e.nodes.toOpenArray(2, e.nodes.high)
   else:
     bu.subTree Addr:
@@ -531,6 +550,7 @@ proc use(bu; e: Expr) =
     bu.subTree Copy:
       bu.add e.nodes
   of Deref:
+    # turn the ``Deref`` into a ``Load``
     bu.subTree Load:
       bu.add e.nodes[1]
       bu.add e.nodes.toOpenArray(2, e.nodes.high)
@@ -552,7 +572,7 @@ proc genAsgn(dest: Expr, src: Expr; bu) =
   else:
     assert dest.nodes[0].kind != Load
     bu.subTree Asgn:
-      bu.add dest.nodes
+      bu.useLvalue dest
       bu.use src
 
 template addStmt(sub: var Builder[NodeKind], kind: NodeKind, body: untyped) =
@@ -606,7 +626,7 @@ proc genDefault(c; env: var MirEnv; dest: Expr, typ: TypeId, bu) =
   let typ = env.types.canonical(typ)
   case env.types.headerFor(typ, Lowered).kind
   of tkBool, tkChar, tkInt, tkUInt, tkRef, tkPtr, tkVar, tkLent, tkPointer:
-    genAsgn(dest, makeExpr(@[node(IntVal, 0)], typ), bu)
+    genAsgn(dest, makeExpr(@[node(IntVal, c.lit.pack(0))], typ), bu)
   of tkFloat:
     genAsgn(dest, makeExpr(@[node(FloatVal, c.lit.pack(0.0))], typ), bu)
   else:
@@ -615,7 +635,7 @@ proc genDefault(c; env: var MirEnv; dest: Expr, typ: TypeId, bu) =
       takeAddr(dest, bu)
       bu.add node(IntVal, c.lit.pack(size))
 
-    # TODO: the original type has to be passed to hasRttiHeader and
+    # TODO: the original type has to be passed to both hasRttiHeader and
     #       getTypeInfoV2, otherwise distinct types don't have the
     #       correct RTTI generated for them
     if hasRttiHeader(env.types, typ):
@@ -646,6 +666,7 @@ proc genOf(c; env: var MirEnv, tree; e: Expr, typ: TypeId; bu) =
         bu.add node(Immediate, 3)
 
 proc genLength(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
+  ## Emits an assignment between `dest` and a length query for `n`.
   let typ = env.types.canonical(tree[n].typ)
   case env.types.headerFor(typ, Canonical).kind
   of tkSeq, tkString:
@@ -654,10 +675,9 @@ proc genLength(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
         c.translateValue(env, tree, n, false, bu)
         bu.add node(Immediate, 0)
   of tkArray:
-    # XXX: the MIR array type length is always clamped to 1, which makes
-    #      it have no use for our case here, as we need to know about
-    #      empty arrays. `mirgen` should special-case empty arrays in
-    #      mSlice operations
+    # XXX: we need to know about empty arrays here, but the MIR array type
+    #      length is always clamped to 1 and thus we cannot rely on it.
+    #      `mirgen` should special-case empty arrays in mSlice operations
     let L = c.graph.config.lengthOrd(env.types[typ]).toInt
     stmts.putInto dest, node(IntVal, c.lit.pack(L))
   of tkOpenArray:
@@ -691,8 +711,8 @@ proc genLength(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
 
 proc genSetElem(c; env; tree; n; styp: TypeId, bu) =
   ## Emits the expression for loading a value for use in a set-related
-  ## operation. This means making turning the value into one relative to the
-  ## start of the set's value range.
+  ## operation. This means turning the value into one relative to the start of
+  ## the set's value range. The resulting value is always of uint16 type.
   proc aux(c; env; tree; n; styp: TypeId, bu) =
     assert env.types[styp].kind == tySet
     let first = c.graph.config.firstOrd(env.types[styp])
@@ -707,8 +727,7 @@ proc genSetElem(c; env; tree; n; styp: TypeId, bu) =
   let typ = env.types.canonical(tree[n].typ)
   let desc = env.types.headerFor(typ, Lowered)
   if desc.kind != tkUInt or desc.size(env.types) != 2:
-    # convert the result to a uint16 value. Sets cannot have more than 2^16
-    # elements, hence a uint16
+    # sets cannot have more than 2^16 elements, hence a uint16
     bu.subTree Conv:
       bu.add node(UInt, 2)
       bu.add typeRef(c, env, typ)
@@ -717,11 +736,11 @@ proc genSetElem(c; env; tree; n; styp: TypeId, bu) =
     aux(c, env, tree, n, styp, bu)
 
 proc genSetOp(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
-  ## Generates the IL code for a binary set operation.
+  ## Generates and emits the IL code for a binary set operation.
   let
     a = NodePosition tree.argument(n, 0) # always a set
     b = NodePosition tree.argument(n, 1)
-    # ^^ for some operations a set, for some not
+    # ^^ for some operations a set, for others not
     m = tree[n, 1].magic
     typ  = env.types.canonical(tree[a].typ)
     desc = env.types.headerFor(typ, Lowered)
@@ -939,7 +958,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     else:
       # both the procedure pointer and environment pointer need to be
       # compared (shallow equality)
-      # TODO: use a proper short-circuiting and, not a bitand
+      # TODO: use a proper short-circuiting ``and``, not a ``bitand``
       wrapAsgn BitAnd:
         bu.add typeRef(c, env, PointerType)
         wrapAsgn Eq:
@@ -967,13 +986,13 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       let arg = tree.argument(n, 0)
       case env.types.headerFor(tree[arg].typ, Lowered).kind
       of tkClosure:
-        # must be a closure
         bu.add typeRef(c, env, tree[arg].typ)
         bu.subTree Copy:
           bu.subTree Field:
             lvalue(arg)
             bu.add node(Immediate, 0)
       else:
+        # must be a pointer-like type
         bu.add typeRef(c, env, tree[arg].typ)
         value(arg)
       bu.add node(IntVal, 0)
@@ -1076,16 +1095,18 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     stmts.join(after)
   of mSizeof:
     let typ = env.types.canonical(tree[tree.argument(n, 0)].typ)
-    if env.types.headerFor(typ, Canonical).size(env.types) >= 0:
+    let desc = env.types.headerFor(typ, Canonical)
+    if desc.size(env.types) >= 0:
       wrapAsgn:
-        bu.add node(IntVal, c.lit.pack(env.types.headerFor(typ, Canonical).size(env.types)))
+        bu.add node(IntVal, c.lit.pack(desc.size(env.types)))
     else:
       unreachable()
   of mAlignof:
     let typ = env.types.canonical(tree[tree.argument(n, 0)].typ)
-    if env.types.headerFor(typ, Canonical).size(env.types) >= 0:
+    let desc = env.types.headerFor(typ, Canonical)
+    if desc.size(env.types) >= 0:
       wrapAsgn:
-        bu.add node(IntVal, c.lit.pack(env.types.headerFor(typ, Canonical).align))
+        bu.add node(IntVal, c.lit.pack(desc.align))
     else:
       unreachable()
   of mEqStr:
@@ -1121,7 +1142,8 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
 
       bu.add node(IntVal, 0)
   of mCopyInternal:
-    # copy the RTTI pointer
+    # the internal part of an object is the RTTI pointer stored in the hidden
+    # field
     stmts.addStmt Asgn:
       c.genField(env, tree, NodePosition tree.argument(n, 0), -1, bu)
       bu.subTree Copy:
@@ -1229,7 +1251,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       value(tree.argument(n, 0))
   of mAppendStrStr:
     # in theory, the appendStrStr magic supports being merged, but this never
-    # happens in practice in, meaning that the call expressions only ever have
+    # happens in practice, meaning that the call expression only ever has
     # two parameters here
     stmts.addStmt Call:
       bu.add compilerProc(c, env, "prepareAdd")
@@ -1443,7 +1465,8 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   of mChckBounds:
     # XXX: bound checks on to-openArray conversion are currently omitted, as
     #      the implementation would simply be too error-prone at the moment
-    #      (bound checks are fairly involved, see ``cgen``)
+    #      (bound checks are fairly involved, see ``cgen`` in the NimSkull
+    #      compiler)
     discard
   of mGetTypeInfoV2:
     let t = tree[tree.argument(n, 0)].typ
@@ -1482,8 +1505,8 @@ proc genCall(c; env: var MirEnv; tree; n; dest: Expr, stmts; withEnv = false) =
       typ = env.types.canonical(tree[n, 1].typ)
       let isClosure = env.types.headerFor(typ, Canonical).kind == tkClosure
 
-      # for closure invocations where the passing the env is omitted, the
-      # signature type needs to have no closure too
+      # for closure invocations where passing the env is omitted, the
+      # signature type needs to have no env parameter too
       bu.add c.genProcType(env, typ, isClosure and not withEnv)
       if isClosure:
         bu.subTree Copy:
@@ -1581,8 +1604,8 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         c.genCall(env, tree, n, dest, stmts)
       else:
         # a dynamic call. Closures require special handling, as the dynamic
-        # callee might not have an env parameter. Whether it has one is
-        # indicated by the closure's env value being non-nil
+        # callee might not have an env parameter. If the closure's env value
+        # is non-nil, the dynamic callee must have one, otherwise it must not
         if env.types.headerFor(tree[callee].typ, Canonical).kind == tkClosure:
           let els  = c.prc.newLabel()
           let then = c.prc.newLabel()
@@ -1632,7 +1655,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     for it in tree.items(n, 0, ^1):
       stmts.addStmt Asgn:
         bu.subTree Field:
-          bu.add dest.nodes
+          bu.useLvalue dest
           bu.add node(Immediate, i.uint32)
         value(tree.last(it))
       inc i
@@ -1643,7 +1666,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     for it in tree.items(n, 0, ^1):
       stmts.addStmt Asgn:
         bu.subTree At:
-          bu.add dest.nodes
+          bu.useLvalue dest
           bu.add node(IntVal, c.lit.pack(i))
         value(tree.last(it))
       inc i
@@ -1656,14 +1679,14 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     # emit the length initialization
     stmts.addStmt Asgn:
       bu.subTree Field:
-        bu.add dest.nodes
+        bu.useLvalue dest
         bu.add node(Immediate, 0)
       bu.add node(IntVal, c.lit.pack(tree.len(n)))
 
     # emit the payload initialization:
     stmts.addStmt Asgn:
       bu.subTree Field:
-        bu.add dest.nodes
+        bu.useLvalue dest
         bu.add node(Immediate, 1)
       bu.subTree Call:
         bu.add c.compilerProc(env, "newSeqPayload")
@@ -1680,7 +1703,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
               bu.add typeRef(c, env, payloadType(env.types, typ))
               bu.subTree Copy:
                 bu.subTree Field:
-                  bu.add dest.nodes
+                  bu.useLvalue dest
                   bu.add node(Immediate, 1)
             bu.add node(Immediate, 1)
           bu.add node(IntVal, c.lit.pack(i))
@@ -1794,7 +1817,8 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     stmts.goto(exit)
 
     stmts.join(els)
-    # if the requested length is zero, both fields are initialized to zero
+    # if the requested length is zero, both the length and pointer are
+    # initialized to zero
     stmts.addStmt Asgn:
       bu.subTree Field:
         bu.useLvalue dest
@@ -1827,7 +1851,8 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
 
     for it in tree.items(n, 0, ^1):
       if tree[it].kind == mnkRange:
-        # a range constructor. Include all elements part of it in the set
+        # a range constructor. Include all elements part of the range in the
+        # set
         let
           startLab = c.prc.newLabel()
           exitLab = c.prc.newLabel()
@@ -1891,7 +1916,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       let b = env.types.headerFor(src, Lowered).size(env.types)
       # for the implementation, keep in mind that Reinterp only supports
       # operands of the same size. "Cutting off" bits only works with uint
-      # values, requiring the operand to first be bitcast into an uint value of
+      # values, requiring the operand to first be bitcast into a uint value of
       # the same size
       # XXX: translation for casts will become easier once the IL has more fine
       #      grained conversion operators
@@ -1942,9 +1967,9 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
     if not c.prc.active:
       return
 
-  # XXX: the "is active" tracking is currently necessary because local dead-
-  #      code elimination in ``mirgen`` for closure iterators doesn't work
-  #      properly
+  # XXX: the "is active" tracking is currently necessary because ``mirgen``
+  #      doesn't perform local dead-code elimination correctly for closure
+  #      iterators doesn't work
 
   case tree[n].kind
   of mnkAsgn, mnkSwitch, mnkDef, mnkDefCursor, mnkInit:
@@ -1955,8 +1980,8 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
       let
         root = tree.child(n, 0)
         field = tree[root, 1].field
-      # note: the `tree[root].typ` yields the object type, even if doesn't
-      # look that way
+      # note: `tree[root].typ` yields the object type, even though it may
+      # not look like it does
       let typ = env.types[env.types.lookupField(tree[root].typ, field)].typ
       dest = makeExpr typ:
         c.genField(env, dest, field, bu)
@@ -1964,7 +1989,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
     if tree[n, 1].kind != mnkNone:
       c.translateExpr(env, tree, tree.child(n, 1), dest, stmts)
     elif tree[n, 0].kind != mnkParam:
-      # ignore param defs; they only mark sink parameters as going live
+      # ignore param defs; they only mark ``sink`` parameters as going live
       c.genDefault(env, dest, tree[n, 0].typ, stmts)
   of mnkBind, mnkBindMut:
     guardActive()
@@ -1985,7 +2010,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
           discard
         c.prc.active = false
   of mnkScope, mnkEndScope:
-    discard
+    discard "nothing to do"
   of mnkLoop:
     guardActive()
     stmts.addStmt Loop:
@@ -2001,8 +2026,8 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
     stmts.join label
   of mnkEndStruct:
     var label: uint32
-    # the EndStruct can mark the end of both an If or Except. Only those
-    # marking the end of an If need to be turned into a join heres
+    # ``EndStruct`` can mark the end of both an ``If`` or ``Except``. Only
+    # the ones marking the end of an ``If`` need to be turned into a join here
     if c.prc.labelMap.pop(tree[n, 0].label, label):
       stmts.join(label)
       c.prc.active = true
@@ -2022,7 +2047,8 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
     stmts.join(label)
   of mnkCase:
     guardActive()
-    # translate to a chain of If statements
+    # translate to a chain of ``If`` statements, as the target IL doesn't
+    # support case statements ranges as labels
     let tmp = c.newTemp(tree[n, 0].typ)
     stmts.addStmt Asgn:
       bu.useLvalue tmp
@@ -2067,7 +2093,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
         stmts.goto then
 
     if tree[tree.last(n)].len != 1:
-      # there's no else branch
+      # there's no 'else' branch
       stmts.join next
       stmts.addStmt Unreachable:
         discard
@@ -2089,7 +2115,6 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
       var els = c.prc.newLabel()
 
       let
-        # XXX: this looks like it's nonsense? `ex` is never initialized...
         ex = c.newTemp(PointerType)
         excType = env.types.add(c.graph.getCompilerProc("Exception").typ)
         expr = buildExpr excType:
@@ -2187,6 +2212,8 @@ proc complete(c; env: MirEnv, typ: Node, prc: ProcContext, body: MirBody,
 
 proc translateProc(c; env: var MirEnv, procType: TypeId,
                    body: sink MirBody): seq[Node] =
+  ## Translates the full body of a procedure (with signature `procType`) to
+  ## a semantically equivalent IL ``ProcDef``, returning the latter.
   c.prc.reset()
   c.prc.sources = move body.source
 
@@ -2248,8 +2275,8 @@ proc replaceProcAst(config: ConfigRef, prc: PSym, with: PNode) =
         map.withValue n.sym.id, it:
           n.sym = it[]
         do:
-          # IDs for locals only need to be unique within their parent procedure,
-          # so duplicating the ID here is fine
+          # IDs for locals only need to be unique within their parent
+          # procedure, so duplicating the ID here is fine
           let s = copySym(n.sym, n.sym.itemId)
           s.owner = prc # reparent
           map[s.id] = s
@@ -2274,7 +2301,11 @@ proc replaceProcAst(config: ConfigRef, prc: PSym, with: PNode) =
   prc.typ = copyType(with[namePos].sym.typ, with[namePos].sym.typ.itemId, prc)
   patch(prc.typ.n)
 
-proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[ProcedureId, Builder[NodeKind]], graph: ModuleGraph, c; evt: sink BackendEvent) =
+proc processEvent(env: var MirEnv, bodies: var ProcMap,
+                  partial: var Table[ProcedureId, Builder[NodeKind]],
+                  graph: ModuleGraph,
+                  c;
+                  evt: sink BackendEvent) =
   case evt.kind
   of bekModule, bekConstant:
     discard "nothing to do"
@@ -2324,7 +2355,7 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
     else:
       unreachable()
   of bekPartial:
-    # a new procedure is created for each fragment, # with a call to the new
+    # a new procedure is created for each fragment, with a call to the new
     # procedure then being appended to the partial procedure. This is much
     # easier to implement than trying to append all fragments directly to the
     # partial procedure
@@ -2411,7 +2442,7 @@ proc embedTaggedUnion(c; env: TypeEnv, id: TypeId, bu) =
     for _, it in env.fields(desc, 1):
       if env.isEmbedded(it.typ):
         if env.headerFor(it.typ, Lowered).numFields == 0:
-          # don't emit an empty record
+          # IL record types must not be empty; add a dummy field
           bu.add node(UInt, 1)
         else:
           # emit the record type for the embedded type, but make sure to
@@ -2527,7 +2558,7 @@ proc genProcType(c; env: MirEnv, typ: TypeId, ignoreClosure = false): Node =
 
 proc genType(c; env: TypeEnv, typ: TypeId): uint32 =
   let typ = env.canonical(typ)
-  c.typeMap.withValue typ, val:
+  c.typeCache.withValue typ, val:
     # already cached
     result = val[]
   do:
@@ -2535,7 +2566,7 @@ proc genType(c; env: TypeEnv, typ: TypeId): uint32 =
     var bu = initBuilder[NodeKind]()
     c.translate(env, typ, bu)
     result = c.types.mgetOrPut(finish(bu), c.types.len.uint32)
-    c.typeMap[typ] = result
+    c.typeCache[typ] = result
 
 proc findPatchFile(config: ConfigRef, file: string): FileIndex =
   var patchDir = getAppDir()
@@ -2718,12 +2749,12 @@ proc genConst(c; env; tree; n; dest: Expr, stmts) =
     if bitset.len > 8:
       # the set is implemented as an array
       for i, it in bitset.pairs:
-        # globals are zero-initialized by default, so some can be saved by
-        # omitting zero assignments
+        # globals are zero-initialized by default, and therefore zero
+        # assignments can be omitted
         if it != 0:
           stmts.addStmt Asgn:
             bu.subTree At:
-              bu.add dest.nodes
+              bu.useLvalue dest
               bu.add node(IntVal, c.lit.pack(i))
             bu.add node(IntVal, c.lit.pack(it.int))
     else:
@@ -2797,7 +2828,7 @@ proc generateCode(graph: ModuleGraph): PackedTree[NodeKind] =
   block:
     # the ``TFrame`` system type must not be treated as an imported type (as
     # those are not supported by skully), so we have to "correct" the type
-    # prior to the MIR processing
+    # prior to MIR processing
     let s = graph.systemModuleSym(graph.cache.getIdent("TFrame"))
     s.flags.excl sfImportc
     s.extFlags.excl exfNoDecl
@@ -2828,8 +2859,8 @@ proc generateCode(graph: ModuleGraph): PackedTree[NodeKind] =
     it.subTree Return: discard
 
     var bu = initBuilder(ProcDef)
-    # all partial procedure have signature ``proc()``. The main procedure does
-    # too, therefore its type can be used here
+    # all partial procedure have signature ``proc()``. The main module's init
+    # procedure does too, therefore its type can be used here
     bu.add c.genProcType(env, env.types.add(mlist.mainModule().init.typ))
     bu.subTree Params: discard
     bu.subTree Locals: discard
