@@ -126,7 +126,7 @@ jobs:
         run: bin/koch single phy -d:release
 
       - name: Build skully
-        run: nim c -d:nimStrictMode -d:release --outdir:bin skully/skully.nim
+        run: bin/koch single skully -d:nimStrictMode -d:release
 
       - name: Compile phy to L25 code with skully
         run: bin/skully phy/phy.nim build/phy.txt
