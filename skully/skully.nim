@@ -2277,6 +2277,8 @@ proc replaceProcAst(config: ConfigRef, prc: PSym, with: PNode) =
 
 proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[ProcedureId, Builder[NodeKind]], graph: ModuleGraph, c; evt: sink BackendEvent) =
   case evt.kind
+  of bekModule, bekConstant:
+    discard "nothing to do"
   of bekDiscovered:
     case evt.entity.kind
     of mnkGlobal:
@@ -2349,8 +2351,11 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap, partial: var Table[Proce
 
     let procType = env.types.add(evt.sym.typ)
     bodies[c.registerProc(evt.id)] = c.translateProc(env, procType, body)
-  else:
-    discard
+  of bekImported:
+    # dynlib procedures are not supported
+    c.graph.config.localReport(evt.sym.info,
+      SemReport(kind: rsemUserError,
+                str: "dynlib procedures are not supported"))
 
 proc translateProcType(c; env: TypeEnv, id: TypeId, ignoreClosure: bool, bu) =
   let desc = env.headerFor(id, Canonical)
