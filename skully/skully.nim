@@ -2005,8 +2005,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
     # marking the end of an If need to be turned into a join heres
     if c.prc.labelMap.pop(tree[n, 0].label, label):
       stmts.join(label)
-
-    c.prc.active = true
+      c.prc.active = true
   of mnkGoto:
     guardActive()
     stmts.goto(c.prc.request(tree[n, 0].label))
