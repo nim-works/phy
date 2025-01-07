@@ -13,6 +13,7 @@ proc typeToString*(typ: SemType): string =
   of tkVoid:  "void"
   of tkUnit:  "unit"
   of tkBool:  "bool"
+  of tkChar:  "char"
   of tkInt:   "int"
   of tkFloat: "float"
   of tkTuple:

@@ -3,7 +3,8 @@
 
 import
   std/[
-    options
+    options,
+    strutils
   ],
   phy/[
     type_rendering,
@@ -46,6 +47,16 @@ proc primToString(v: Value, typ: SemType): string =
     of 0: "false"
     of 1: "true"
     else: "unknown(" & $v.intVal & ")"
+  of tkChar:
+    case v.intVal
+    of ord('\n'):       "'\\n'"
+    of ord('\r'):       "'\\r'"
+    of ord('\''):       "'\\''"
+    of ord('\\'):       "'\\\\'"
+    of 32..38, 40..91, 93..127:
+      "'" & $char(v.intVal) & "'"
+    else:
+      "'\\x" & toHex(v.intVal, 2) & "'"
   of tkInt:
     $v.intVal
   of tkFloat:
@@ -64,6 +75,8 @@ proc valueToString(env: var VmEnv, a: VirtualAddr, typ: SemType): string =
   of tkUnit:
     result = "()"
   of tkBool:
+    result = primToString(Value(readInt(p, 1)), typ)
+  of tkChar:
     result = primToString(Value(readInt(p, 1)), typ)
   of tkInt:
     result = $readInt(p, 8)

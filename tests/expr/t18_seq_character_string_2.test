@@ -1,0 +1,4 @@
+discard """
+  output: "['a', '\\xCE', '\\xB2', 'c']: seq(char)"
+"""
+(Seq "aβc")

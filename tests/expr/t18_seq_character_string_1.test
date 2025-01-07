@@ -1,0 +1,4 @@
+discard """
+  output: "['a', 'b', 'c']: seq(char)"
+"""
+(Seq "abc")
