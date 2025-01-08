@@ -1276,6 +1276,63 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
   of AllNodes - ExprNodes:
     unreachable($t[n].kind)
 
+proc importIoProcedures(c) =
+  ## Adds the built-in I/O procedures to `c`.
+  # both 'write' and 'writeErr' need a wrapper procedure, as the external
+  # procedure cannot take a seq as input (only a pointer and an int)
+  var procTy = SemType(kind: tkProc,
+                       elems: @[prim(tkVoid), pointerType, prim(tkInt)])
+  let writeHostPrc = c.addProc(procTy):
+    buildTree Import:
+      bu.add Node(kind: Type, val: c.genProcType(procTy))
+      bu.add Node(kind: StringVal, val: c.literals.pack("core.write"))
+  let writeErrHostPrc = c.addProc(procTy):
+    buildTree Import:
+      bu.add Node(kind: Type, val: c.genProcType(procTy))
+      bu.add Node(kind: StringVal, val: c.literals.pack("core.writeErr"))
+
+  # both write and writeErr use the same wrapper body, just with a different
+  # external procedure to call
+  const Body = """
+    (ProcDef (Type $1)
+      (Params (Local 0))
+      (Locals (Type $2))
+      (Stmts
+        (If
+          (Lt (Type $4)
+            (IntVal 0)
+            (Copy (Field (Local 0) 0)))
+          (Call (Proc $3)
+            (Addr
+              (At
+                (Field
+                  (Deref (Type $5)
+                    (Copy (Field (Local 0) 1))) 1)
+                (IntVal 0)))
+            (Copy (Field (Local 0) 0))))
+        (Return (IntVal 0))))
+  """
+
+  let stringType = SemType(kind: tkSeq, elems: @[prim(tkChar)])
+  procTy = SemType(kind: tkProc, elems: @[prim(tkUnit), stringType])
+  let
+    signature = c.genProcType(procTy)
+    strTypeIL = c.typeToIL(stringType)
+    intTypeIL = c.typeToIL(prim(tkInt))
+    payloadType = c.genPayloadType(prim(tkChar))
+
+  let writePrc = c.addProc(procTy):
+    parseSexp[NodeKind](Body % [$signature, $strTypeIL, $writeHostPrc,
+                                $intTypeIL, $payloadType],
+                        c.literals)
+  c.addDecl("write", Entity(kind: ekProc, id: writePrc))
+
+  let writeErrPrc = c.addProc(procTy):
+    parseSexp[NodeKind](Body % [$signature, $strTypeIL, $writeErrHostPrc,
+                                $intTypeIL, $payloadType],
+                        c.literals)
+  c.addDecl("writeErr", Entity(kind: ekProc, id: writeErrPrc))
+
 proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   ## Creates a new empty module translation/analysis context.
   result = ModuleCtx(reporter: reporter,
@@ -1484,6 +1541,8 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   addProc procTy, PrepareAddBody,
           [$c.genProcType(procTy), $c.typeToIL(prim(tkInt)),
            $size(prim(tkInt)) #[<- offset of payload's data field]#]
+
+  importIoProcedures(result)
 
 proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
   ## Closes the module context and returns the accumulated translated code.
