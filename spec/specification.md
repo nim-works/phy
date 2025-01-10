@@ -258,7 +258,8 @@ Mutability is part of the type system. `All[typ]` means "matches `(mut typ)`
 and `typ`", which makes it writing deduction rules applicable to expression of
 both mutable and immutable type easier.
 
-`built_ins` is a set of names: `{==, <=, <, +, -, *, div, mod, true, false}`.
+`built_ins` is a set of names:
+`{==, <=, <, +, -, *, div, mod, true, false, write, writeErr}`.
 
 ```
 
@@ -385,6 +386,14 @@ C |- e_1 : All[typ_1]  typ_1 = (SeqTy typ_2)  C |- e_2 : All[typ_3]  typ_3 <:= t
 ------------------------------------------------------------------------------------ # S-builtin-concat
 C |- (Call concat e_1 e_2) : typ_1
 
+C |- e_1 : All[typ]  typ = (SeqTy char)
+--------------------------------------- # S-builtin-write
+C |- (Call write e_1) : unit
+
+C |- e_1 : All[typ]  typ = (SeqTy char)
+--------------------------------------- # S-builtin-writeErr
+C |- (Call writeErr e_1) : unit
+
 C |- e_1 : All[typ_1]  typ_1 = (ProcTy typ_r typ_p*)  C |- e_2 : All[typ_a] ...  typ_a <:= typ_p ...
 ---------------------------------------------------------------------------------------------------- # S-call
 C |- (Call e_1 e_2*) : typ_r
@@ -490,11 +499,16 @@ steps to `t_2` plugged into `E`".
 The configuration for steps is a tuple of the form `C; e`, where `C` is the
 *context* record. It's abstract syntax is as follows:
 ```
-C ::= { locs S }
+C ::= { locs S
+        output val
+        errOutput val }
 ```
 
 `locs` is a store (`S`), which maps *locations* to *values* (`S(l) = val`).
 Mutable state is modeled via locations.
+
+`input` is a value, which must be a `(array c ...)`, where `c` is of type
+`char`. The same is true for both `output` and `errOutput`.
 
 `e[x/y]` means "`e` with all occurrences of name `x` replaced with `y`".
 
@@ -654,6 +668,14 @@ val_1 = (proc typ_r [x typ_p]^n e)
 # ^^ read: the call is replaced with the procedure's body (in which all
 # occurrences of the parameters were substituted with a copy of the respective
 # argument), which is wrapped in a `Frame` expression
+
+C_1.output = (array val_2*)  C_2 = C_1 with output = (array val_2 ... val_1 ...)
+-------------------------------------------------------------------------------- # E-builtin-write
+C_1; (Call write val_1)  ~~>  C_2; (TupleCons)
+
+C_1.errOutput = (array val_2*)  C_2 = C_1 with errOutput = (array val_2 ... val_1 ...)
+-------------------------------------------------------------------------------------- # E-builtin-writeErr
+C_1; (Call writeErr val_1)  ~~>  C_2; (TupleCons)
 ```
 
 The steps are:
