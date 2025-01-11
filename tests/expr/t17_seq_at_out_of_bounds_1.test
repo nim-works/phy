@@ -1,0 +1,4 @@
+discard """
+  output: "runtime error: ecUnreachable"
+"""
+(At (Seq (IntTy) 1) -1)

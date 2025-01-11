@@ -34,6 +34,7 @@ expr     ::= <ident>
           |  (Seq <strVal>)
           |  (Call <expr>+)
           |  (FieldAccess <expr> <intVal>)
+          |  (At <expr> <expr>)
           |  (And <expr> <expr>)
           |  (Or <expr> <expr>)
           |  (If <expr> <expr> <expr>?)
@@ -111,9 +112,15 @@ typ ::= void                        # corresponds to `(VoidTy)`
      |  (UnionTy <typ>+)
      |  (ProcTy  <typ>+)
      |  (SeqTy   <typ>)
-le  ::= x                   # | subset of expressions where all non-lvalue
-     |  (FieldAccess le n)  # | operands were already evaluated
-e   ::= x | val | typ | ... # includes all expressions from the abstract syntax
+le  ::= <l>                  # | subset of expressions where all non-lvalue
+     |  (FieldAccess <le> n) # | operands were already evaluated
+     |  (At <le> n)          # |
+e   ::= x                    # free variable
+     | <val>
+     | <typ>
+     | (With a:<e> n b:<e>)  # | return array/tuple value `a` with the `n`-th
+                             # | element replaced with `b`
+     |  ... # includes all expressions from the abstract syntax
 
 e += (Frame typ e) # a special expression for assisting with evaluation
 ```
@@ -318,6 +325,14 @@ C |- e: (mut typ_1)  typ_1 = (TupleTy ...)  typ_1 at n = typ_2
 -------------------------------------------------------------- # S-mut-field
 C |- (FieldAccess e n) : (mut typ_2)
 
+C |- e_1: typ_1  typ_1 = (SeqTy typ_2)  C |- e_2 : typ_3  typ_3 = int
+--------------------------------------------------------------------- # S-at
+C |- (At e_1 e_2) : typ_2
+
+C |- e: (mut typ_1)  typ_1 = (SeqTy typ_2)  C |- e_2 : typ_3  typ_3 = int
+------------------------------------------------------------------------- # S-mut-field
+C |- (At e_1 e_2) : (mut typ_2)
+
 C |- e_1 : (mut typ_1)  C |- e_2 : All[typ_2]  typ_2 <:= typ_1
 -------------------------------------------------------------- # S-asgn
 C |- (Asgn e_1 e_2)
@@ -413,6 +428,14 @@ C |- (Frame typ_1 e) : typ_1
 
 --------------------------------------------------------- # S-proc-val
 C |- (proc typ_r [x typ_p]^ e) : (ProcTy typ_r typ_p ...)
+
+C |- e_1 : All[typ_1]  typ_1 = (SeqTy typ_2)  C |- e_2 : All[typ_3]  typ_3 <:= typ_2
+------------------------------------------------------------------------------------ # S-seq-with
+C |- (With e_1 n e_2) : typ_1
+
+C |- e_1 : All[typ_1]  typ_1 = (TupleTy typ_2+)  C |- e_2 : All[typ_3]  typ_3 <:= typ_2 at n
+-------------------------------------------------------------------------------------------- # S-tuple-with
+C |- (With e_1 n e_2) : typ_1
 ```
 
 ##### Modules and Declarations
@@ -524,17 +547,26 @@ and `body` is the procedure's body.
 >       reduced to a `(proc ...)` value, which is what a program is, in the
 >       end -- a procedural value
 
-The evaluation contexts are (evaluation happens left to right):
+The evaluation contexts are:
 
 ```
-E' ::= []
-    |  (FieldExpr E' n)
+E' ::= (FieldAccess E' n)
+    |  (At E' e)
+    |  (At le E)
+
+L  ::= []                  # | evaluation context for lvalues
+    |  (FieldAccess L n)   # |
+    |  (At L n)            # |
 
 E  ::= []
     |  (Exprs E e*)
     |  (FieldAccess E n)
-    |  (Asgn E' n)
+    |  (At E e)
+    |  (At le E)
+    |  (Asgn E' e)
     |  (Asgn le E)
+    |  (With E n e)
+    |  (With val n E)
     |  (TupleCons val* E e*)
     |  (Seq typ val* E e*)
     |  (Call val* E e*)
@@ -558,6 +590,25 @@ The pure notions of reduction are:
 (While e_1 e_2)  ~~>  (If e_1 (Exprs e_2 (While e_1 e_2)) (TupleCons)) # E-while
 
 (FieldAccess (tuple val^n) i)  ~~>  val_i # E-tuple-access
+
+(Asgn (FieldAccess le n) val_1)  ~~>  (Asgn le (With le n val_1)) # E-field-asgn
+(Asgn (At le n) val_1)           ~~>  (Asgn le (With le n val_1)) # E-elem-asgn
+
+n >= 0  n < |val|
+---------------------------------- # E-at
+(At (array val*) n)  ~~>  val at n
+
+n < 0 v n >= |val|
+-------------------------------------- # E-at-out-of-bounds
+(At (array val*) n)  ~~> (Unreachable)
+
+n >= 0  n < |val_1|  val_3 = copy(C, val_1) with n -> copy(val_2)
+----------------------------------------------------------------- # E-with
+C; (With val_1 n val_2)  ~~>  C; val_3
+
+n < 0 v n >= |val_1|
+------------------------------------------------------------------ # E-with-out-of-bounds
+C; (With val_1 n val_2)  ~~>  C; (Unreachable)
 
 val_3 = int_add(val_1, val_2)  val_3 != {}
 ------------------------------------------ # E-add-int
@@ -629,10 +680,6 @@ length = |val|
 
 The impure notions of reduction are:
 ```
-C.locs(l) = (tuple val^n)
------------------------------------ # E-tuple-loc-access
-C; (FieldAccess l i)  ~~>  C; val_i
-
 val_2 = copy(C, val_1) ...
 ------------------------------------------------ # E-tuple-cons
 C; (TupleCons val_1+)  ~~>  C; (tuple val_2 ...)
@@ -656,10 +703,6 @@ C; (Let x val e)  ~~>  C + locs with l -> copy(C, val); e[x/l]
 #       to `(Pop x e)`
 
 C; (Asgn l val)  ~~>  C + locs with l -> copy(C, val); (TupleCons) # E-asgn
-
-le ~~> val_2  val_3 = copy(C, val_2) with n -> copy(C, val_1)
-------------------------------------------------------------- # E-field-asgn
-C; (Asgn (FieldAccess le n) val_1)  ~~>  C; (Asgn le val_3)
 
 val_1 = (proc typ_r [x typ_p]^n e)
 ---------------------------------------------------------------- # E-call-reduce
@@ -687,6 +730,14 @@ C; E[e_1]  -->  C; E[e_2]
     C_1; e_1 ~~> C_2; e_2
 -----------------------------  # E-reduce-impure
 C_1; E[e_1]  -->  C_2; E[e_2]
+
+C.locs(l) = val
+------------------------------------------------------------ # E-tuple-loc-access
+C; E[L[(FieldAccess l n)]  ~~>  C; E[L[(FieldAccess val n)]]
+
+C.locs(l) = val
+------------------------------------------ # E-at-loc
+C; E[L[(At l n)]  ~~>  C; E[L[(At val n)]]
 
 val_2 = copy(C, val_1)
 ----------------------------------------------------- # E-return

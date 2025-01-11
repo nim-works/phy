@@ -1,0 +1,10 @@
+discard """
+  description: "Parameters are immutable. Their elements cannot be assigned to"
+  reject: true
+"""
+(ProcDecl (Ident "main") (UnitTy)
+  (Params (ParamDecl (Ident "a") (SeqTy (IntTy))))
+  (Exprs
+    (Asgn (At (Ident "a") (IntVal 0))
+      (IntVal 100))
+    (Return)))
