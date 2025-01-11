@@ -118,7 +118,8 @@ le  ::= <l>                  # | subset of expressions where all non-lvalue
 e   ::= x                    # free variable
      | <val>
      | <typ>
-     | (With <e> <e>)
+     | (With a:<e> n b:<e>)  # | return array/tuple value `a` with the `n`-th
+                             # | element replaced with `b`
      |  ... # includes all expressions from the abstract syntax
 
 e += (Frame typ e) # a special expression for assisting with evaluation
