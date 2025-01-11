@@ -25,11 +25,13 @@ numbers, and decimal numbers, respectively.
 ident    ::= (Ident <string>)
 intVal   ::= (IntVal <int>)
 floatVal ::= (FloatVal <float>)
+strVal   ::= (StringVal <string>)
 expr     ::= <ident>
           |  <intVal>
           |  <floatVal>
           |  (TupleCons <expr>*)
           |  (Seq <texpr> <expr>*)
+          |  (Seq <strVal>)
           |  (Call <expr>+)
           |  (FieldAccess <expr> <intVal>)
           |  (At <expr> <expr>)
@@ -88,6 +90,7 @@ the desugared form (the *language core*).
 ```
 c   ::= n                           # corresponds to `(IntVal n)`
      |  rational                    # corresponds to `(FloatVal rational)`
+     |  str                         # corresponds to `(StringVal str)`
      |  true                        # corresponds to `(Ident "true")`
      |  false                       # corresponds to `(Ident "false")`
      |  (TupleCons)                 # unit value
@@ -151,6 +154,7 @@ and `ProcTy` is significant, in `UnionTy` it is not. Formally:
 void  = void
 unit  = unit
 bool  = bool
+char  = char
 int   = int
 float = float
 
@@ -165,6 +169,7 @@ equal to b".
 # void is the bottom type; it's a subtype of all other types
 void <: unit
 void <: bool
+void <: char
 void <: int
 void <: float
 void <: (TupleTy typ+)
@@ -213,6 +218,10 @@ C |-_t (UnitTy) : unit
 C |-_t (BoolTy) : bool
 
 
+--------------------- # S-char-type
+C |-_t (CharTy) : char
+
+
 ------------------- # S-int-type
 C |-_t (IntTy) : int
 
@@ -255,7 +264,8 @@ Mutability is part of the type system. `All[typ]` means "matches `(mut typ)`
 and `typ`", which makes it writing deduction rules applicable to expression of
 both mutable and immutable type easier.
 
-`built_ins` is a set of names: `{==, <=, <, +, -, true, false}`.
+`built_ins` is a set of names:
+`{==, <=, <, +, -, *, div, mod, true, false, write, writeErr}`.
 
 ```
 
@@ -293,6 +303,10 @@ C |- (TupleCons e+) : (TupleTy typ ...)
 C |-_t e_1 : typ_1  C |- e_2 : All[typ_2] ...  typ_2 <:= typ_1 ...
 ------------------------------------------------------------------ # S-seq-cons
 C |- (Seq e_1 e_2*) : (SeqTy typ_1)
+
+
+------------------------------------------------------------------ # S-string-cons
+C |- (Seq str) : (SeqTy char)
 
 C |- e : All[typ]   C.return <:= typ
 ------------------------------------ # S-return
@@ -354,6 +368,18 @@ C |- e_1 : All[typ_1]  C |- e_2 : All[typ_1]  typ in {int, float}
 ----------------------------------------------------------------- # S-builtin-minus
 C |- (Call - e_1 e_2) : typ_1
 
+C |- e_1 : All[typ_1]  C |- e_2 : All[typ_1]  typ = int
+------------------------------------------------------- # S-builtin-mul
+C |- (Call * e_1 e_2) : typ_1
+
+C |- e_1 : All[typ_1]  C |- e_2 : All[typ_1]  typ = int
+------------------------------------------------------- # S-builtin-div
+C |- (Call div e_1 e_2) : typ_1
+
+C |- e_1 : All[typ_1]  C |- e_2 : All[typ_1]  typ = int
+------------------------------------------------------- # S-builtin-mod
+C |- (Call mod e_1 e_2) : typ_1
+
 C |- e_1 : All[typ_1]  C |- e_2 : All[typ_1]  typ in {int, float, bool}
 ----------------------------------------------------------------------- # S-builtin-eq
 C |- (Call == e_1 e_2) : typ_1
@@ -373,6 +399,14 @@ C |- (Call len e) : int
 C |- e_1 : All[typ_1]  typ_1 = (SeqTy typ_2)  C |- e_2 : All[typ_3]  typ_3 <:= typ_2
 ------------------------------------------------------------------------------------ # S-builtin-concat
 C |- (Call concat e_1 e_2) : typ_1
+
+C |- e_1 : All[typ]  typ = (SeqTy char)
+--------------------------------------- # S-builtin-write
+C |- (Call write e_1) : unit
+
+C |- e_1 : All[typ]  typ = (SeqTy char)
+--------------------------------------- # S-builtin-writeErr
+C |- (Call writeErr e_1) : unit
 
 C |- e_1 : All[typ_1]  typ_1 = (ProcTy typ_r typ_p*)  C |- e_2 : All[typ_a] ...  typ_a <:= typ_p ...
 ---------------------------------------------------------------------------------------------------- # S-call
@@ -487,11 +521,16 @@ steps to `t_2` plugged into `E`".
 The configuration for steps is a tuple of the form `C; e`, where `C` is the
 *context* record. It's abstract syntax is as follows:
 ```
-C ::= { locs S }
+C ::= { locs S
+        output val
+        errOutput val }
 ```
 
 `locs` is a store (`S`), which maps *locations* to *values* (`S(l) = val`).
 Mutable state is modeled via locations.
+
+`input` is a value, which must be a `(array c ...)`, where `c` is of type
+`char`. The same is true for both `output` and `errOutput`.
 
 `e[x/y]` means "`e` with all occurrences of name `x` replaced with `y`".
 
@@ -586,6 +625,30 @@ int_sub(val_1, val_2) = {}
 ---------------------------------------- # E-sub-int-overflow
 (Call - val_1 val_2)  ~~>  (Unreachable)
 
+val = int_mul(n_1, n_2)
+-------------------------- # E-mul-int
+(Call * n_1 n_2)  ~~>  val
+
+int_mul(n_1, n_2) = {}
+------------------------------------ # E-mul-int-overflow
+(Call * n_1 n_2)  ~~>  (Unreachable)
+
+val = int_div(n_1, n_2)
+---------------------------- # E-div-int
+(Call div n_1 n_2)  ~~>  val
+
+int_div(n_1, n_2) = {}
+-------------------------------------- # E-div-int-overflow
+(Call div n_1 n_2)  ~~>  (Unreachable)
+
+val = int_mod(n_1, n_2)
+---------------------------- # E-mod-int
+(Call mod n_1 n_2)  ~~>  val
+
+int_mod(n_1, n_2) = {}
+-------------------------------------- # E-mod-int-error
+(Call mod n_1 n_2)  ~~>  (Unreachable)
+
 val_3 = float_add(val_1, val_2)
 -------------------------------- # E-add-float
 (Call + val_1 val_2)  ~~>  val_3
@@ -624,6 +687,10 @@ val_2 = copy(C, val_1) ...
 ---------------------------------------------- # E-seq-cons
 C; (Seq typ val_1+)  ~~>  C; (array val_2 ...)
 
+c in utf8_bytes(str)
+----------------------------------- # E-string-cons
+C; (Seq str)  ~~>  C; (array c ...)
+
 l notin C.locs
 -------------------------------------------------------------- # E-let-introduce
 C; (Let x val e)  ~~>  C + locs with l -> copy(C, val); e[x/l]
@@ -643,6 +710,14 @@ val_1 = (proc typ_r [x typ_p]^n e)
 # ^^ read: the call is replaced with the procedure's body (in which all
 # occurrences of the parameters were substituted with a copy of the respective
 # argument), which is wrapped in a `Frame` expression
+
+C_1.output = (array val_2*)  C_2 = C_1 with output = (array val_2 ... val_1 ...)
+-------------------------------------------------------------------------------- # E-builtin-write
+C_1; (Call write val_1)  ~~>  C_2; (TupleCons)
+
+C_1.errOutput = (array val_2*)  C_2 = C_1 with errOutput = (array val_2 ... val_1 ...)
+-------------------------------------------------------------------------------------- # E-builtin-writeErr
+C_1; (Call writeErr val_1)  ~~>  C_2; (TupleCons)
 ```
 
 The steps are:
@@ -679,11 +754,25 @@ C; B[(Unreachable)]  -->  C; (Unreachable)
 
 Arithmetic functions:
 ```
+trunc(r) = +i (where r >= 0 ^ i in N ^ |r| - 1 < i <= |r|)
+         = -i (where r <  0 ^ i in N ^ |r| - 1 < i <= |r|)
+# ^^ round towards zero
+
 int_add(n_1, n_2) = n_1 + n_2  (where -2^63 <= n_1 - n_2 < 2^63)
                   = {}         (otherwise)
 
 int_sub(n_1, n_2) = n_1 - n_2  (where -2^63 <= n_1 - n_2 < 2^63)
                   = {}         (otherwise)
+
+int_mul(n_1, n_2) = n_1 * n_2  (where -2^63 <= n_1 * n_2 < 2^63)
+                  = {}         (otherwise)
+
+int_div(n_1, 0)   = {}
+int_div(n_1, n_2) = {}                (where n_1 = -2^63 ^ n_2 = -1)
+                  = trunc(n_1 / n_2)  (otherwise)
+
+int_mod(n_1, 0)   = {}
+int_mod(n_1, n_2) = n_1 - (n_2 * trunc(n_1 / n_2))
 
 float_add(real_1, real_2) = ?
 float_sub(real_1, real_2) = ?
@@ -709,6 +798,12 @@ copy(C, l)                        = copy(C, C.locs(l))
 copy(C, (proc typ_r [x typ]^n e)) = (proc typ_r [x typ]^n e)
 copy(C, (array val^n))            = (array val^n)
 copy(C, (tuple val^n))            = (tuple val^n)
+```
+
+```
+utf8_bytes(str) = ?
+# TODO: the function is mostly self-explanatory, but it should be defined in
+#       a bit more detail nonetheless
 ```
 
 #### Type Safety

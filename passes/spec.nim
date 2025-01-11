@@ -26,7 +26,7 @@ type
     Copy
 
     Neg, Add, Sub, Mul, Div, Mod
-    AddChck, SubChck
+    AddChck, SubChck, MulChck
 
     Not, Eq, Le, Lt
     BitAnd, BitNot, BitXor, BitOr

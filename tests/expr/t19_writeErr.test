@@ -1,0 +1,4 @@
+discard """
+  output: "test\n(): unit"
+"""
+(Call writeErr (Seq "test\n"))
