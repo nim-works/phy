@@ -88,6 +88,7 @@ the desugared form (the *language core*).
 ### Semantic Grammar
 
 ```
+ch  ::= ...                         # UTF-8 byte values
 c   ::= n                           # corresponds to `(IntVal n)`
      |  rational                    # corresponds to `(FloatVal rational)`
      |  str                         # corresponds to `(StringVal str)`
@@ -266,7 +267,7 @@ and `typ`", which makes it writing deduction rules applicable to expression of
 both mutable and immutable type easier.
 
 `built_ins` is a set of names:
-`{==, <=, <, +, -, *, div, mod, true, false, write, writeErr}`.
+`{==, <=, <, +, -, *, div, mod, true, false, write, writeErr, readFile}`.
 
 ```
 
@@ -408,6 +409,10 @@ C |- (Call write e_1) : unit
 C |- e_1 : All[typ]  typ = (SeqTy char)
 --------------------------------------- # S-builtin-writeErr
 C |- (Call writeErr e_1) : unit
+
+C |- e_1 : All[typ]  typ = (SeqTy char)
+--------------------------------------- # S-builtin-readFile
+C |- (Call readFile e_1) : (SeqTy char)
 
 C |- e_1 : All[typ_1]  typ_1 = (ProcTy typ_r typ_p*)  C |- e_2 : All[typ_a] ...  typ_a <:= typ_p ...
 ---------------------------------------------------------------------------------------------------- # S-call
@@ -688,9 +693,9 @@ val_2 = copy(C, val_1) ...
 ---------------------------------------------- # E-seq-cons
 C; (Seq typ val_1+)  ~~>  C; (array val_2 ...)
 
-c in utf8_bytes(str)
------------------------------------ # E-string-cons
-C; (Seq str)  ~~>  C; (array c ...)
+ch in utf8_bytes(str)
+------------------------------------ # E-string-cons
+C; (Seq str)  ~~>  C; (array ch ...)
 
 l notin C.locs
 -------------------------------------------------------------- # E-let-introduce
@@ -719,6 +724,15 @@ C_1; (Call write val_1)  ~~>  C_2; (TupleCons)
 C_1.errOutput = (array val_2*)  C_2 = C_1 with errOutput = (array val_2 ... val_1 ...)
 -------------------------------------------------------------------------------------- # E-builtin-writeErr
 C_1; (Call writeErr val_1)  ~~>  C_2; (TupleCons)
+
+val_2 = (array ch*)
+------------------------------------------- # E-builtin-readFile
+C_1; (Call readFile val_1)  ~~>  C_2; val_2
+
+# ^^ a readFile call doesn't reduce to a concrete value, but rather to an
+# abstract value. The only thing known about the abstract value is that it's
+# an array with an unknown number of elements belonging to the `ch` non-
+# terminal
 ```
 
 The steps are:
