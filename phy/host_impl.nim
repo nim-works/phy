@@ -31,7 +31,7 @@ proc writeToFile(env: var VmEnv, file: File, data: VirtualAddr, len: int
                 ): CallbackResult =
   if len < 0: trap() # guard against misuse
 
-  let chars = cast[ptr UncheckedArray[char]](toHost(data, len.uint64))
+  let chars = toHostChars(data, len.uint64)
   try:
     discard stdout.writeChars(toOpenArray(chars, 0, len - 1), 0, len)
     result = CallbackResult(code: cecNothing)
