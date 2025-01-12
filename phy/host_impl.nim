@@ -10,15 +10,28 @@ import
 template trap() =
   return CallbackResult(code: cecError)
 
+template toHost(a: VirtualAddr, size: uint64): HostPointer =
+  mixin env
+  var r: HostPointer
+  if checkmem(env.allocator, a, size, r):
+    return CallbackResult(code: cecError)
+  r
+
+template toHostChars(a: VirtualAddr, size: uint64): untyped =
+  cast[ptr UncheckedArray[char]](toHost(a, size))
+
+proc toString(x: openArray[char]): string =
+  ## Creates a string from `x`. This is not the same as `$`, which would
+  ## *render* `x` to text.
+  if x.len > 0:
+    result = newString(x.len)
+    copyMem(addr result[0], addr x[0], x.len)
+
 proc writeToFile(env: var VmEnv, file: File, data: VirtualAddr, len: int
                 ): CallbackResult =
   if len < 0: trap() # guard against misuse
 
-  var p: HostPointer
-  if checkmem(env.allocator, data, len.uint64, p):
-    return CallbackResult(code: cecError)
-
-  let chars = cast[ptr UncheckedArray[char]](p)
+  let chars = cast[ptr UncheckedArray[char]](toHost(data, len.uint64))
   try:
     discard stdout.writeChars(toOpenArray(chars, 0, len - 1), 0, len)
     result = CallbackResult(code: cecNothing)
@@ -47,3 +60,29 @@ proc hostProcedures*(includeTest: bool): Table[string, VmCallback] =
     writeToFile(env, stdout, args[0].addrVal, args[1].intVal.int)
   hostProc "core.writeErr":
     writeToFile(env, stderr, args[0].addrVal, args[1].intVal.int)
+  # XXX: the current file API is meant to be temporary. It needs to be
+  #      replaced with a handle-based one at some point
+  hostProc "core.fileSize":
+    if args[1].intVal < 0: trap() # guard against misuse
+    let name = toHostChars(args[0].addrVal, args[1].intVal.uint64)
+    try:
+      let f = open(toString(toOpenArray(name, 0, args[1].intVal.int - 1)),
+                   fmRead)
+      defer: f.close()
+      CallbackResult(code: cecValue, value: cast[Value](f.getFileSize()))
+    except IOError:
+      CallbackResult(code: cecValue, value: cast[Value](0))
+  hostProc "core.readFile":
+    if args[1].intVal < 0 or args[3].intVal < 0: # guard against misuse
+      trap()
+    let
+      name = toHostChars(args[0].addrVal, args[1].intVal.uint64)
+      data = toHostChars(args[2].addrVal, args[3].intVal.uint64)
+    try:
+      let f = open(toString(toOpenArray(name, 0, args[1].intVal.int - 1)),
+                   fmRead)
+      defer: f.close()
+      CallbackResult(code: cecValue,
+                     value: cast[Value](f.readBuffer(data, args[3].intVal)))
+    except IOError:
+      CallbackResult(code: cecValue, value: cast[Value](0))
