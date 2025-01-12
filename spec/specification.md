@@ -681,6 +681,15 @@ length = |val|
 
 ---------------------------------------------------------------- # E-builtin-concat
 (Call concat (array val_1*) val_2)  ~~>  (array val_1 ... val_2)
+
+val_2 = (array ch*)
+--------------------------------- # E-builtin-readFile
+(Call readFile val_1)  ~~>  val_2
+
+# ^^ a readFile call doesn't reduce to a concrete value, but rather to an
+# abstract value. The only thing known about the abstract value is that it's
+# an array with an unknown number of elements belonging to the `ch` non-
+# terminal
 ```
 
 The impure notions of reduction are:
@@ -724,15 +733,6 @@ C_1; (Call write val_1)  ~~>  C_2; (TupleCons)
 C_1.errOutput = (array val_2*)  C_2 = C_1 with errOutput = (array val_2 ... val_1 ...)
 -------------------------------------------------------------------------------------- # E-builtin-writeErr
 C_1; (Call writeErr val_1)  ~~>  C_2; (TupleCons)
-
-val_2 = (array ch*)
-------------------------------------------- # E-builtin-readFile
-C_1; (Call readFile val_1)  ~~>  C_2; val_2
-
-# ^^ a readFile call doesn't reduce to a concrete value, but rather to an
-# abstract value. The only thing known about the abstract value is that it's
-# an array with an unknown number of elements belonging to the `ch` non-
-# terminal
 ```
 
 The steps are:
