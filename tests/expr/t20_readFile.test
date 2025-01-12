@@ -1,0 +1,4 @@
+discard """
+  output: "['a', 'b', '\\n', 'c', 'd', 'e']: seq(char)"
+"""
+(Call readFile (Seq "tests/expr/t20_file.txt"))
