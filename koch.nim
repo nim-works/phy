@@ -19,7 +19,7 @@ Commands:
   Programs: seq[(string, string, bool)] = @[
     ("tester", "tools/tester.nim", true),
     ("passtool", "tools/passtool/passtool.nim", true),
-    ("repl", "tools/repl.nim", false),
+    ("repl", "phy/repl.nim", false),
     ("phy", "phy/phy.nim", false)
   ]
     ## maps program names to the associated path and whether the program
