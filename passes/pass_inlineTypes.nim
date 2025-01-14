@@ -3,7 +3,7 @@
 
 import
   std/[tables],
-  passes/[changesets, spec, trees]
+  passes/[changesets, syntax, trees]
 
 proc lower*(tree: PackedTree[NodeKind]): ChangeSet[NodeKind] =
   ## Computes the changeset representing the lowering for a whole module

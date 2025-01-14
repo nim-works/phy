@@ -35,7 +35,7 @@ proc main(args: openArray[string]) =
       quit(1)
 
     let
-      module = args[3] # the import path of the spec module
+      module = args[3] # the import path of the syntax module
       outfile = args[4]
 
     if '*' in outfile:

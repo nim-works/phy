@@ -27,7 +27,7 @@ import
     pass25,
     pass30,
     source2il,
-    spec_source,
+    syntax_source,
     trees,
   ],
   phy/[

@@ -8,17 +8,17 @@
 
 import
   std/[algorithm, sequtils, tables],
-  passes/[builders, ir, spec, trees],
+  passes/[builders, ir, syntax, trees],
   phy/[reporting, tree_parser, type_rendering, types],
   vm/[utils]
 
 from std/strutils import `%`
 from vm/vmalloc import AddressBias
 
-import passes/spec_source except NodeKind
+import passes/syntax_source except NodeKind
 
 type
-  SourceKind = spec_source.NodeKind
+  SourceKind = syntax_source.NodeKind
   InTree     = PackedTree[SourceKind]
   Node       = TreeNode[NodeKind]
   NodeSeq    = seq[Node]

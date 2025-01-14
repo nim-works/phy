@@ -8,7 +8,7 @@
 ## translation.
 
 import
-  passes/[builders, spec, trees],
+  passes/[builders, syntax, trees],
   vm/utils
 
 type
