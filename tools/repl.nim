@@ -33,9 +33,7 @@ import
   phy/[
     default_reporting,
     host_impl,
-    tree_parser
-  ],
-  common/[
+    tree_parser,
     vmexec
   ],
   vm/[

@@ -10,9 +10,6 @@ import
     streams,
     strutils
   ],
-  common/[
-    vmexec
-  ],
   generated/[
     lang0_checks,
     lang1_checks,
@@ -44,7 +41,8 @@ import
     default_reporting,
     host_impl,
     tree_parser,
-    types
+    types,
+    vmexec
   ],
   vm/[
     assembler,
