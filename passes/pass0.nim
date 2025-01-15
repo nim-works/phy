@@ -6,7 +6,7 @@ import
   ],
   passes/[
     trees,
-    spec
+    syntax
   ],
   vm/[
     utils,
@@ -278,6 +278,13 @@ proc genExpr(c; tree; val: NodeIndex) =
     c.genCheckedBinary(tree, val, opcAddChck)
   of SubChck:
     c.genCheckedBinary(tree, val, opcSubChck)
+  of MulChck:
+    let (typ, a, b) = triplet(tree, val)
+    assert parseType(tree, typ).size == 8
+    c.genExpr(tree, a)
+    c.genExpr(tree, b)
+    c.instr(opcMulChck)
+    c.instr(opcPopLocal, tree[val, 3].id)
   of BitNot:
     let typ = parseType(tree, tree.child(val, 0))
     c.genExpr(tree, tree.child(val, 1))

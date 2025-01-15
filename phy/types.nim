@@ -21,6 +21,7 @@ type
     tkVoid
     tkUnit
     tkBool
+    tkChar  ## UTF-8 byte
     tkInt
     tkFloat
     tkTuple ## an anonymous product type
@@ -32,7 +33,7 @@ type
     ## Represents a source-language type. The "Sem" prefix is there to prevent
     ## name conflicts with other types named `Type`.
     case kind*: TypeKind
-    of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:
+    of tkError, tkVoid, tkUnit, tkBool, tkChar, tkInt, tkFloat:
       discard
     of tkTuple, tkUnion, tkProc, tkSeq:
       elems*: seq[SemType]
@@ -52,7 +53,7 @@ proc cmp*(a, b: SemType): int =
 
   # same kind, compare operands
   case a.kind
-  of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:
+  of tkError, tkVoid, tkUnit, tkBool, tkChar, tkInt, tkFloat:
     result = 0 # equal
   of tkTuple, tkUnion, tkProc, tkSeq:
     result = a.elems.len - b.elems.len
@@ -83,7 +84,7 @@ proc `==`*(a, b: SemType): bool =
     return false
 
   case a.kind
-  of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:
+  of tkError, tkVoid, tkUnit, tkBool, tkChar, tkInt, tkFloat:
     result = true
   of tkTuple, tkUnion, tkProc, tkSeq:
     result = a.elems == b.elems
@@ -105,7 +106,7 @@ proc size*(t: SemType): int =
   case t.kind
   of tkVoid: unreachable()
   of tkError: 8 # TODO: return a value indicating "unknown"
-  of tkUnit, tkBool: 1
+  of tkUnit, tkBool, tkChar: 1
   of tkInt, tkFloat: 8
   of tkProc: 8 # size of a pointer
   of tkTuple:
@@ -134,7 +135,7 @@ proc isTriviallyCopyable*(typ: SemType): bool =
   ## Whether a value of `typ` can be trivially copied (that is, via a
   ## single block copy).
   case typ.kind
-  of tkError, tkUnit, tkBool, tkInt, tkFloat, tkProc:
+  of tkError, tkUnit, tkBool, tkChar, tkInt, tkFloat, tkProc:
     true
   of tkSeq:
     false

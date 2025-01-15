@@ -1,0 +1,5 @@
+discard """
+  description: "'mod' uses truncated division"
+  output: "4: int"
+"""
+(Call (Ident "mod") (IntVal 4) (IntVal -5))

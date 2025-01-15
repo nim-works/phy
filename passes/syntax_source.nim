@@ -9,16 +9,17 @@ import
 
 type
   NodeKind* {.pure.} = enum
-    IntVal, FloatVal
+    IntVal, FloatVal, StringVal
     Ident,
-    VoidTy, UnitTy, BoolTy, IntTy, FloatTy, TupleTy, UnionTy, ProcTy, SeqTy
+    VoidTy, UnitTy, BoolTy, CharTy, IntTy, FloatTy, TupleTy, UnionTy, ProcTy,
+    SeqTy
     And, Or
     If
     While
     Call
     TupleCons
     Seq
-    FieldAccess
+    FieldAccess, At
     Exprs
     Asgn
     Return
@@ -33,7 +34,7 @@ type
 
 const
   ExprNodes* = {IntVal, FloatVal, Ident, And, Or, If, While, Call, TupleCons,
-                Seq, FieldAccess, Asgn, Return, Unreachable, Exprs, Decl}
+                Seq, FieldAccess, At, Asgn, Return, Unreachable, Exprs, Decl}
   DeclNodes* = {ProcDecl, TypeDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 
@@ -48,6 +49,7 @@ proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
   case n.kind
   of IntVal:    sexp([newSSymbol("IntVal"), sexp tree.getInt(idx)])
   of FloatVal:  sexp([newSSymbol("FloatVal"), sexp tree.getFloat(idx)])
+  of StringVal: sexp([newSSymbol("StringVal"), sexp tree.getString(idx)])
   of Ident:     sexp([newSSymbol("Ident"), sexp tree.getString(idx)])
   else:         unreachable()
 
@@ -73,7 +75,7 @@ proc fromSexp*(_: typedesc[NodeKind], val: BiggestFloat, lit): Node =
   Node(kind: FloatVal, val: lit.pack(val))
 
 proc fromSexp*(_: typedesc[NodeKind], val: string, lit): Node =
-  raise ValueError.newException("standalone strings are not supported")
+  Node(kind: StringVal, val: lit.pack(val))
 
 proc fromSexpSym*(_: typedesc[NodeKind], val: string, lit): Node =
   Node(kind: Ident, val: lit.pack(val))

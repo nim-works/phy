@@ -8,17 +8,17 @@
 
 import
   std/[algorithm, sequtils, tables],
-  passes/[builders, ir, spec, trees],
+  passes/[builders, ir, syntax, trees],
   phy/[reporting, tree_parser, type_rendering, types],
   vm/[utils]
 
 from std/strutils import `%`
 from vm/vmalloc import AddressBias
 
-import passes/spec_source except NodeKind
+import passes/syntax_source except NodeKind
 
 type
-  SourceKind = spec_source.NodeKind
+  SourceKind = syntax_source.NodeKind
   InTree     = PackedTree[SourceKind]
   Node       = TreeNode[NodeKind]
   NodeSeq    = seq[Node]
@@ -46,6 +46,7 @@ type
   TypeAttachedOp = enum
     ## Type-attached operators.
     opCopy
+    opAt
 
   ModuleCtx* = object
     ## The translation/analysis context for a single module.
@@ -113,6 +114,9 @@ const
   BuiltIns = {
     "+": ekBuiltinProc,
     "-": ekBuiltinProc,
+    "*": ekBuiltinProc,
+    "div": ekBuiltinProc,
+    "mod": ekBuiltinProc,
     "==": ekBuiltinProc,
     "<=": ekBuiltinProc,
     "<": ekBuiltinProc,
@@ -298,6 +302,8 @@ proc typeToIL(c; typ: SemType): uint32 =
     c.addType Node(kind: Int, val: 1)
   of tkBool:
     c.addType Node(kind: Int, val: 1)
+  of tkChar:
+    c.addType Node(kind: UInt, val: 1)
   of tkInt, tkError:
     c.addType Node(kind: Int, val: 8)
   of tkFloat:
@@ -430,7 +436,8 @@ proc addProc(c; typ: sink SemType, def: seq[Node]): int =
 proc getTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32
 
 proc genPayloadAccess(c; e: sink IrNode, typ: SemType): IrNode =
-  newDeref(c.genPayloadType(typ), newFieldExpr(e, 1))
+  assert typ.kind == tkSeq
+  newDeref(c.genPayloadType(typ.elems[0]), newFieldExpr(e, 1))
 
 proc genSeqAccess(c; e, idx: sink IrNode, typ: SemType): IrNode =
   newAt(newFieldExpr(c.genPayloadAccess(e, typ), 1), idx)
@@ -542,6 +549,25 @@ proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
       body.add newReturn(dst)
     else:
       unreachable() # no copy procedure needed
+  of opAt:
+    # at(s: seq(T), index: int) -> pointer
+    procTy = SemType(kind: tkProc, elems: @[pointerType, typ, prim(tkInt)])
+    params.add 0
+    params.add 1
+    locals.add typ
+    locals.add prim(tkInt)
+
+    let
+      s   = newLocal(0)
+      idx = newLocal(1)
+
+    body = IrNode(kind: Stmts)
+    body.add newIf(
+      c.newIntOp(Le, newIntVal(0), idx),
+      newIf(
+        c.newIntOp(Lt, idx, newFieldExpr(s, 0)),
+        newReturn(newAddr(c.genSeqAccess(s, idx, typ)))))
+    body.add newUnreachable()
 
   # assemble the final definition and add it to the module:
   var bu = initBuilder(ProcDef)
@@ -707,25 +733,76 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, expr, stmts): SemType =
     eA = exprToIL(c, t, a)
     eB = exprToIL(c, t, b)
 
-  let op =
-    case name
-    of "+": Add
-    of "-": Sub
-    else:   unreachable()
-
   if tkError in {eA.typ.kind, eB.typ.kind}:
     result = errorType()
   elif eA.typ != eB.typ:
     c.error("arguments have mismatching types")
     result = errorType()
-  elif eA.typ.kind notin {tkInt, tkFloat}:
-    c.error("arguments must be of 'int' or 'float' type")
-    result = errorType()
   else:
-    expr = newBinaryOp(op, c.typeToIL(eA.typ),
-                       c.capture(eA, stmts),
-                       c.capture(eB, stmts))
-    result = eA.typ
+    template wantType(s: set[TypeKind], msg: string) =
+      if eA.typ.kind notin s:
+        c.error(msg)
+        return errorType()
+
+    proc check(c; op: NodeKind, a, b: sink IrNode, stmts): IrNode {.nimcall.} =
+      ## Emits a checked arithmetic operation and returns the local storing the
+      ## result.
+      let flag = c.newTemp(prim(tkBool))
+      result = c.newTemp(prim(tkInt))
+      stmts.add newAsgn(result,
+        newCheckedOp(op, c.typeToIL(prim(tkInt)), a, b, flag))
+      # abort execution if an overflow occurrs
+      stmts.add newIf(
+        newBinaryOp(Eq, c.typeToIL(prim(tkBool)), flag, newIntVal(1)),
+        newUnreachable())
+
+    result = eA.typ # later turned into an error type if wrong
+    let
+      valA = c.capture(eA, stmts)
+      valB = c.capture(eB, stmts)
+    case name
+    of "+":
+      case result.kind
+      of tkInt:
+        expr = check(c, AddChck, valA, valB, stmts)
+      of tkFloat:
+        expr = newBinaryOp(Add, c.typeToIL(result), valA, valB)
+      else:
+        c.error("arguments must be of 'int' or 'float' type")
+        result = errorType()
+    of "-":
+      case result.kind
+      of tkInt:
+        expr = check(c, SubChck, valA, valB, stmts)
+      of tkFloat:
+        expr = newBinaryOp(Sub, c.typeToIL(result), valA, valB)
+      else:
+        c.error("arguments must be of 'int' or 'float' type")
+        result = errorType()
+    of "*":
+      wantType {tkInt}, "arguments must be of 'int' type"
+      expr = check(c, MulChck, valA, valB, stmts)
+    of "div":
+      wantType {tkInt}, "arguments must be of 'int' type"
+      # emit a division-by-zero guard:
+      stmts.add newIf(
+        newBinaryOp(Eq, c.typeToIL(eA.typ), valB, newIntVal(0)),
+        newUnreachable())
+      # emit an overflow guard:
+      stmts.add newIf(
+        newBinaryOp(Eq, c.typeToIL(eA.typ), valA, newIntVal(low(int64))),
+        newIf(newBinaryOp(Eq, c.typeToIL(eA.typ), valB, newIntVal(-1)),
+          newUnreachable()))
+      expr = newBinaryOp(Div, c.typeToIL(eA.typ), valA, valB)
+    of "mod":
+      wantType {tkInt}, "arguments must be of 'int' type"
+      # emit a division-by-zero guard:
+      stmts.add newIf(
+        newBinaryOp(Eq, c.typeToIL(eA.typ), valB, newIntVal(0)),
+        newUnreachable())
+      expr = newBinaryOp(Mod, c.typeToIL(eA.typ), valA, valB)
+    else:
+      unreachable()
 
 proc relToIL(c; t; n: NodeIndex, name: string, expr; stmts): SemType =
   ## Analyzes and emits the IL for a relational operation.
@@ -840,7 +917,7 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
 
     if ent.kind == ekBuiltinProc:
       case name
-      of "+", "-":
+      of "+", "-", "*", "div", "mod":
         result = binaryArithToIL(c, t, n, name, expr, stmts)
       of "==", "<", "<=":
         result = relToIL(c, t, n, name, expr, stmts)
@@ -1060,6 +1137,39 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       expr = UnitNode
       result = prim(tkUnit) + {}
   of SourceKind.Seq:
+    if t[n, 0].kind == SourceKind.StringVal:
+      # it's a string constructor
+      result = SemType(kind: tkSeq, elems: @[prim(tkChar)]) + {}
+      let
+        str {.cursor.} = t.getString(t.child(n, 0))
+        elem = prim(tkChar)
+        tmp = c.newTemp(result.typ)
+        payloadField = newFieldExpr(tmp, 1)
+
+      # emit the length field assignment:
+      stmts.add newAsgn(newFieldExpr(tmp, 0), newIntVal(str.len))
+
+      # emit the payload field assignment:
+      if str.len > 0:
+        let size = size(prim(tkInt)) + size(elem) * str.len
+        stmts.add newAsgn(payloadField, newCall(AllocProc, newIntVal(size)))
+
+        let payloadExpr = newDeref(c.genPayloadType(elem), payloadField)
+        # emit the capacity assignment:
+        stmts.add newAsgn(newFieldExpr(payloadExpr, 0), newIntVal(str.len))
+
+        # assign the bytes one by one:
+        for i, it in str.pairs:
+          stmts.add newAsgn(
+            newAt(newFieldExpr(payloadExpr, 1), newIntVal(i)),
+            newIntVal(ord(it)))
+      else:
+        # an empty sequence, set the payload pointer to zero (nil)
+        stmts.add newAsgn(payloadField, newIntVal(0))
+
+      expr = tmp
+      return
+
     let
       typ = c.expectNot(c.evalType(t, t.child(n, 0)), tkVoid)
       length = t.len(n) - 1
@@ -1120,6 +1230,34 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
     else:
       c.error("expected 'tuple' value")
       result = errorType() + {}
+  of SourceKind.At:
+    let
+      (a, b) = t.pair(n)
+      arr = c.exprToIL(t, a)
+      idx = c.exprToIL(t, b)
+
+    if arr.typ.kind notin {tkSeq, tkError}:
+      c.error("expected 'seq' value")
+    if idx.typ.kind notin {tkInt, tkError}:
+      c.error("index expression must be of type 'int'")
+
+    if arr.typ.kind == tkSeq:
+      result = arr.typ.elems[0] + arr.attribs
+
+      let at = c.getTypeBoundOp(opAt, arr.typ)
+      # keep the following things in mind:
+      # * the statements for the arr expression (i.e., its side effects),
+      #   need to come first
+      # * the result of the index expression needs to be captured, as it could
+      #   be impure and there might still be outermore side-effectful
+      #   expressions
+      # * checking the index and computing the address *must* be part of
+      #   the `expr`, otherwise side-effects from outermore index expressions
+      #   could render the array stale
+      expr = newDeref(c.typeToIL(result.typ),
+        newCall(at, @[c.inlineLvalue(arr, stmts), c.capture(idx, stmts)]))
+    else:
+      result = errorType() + arr.attribs
   of SourceKind.Asgn:
     let (a, b) = t.pair(n)
     var dst = c.exprToIL(t, a)
@@ -1186,6 +1324,118 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
     result = prim(tkUnit) + {}
   of AllNodes - ExprNodes:
     unreachable($t[n].kind)
+
+proc importIoProcedures(c) =
+  ## Adds the built-in I/O procedures to `c`.
+  # both 'write' and 'writeErr' need a wrapper procedure, as the external
+  # procedure cannot take a seq as input (only a pointer and an int)
+  var procTy = SemType(kind: tkProc,
+                       elems: @[prim(tkVoid), pointerType, prim(tkInt)])
+  let writeHostPrc = c.addProc(procTy):
+    buildTree Import:
+      bu.add Node(kind: Type, val: c.genProcType(procTy))
+      bu.add Node(kind: StringVal, val: c.literals.pack("core.write"))
+  let writeErrHostPrc = c.addProc(procTy):
+    buildTree Import:
+      bu.add Node(kind: Type, val: c.genProcType(procTy))
+      bu.add Node(kind: StringVal, val: c.literals.pack("core.writeErr"))
+  procTy = SemType(kind: tkProc,
+                    elems: @[prim(tkInt), pointerType, prim(tkInt)])
+  let fileSizePrc = c.addProc(procTy):
+    buildTree Import:
+      bu.add Node(kind: Type, val: c.genProcType(procTy))
+      bu.add Node(kind: StringVal, val: c.literals.pack("core.fileSize"))
+  procTy = SemType(kind: tkProc,
+                   elems: @[prim(tkInt), pointerType, prim(tkInt),
+                            pointerType, prim(tkInt)])
+  let readFileHostPrc = c.addProc(procTy):
+    buildTree Import:
+      bu.add Node(kind: Type, val: c.genProcType(procTy))
+      bu.add Node(kind: StringVal, val: c.literals.pack("core.readFile"))
+
+  # both write and writeErr use the same wrapper body, just with a different
+  # external procedure to call
+  const Body = """
+    (ProcDef (Type $1)
+      (Params (Local 0))
+      (Locals (Type $2))
+      (Stmts
+        (If
+          (Lt (Type $4)
+            (IntVal 0)
+            (Copy (Field (Local 0) 0)))
+          (Call (Proc $3)
+            (Addr
+              (At
+                (Field
+                  (Deref (Type $5)
+                    (Copy (Field (Local 0) 1))) 1)
+                (IntVal 0)))
+            (Copy (Field (Local 0) 0))))
+        (Return (IntVal 0))))
+  """
+
+  let stringType = SemType(kind: tkSeq, elems: @[prim(tkChar)])
+  procTy = SemType(kind: tkProc, elems: @[prim(tkUnit), stringType])
+  let
+    signature = c.genProcType(procTy)
+    strTypeIL = c.typeToIL(stringType)
+    intTypeIL = c.typeToIL(prim(tkInt))
+    payloadType = c.genPayloadType(prim(tkChar))
+
+  let writePrc = c.addProc(procTy):
+    parseSexp[NodeKind](Body % [$signature, $strTypeIL, $writeHostPrc,
+                                $intTypeIL, $payloadType],
+                        c.literals)
+  c.addDecl("write", Entity(kind: ekProc, id: writePrc))
+
+  let writeErrPrc = c.addProc(procTy):
+    parseSexp[NodeKind](Body % [$signature, $strTypeIL, $writeErrHostPrc,
+                                $intTypeIL, $payloadType],
+                        c.literals)
+  c.addDecl("writeErr", Entity(kind: ekProc, id: writeErrPrc))
+
+  # build the readFile procedure, which is a wrapper around the external
+  # `fileSize` and `readFile` core procedures. It works as follows:
+  # 1. query the size of the file
+  # 2. create a sequence fitting N characters (N is the result of the previous
+  #    size query)
+  # 3. read N bytes from the file
+  # 4. truncate the sequence to the number of actually read bytes
+  # The file is not locked for the duration of the whole operation, and thus
+  # it's possible (though unlikely) for the file to change in-between the size
+  # query and read. While not ideal, the truncation takes care of that case.
+  # XXX: in the future, the use of a handle-based file core API will resolve
+  #      this problem
+  var readFileBody = IrNode(kind: Stmts)
+  readFileBody.add newAsgn(newFieldExpr(newLocal(1), 0),
+    newCall(fileSizePrc.uint32, @[
+      newAddr(newFieldExpr(c.genPayloadAccess(newLocal(0), stringType), 1)),
+      newFieldExpr(newLocal(0), 0)]))
+  readFileBody.add newAsgn(newFieldExpr(newLocal(1), 1),
+    newCall(AllocProc,
+      c.newIntOp(Add,
+        newIntVal(size(prim(tkInt))),
+        newFieldExpr(newLocal(1), 0))))
+  readFileBody.add newAsgn(newFieldExpr(newLocal(1), 0),
+    newCall(readFileHostPrc.uint32, @[
+      newAddr(newFieldExpr(c.genPayloadAccess(newLocal(0), stringType), 1)),
+      newFieldExpr(newLocal(0), 0),
+      newAddr(newFieldExpr(c.genPayloadAccess(newLocal(1), stringType), 1)),
+      newFieldExpr(newLocal(1), 0)]))
+  readFileBody.add newReturn(newLocal(1))
+
+  procTy = SemType(kind: tkProc, elems: @[stringType, stringType])
+  let readFilePrc = c.addProc(procTy):
+    buildTree ProcDef:
+      bu.add Node(kind: Type, val: c.genProcType(procTy))
+      bu.subTree Params:
+        bu.add Node(kind: Local, val: 0)
+      bu.subTree Locals:
+        bu.add Node(kind: Type, val: c.typeToIL(stringType))
+        bu.add Node(kind: Type, val: c.typeToIL(stringType))
+      convert(readFileBody, c.literals, bu)
+  c.addDecl("readFile", Entity(kind: ekProc, id: readFilePrc))
 
 proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   ## Creates a new empty module translation/analysis context.
@@ -1395,6 +1645,8 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   addProc procTy, PrepareAddBody,
           [$c.genProcType(procTy), $c.typeToIL(prim(tkInt)),
            $size(prim(tkInt)) #[<- offset of payload's data field]#]
+
+  importIoProcedures(result)
 
 proc close*(c: sink ModuleCtx): PackedTree[NodeKind] =
   ## Closes the module context and returns the accumulated translated code.

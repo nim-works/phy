@@ -1,0 +1,4 @@
+discard """
+  output: "2: int"
+"""
+(Call (Ident "div") (IntVal 6) (IntVal 3))

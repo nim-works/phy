@@ -25,13 +25,16 @@ numbers, and decimal numbers, respectively.
 ident    ::= (Ident <string>)
 intVal   ::= (IntVal <int>)
 floatVal ::= (FloatVal <float>)
+strVal   ::= (StringVal <string>)
 expr     ::= <ident>
           |  <intVal>
           |  <floatVal>
           |  (TupleCons <expr>*)
           |  (Seq <texpr> <expr>*)
+          |  (Seq <strVal>)
           |  (Call <expr>+)
           |  (FieldAccess <expr> <intVal>)
+          |  (At <expr> <expr>)
           |  (And <expr> <expr>)
           |  (Or <expr> <expr>)
           |  (If <expr> <expr> <expr>?)
@@ -85,8 +88,10 @@ the desugared form (the *language core*).
 ### Semantic Grammar
 
 ```
+ch  ::= ...                         # UTF-8 byte values
 c   ::= n                           # corresponds to `(IntVal n)`
      |  rational                    # corresponds to `(FloatVal rational)`
+     |  str                         # corresponds to `(StringVal str)`
      |  true                        # corresponds to `(Ident "true")`
      |  false                       # corresponds to `(Ident "false")`
      |  (TupleCons)                 # unit value
@@ -108,9 +113,15 @@ typ ::= void                        # corresponds to `(VoidTy)`
      |  (UnionTy <typ>+)
      |  (ProcTy  <typ>+)
      |  (SeqTy   <typ>)
-le  ::= x                   # | subset of expressions where all non-lvalue
-     |  (FieldAccess le n)  # | operands were already evaluated
-e   ::= x | val | typ | ... # includes all expressions from the abstract syntax
+le  ::= <l>                  # | subset of expressions where all non-lvalue
+     |  (FieldAccess <le> n) # | operands were already evaluated
+     |  (At <le> n)          # |
+e   ::= x                    # free variable
+     | <val>
+     | <typ>
+     | (With a:<e> n b:<e>)  # | return array/tuple value `a` with the `n`-th
+                             # | element replaced with `b`
+     |  ... # includes all expressions from the abstract syntax
 
 e += (Frame typ e) # a special expression for assisting with evaluation
 ```
@@ -145,6 +156,7 @@ and `ProcTy` is significant, in `UnionTy` it is not. Formally:
 void  = void
 unit  = unit
 bool  = bool
+char  = char
 int   = int
 float = float
 
@@ -159,6 +171,7 @@ equal to b".
 # void is the bottom type; it's a subtype of all other types
 void <: unit
 void <: bool
+void <: char
 void <: int
 void <: float
 void <: (TupleTy typ+)
@@ -207,6 +220,10 @@ C |-_t (UnitTy) : unit
 C |-_t (BoolTy) : bool
 
 
+--------------------- # S-char-type
+C |-_t (CharTy) : char
+
+
 ------------------- # S-int-type
 C |-_t (IntTy) : int
 
@@ -249,7 +266,8 @@ Mutability is part of the type system. `All[typ]` means "matches `(mut typ)`
 and `typ`", which makes it writing deduction rules applicable to expression of
 both mutable and immutable type easier.
 
-`built_ins` is a set of names: `{==, <=, <, +, -, true, false}`.
+`built_ins` is a set of names:
+`{==, <=, <, +, -, *, div, mod, true, false, write, writeErr, readFile}`.
 
 ```
 
@@ -288,6 +306,10 @@ C |-_t e_1 : typ_1  C |- e_2 : All[typ_2] ...  typ_2 <:= typ_1 ...
 ------------------------------------------------------------------ # S-seq-cons
 C |- (Seq e_1 e_2*) : (SeqTy typ_1)
 
+
+------------------------------------------------------------------ # S-string-cons
+C |- (Seq str) : (SeqTy char)
+
 C |- e : All[typ]   C.return <:= typ
 ------------------------------------ # S-return
 C |- (Return e) : void
@@ -303,6 +325,14 @@ C |- (FieldAccess e n) : typ_2
 C |- e: (mut typ_1)  typ_1 = (TupleTy ...)  typ_1 at n = typ_2
 -------------------------------------------------------------- # S-mut-field
 C |- (FieldAccess e n) : (mut typ_2)
+
+C |- e_1: typ_1  typ_1 = (SeqTy typ_2)  C |- e_2 : typ_3  typ_3 = int
+--------------------------------------------------------------------- # S-at
+C |- (At e_1 e_2) : typ_2
+
+C |- e: (mut typ_1)  typ_1 = (SeqTy typ_2)  C |- e_2 : typ_3  typ_3 = int
+------------------------------------------------------------------------- # S-mut-field
+C |- (At e_1 e_2) : (mut typ_2)
 
 C |- e_1 : (mut typ_1)  C |- e_2 : All[typ_2]  typ_2 <:= typ_1
 -------------------------------------------------------------- # S-asgn
@@ -340,6 +370,18 @@ C |- e_1 : All[typ_1]  C |- e_2 : All[typ_1]  typ in {int, float}
 ----------------------------------------------------------------- # S-builtin-minus
 C |- (Call - e_1 e_2) : typ_1
 
+C |- e_1 : All[typ_1]  C |- e_2 : All[typ_1]  typ = int
+------------------------------------------------------- # S-builtin-mul
+C |- (Call * e_1 e_2) : typ_1
+
+C |- e_1 : All[typ_1]  C |- e_2 : All[typ_1]  typ = int
+------------------------------------------------------- # S-builtin-div
+C |- (Call div e_1 e_2) : typ_1
+
+C |- e_1 : All[typ_1]  C |- e_2 : All[typ_1]  typ = int
+------------------------------------------------------- # S-builtin-mod
+C |- (Call mod e_1 e_2) : typ_1
+
 C |- e_1 : All[typ_1]  C |- e_2 : All[typ_1]  typ in {int, float, bool}
 ----------------------------------------------------------------------- # S-builtin-eq
 C |- (Call == e_1 e_2) : typ_1
@@ -360,6 +402,18 @@ C |- e_1 : All[typ_1]  typ_1 = (SeqTy typ_2)  C |- e_2 : All[typ_3]  typ_3 <:= t
 ------------------------------------------------------------------------------------ # S-builtin-concat
 C |- (Call concat e_1 e_2) : typ_1
 
+C |- e_1 : All[typ]  typ = (SeqTy char)
+--------------------------------------- # S-builtin-write
+C |- (Call write e_1) : unit
+
+C |- e_1 : All[typ]  typ = (SeqTy char)
+--------------------------------------- # S-builtin-writeErr
+C |- (Call writeErr e_1) : unit
+
+C |- e_1 : All[typ]  typ = (SeqTy char)
+--------------------------------------- # S-builtin-readFile
+C |- (Call readFile e_1) : (SeqTy char)
+
 C |- e_1 : All[typ_1]  typ_1 = (ProcTy typ_r typ_p*)  C |- e_2 : All[typ_a] ...  typ_a <:= typ_p ...
 ---------------------------------------------------------------------------------------------------- # S-call
 C |- (Call e_1 e_2*) : typ_r
@@ -379,6 +433,14 @@ C |- (Frame typ_1 e) : typ_1
 
 --------------------------------------------------------- # S-proc-val
 C |- (proc typ_r [x typ_p]^ e) : (ProcTy typ_r typ_p ...)
+
+C |- e_1 : All[typ_1]  typ_1 = (SeqTy typ_2)  C |- e_2 : All[typ_3]  typ_3 <:= typ_2
+------------------------------------------------------------------------------------ # S-seq-with
+C |- (With e_1 n e_2) : typ_1
+
+C |- e_1 : All[typ_1]  typ_1 = (TupleTy typ_2+)  C |- e_2 : All[typ_3]  typ_3 <:= typ_2 at n
+-------------------------------------------------------------------------------------------- # S-tuple-with
+C |- (With e_1 n e_2) : typ_1
 ```
 
 ##### Modules and Declarations
@@ -465,11 +527,16 @@ steps to `t_2` plugged into `E`".
 The configuration for steps is a tuple of the form `C; e`, where `C` is the
 *context* record. It's abstract syntax is as follows:
 ```
-C ::= { locs S }
+C ::= { locs S
+        output val
+        errOutput val }
 ```
 
 `locs` is a store (`S`), which maps *locations* to *values* (`S(l) = val`).
 Mutable state is modeled via locations.
+
+`input` is a value, which must be a `(array c ...)`, where `c` is of type
+`char`. The same is true for both `output` and `errOutput`.
 
 `e[x/y]` means "`e` with all occurrences of name `x` replaced with `y`".
 
@@ -485,17 +552,26 @@ and `body` is the procedure's body.
 >       reduced to a `(proc ...)` value, which is what a program is, in the
 >       end -- a procedural value
 
-The evaluation contexts are (evaluation happens left to right):
+The evaluation contexts are:
 
 ```
-E' ::= []
-    |  (FieldExpr E' n)
+E' ::= (FieldAccess E' n)
+    |  (At E' e)
+    |  (At le E)
+
+L  ::= []                  # | evaluation context for lvalues
+    |  (FieldAccess L n)   # |
+    |  (At L n)            # |
 
 E  ::= []
     |  (Exprs E e*)
     |  (FieldAccess E n)
-    |  (Asgn E' n)
+    |  (At E e)
+    |  (At le E)
+    |  (Asgn E' e)
     |  (Asgn le E)
+    |  (With E n e)
+    |  (With val n E)
     |  (TupleCons val* E e*)
     |  (Seq typ val* E e*)
     |  (Call val* E e*)
@@ -520,6 +596,25 @@ The pure notions of reduction are:
 
 (FieldAccess (tuple val^n) i)  ~~>  val_i # E-tuple-access
 
+(Asgn (FieldAccess le n) val_1)  ~~>  (Asgn le (With le n val_1)) # E-field-asgn
+(Asgn (At le n) val_1)           ~~>  (Asgn le (With le n val_1)) # E-elem-asgn
+
+n >= 0  n < |val|
+---------------------------------- # E-at
+(At (array val*) n)  ~~>  val at n
+
+n < 0 v n >= |val|
+-------------------------------------- # E-at-out-of-bounds
+(At (array val*) n)  ~~> (Unreachable)
+
+n >= 0  n < |val_1|  val_3 = copy(C, val_1) with n -> copy(val_2)
+----------------------------------------------------------------- # E-with
+C; (With val_1 n val_2)  ~~>  C; val_3
+
+n < 0 v n >= |val_1|
+------------------------------------------------------------------ # E-with-out-of-bounds
+C; (With val_1 n val_2)  ~~>  C; (Unreachable)
+
 val_3 = int_add(val_1, val_2)  val_3 != {}
 ------------------------------------------ # E-add-int
 (Call + val_1 val_2)  ~~>  val_3
@@ -535,6 +630,30 @@ val_3 = int_add(val_1, val_2)  val_3 != {}
 int_sub(val_1, val_2) = {}
 ---------------------------------------- # E-sub-int-overflow
 (Call - val_1 val_2)  ~~>  (Unreachable)
+
+val = int_mul(n_1, n_2)
+-------------------------- # E-mul-int
+(Call * n_1 n_2)  ~~>  val
+
+int_mul(n_1, n_2) = {}
+------------------------------------ # E-mul-int-overflow
+(Call * n_1 n_2)  ~~>  (Unreachable)
+
+val = int_div(n_1, n_2)
+---------------------------- # E-div-int
+(Call div n_1 n_2)  ~~>  val
+
+int_div(n_1, n_2) = {}
+-------------------------------------- # E-div-int-overflow
+(Call div n_1 n_2)  ~~>  (Unreachable)
+
+val = int_mod(n_1, n_2)
+---------------------------- # E-mod-int
+(Call mod n_1 n_2)  ~~>  val
+
+int_mod(n_1, n_2) = {}
+-------------------------------------- # E-mod-int-error
+(Call mod n_1 n_2)  ~~>  (Unreachable)
 
 val_3 = float_add(val_1, val_2)
 -------------------------------- # E-add-float
@@ -562,14 +681,19 @@ length = |val|
 
 ---------------------------------------------------------------- # E-builtin-concat
 (Call concat (array val_1*) val_2)  ~~>  (array val_1 ... val_2)
+
+val_2 = (array ch*)
+--------------------------------- # E-builtin-readFile
+(Call readFile val_1)  ~~>  val_2
+
+# ^^ a readFile call doesn't reduce to a concrete value, but rather to an
+# abstract value. The only thing known about the abstract value is that it's
+# an array with an unknown number of elements belonging to the `ch` non-
+# terminal
 ```
 
 The impure notions of reduction are:
 ```
-C.locs(l) = (tuple val^n)
------------------------------------ # E-tuple-loc-access
-C; (FieldAccess l i)  ~~>  C; val_i
-
 val_2 = copy(C, val_1) ...
 ------------------------------------------------ # E-tuple-cons
 C; (TupleCons val_1+)  ~~>  C; (tuple val_2 ...)
@@ -577,6 +701,10 @@ C; (TupleCons val_1+)  ~~>  C; (tuple val_2 ...)
 val_2 = copy(C, val_1) ...
 ---------------------------------------------- # E-seq-cons
 C; (Seq typ val_1+)  ~~>  C; (array val_2 ...)
+
+ch in utf8_bytes(str)
+------------------------------------ # E-string-cons
+C; (Seq str)  ~~>  C; (array ch ...)
 
 l notin C.locs
 -------------------------------------------------------------- # E-let-introduce
@@ -590,10 +718,6 @@ C; (Let x val e)  ~~>  C + locs with l -> copy(C, val); e[x/l]
 
 C; (Asgn l val)  ~~>  C + locs with l -> copy(C, val); (TupleCons) # E-asgn
 
-le ~~> val_2  val_3 = copy(C, val_2) with n -> copy(C, val_1)
-------------------------------------------------------------- # E-field-asgn
-C; (Asgn (FieldAccess le n) val_1)  ~~>  C; (Asgn le val_3)
-
 val_1 = (proc typ_r [x typ_p]^n e)
 ---------------------------------------------------------------- # E-call-reduce
 (Call val_1 val_2^n)  ~~>  (Frame typ_r e[x/copy(C, val_2) ...])
@@ -601,6 +725,14 @@ val_1 = (proc typ_r [x typ_p]^n e)
 # ^^ read: the call is replaced with the procedure's body (in which all
 # occurrences of the parameters were substituted with a copy of the respective
 # argument), which is wrapped in a `Frame` expression
+
+C_1.output = (array val_2*)  C_2 = C_1 with output = (array val_2 ... val_1 ...)
+-------------------------------------------------------------------------------- # E-builtin-write
+C_1; (Call write val_1)  ~~>  C_2; (TupleCons)
+
+C_1.errOutput = (array val_2*)  C_2 = C_1 with errOutput = (array val_2 ... val_1 ...)
+-------------------------------------------------------------------------------------- # E-builtin-writeErr
+C_1; (Call writeErr val_1)  ~~>  C_2; (TupleCons)
 ```
 
 The steps are:
@@ -612,6 +744,14 @@ C; E[e_1]  -->  C; E[e_2]
     C_1; e_1 ~~> C_2; e_2
 -----------------------------  # E-reduce-impure
 C_1; E[e_1]  -->  C_2; E[e_2]
+
+C.locs(l) = val
+------------------------------------------------------------ # E-tuple-loc-access
+C; E[L[(FieldAccess l n)]  ~~>  C; E[L[(FieldAccess val n)]]
+
+C.locs(l) = val
+------------------------------------------ # E-at-loc
+C; E[L[(At l n)]  ~~>  C; E[L[(At val n)]]
 
 val_2 = copy(C, val_1)
 ----------------------------------------------------- # E-return
@@ -629,11 +769,25 @@ C; B[(Unreachable)]  -->  C; (Unreachable)
 
 Arithmetic functions:
 ```
+trunc(r) = +i (where r >= 0 ^ i in N ^ |r| - 1 < i <= |r|)
+         = -i (where r <  0 ^ i in N ^ |r| - 1 < i <= |r|)
+# ^^ round towards zero
+
 int_add(n_1, n_2) = n_1 + n_2  (where -2^63 <= n_1 - n_2 < 2^63)
                   = {}         (otherwise)
 
 int_sub(n_1, n_2) = n_1 - n_2  (where -2^63 <= n_1 - n_2 < 2^63)
                   = {}         (otherwise)
+
+int_mul(n_1, n_2) = n_1 * n_2  (where -2^63 <= n_1 * n_2 < 2^63)
+                  = {}         (otherwise)
+
+int_div(n_1, 0)   = {}
+int_div(n_1, n_2) = {}                (where n_1 = -2^63 ^ n_2 = -1)
+                  = trunc(n_1 / n_2)  (otherwise)
+
+int_mod(n_1, 0)   = {}
+int_mod(n_1, n_2) = n_1 - (n_2 * trunc(n_1 / n_2))
 
 float_add(real_1, real_2) = ?
 float_sub(real_1, real_2) = ?
@@ -659,6 +813,12 @@ copy(C, l)                        = copy(C, C.locs(l))
 copy(C, (proc typ_r [x typ]^n e)) = (proc typ_r [x typ]^n e)
 copy(C, (array val^n))            = (array val^n)
 copy(C, (tuple val^n))            = (tuple val^n)
+```
+
+```
+utf8_bytes(str) = ?
+# TODO: the function is mostly self-explanatory, but it should be defined in
+#       a bit more detail nonetheless
 ```
 
 #### Type Safety

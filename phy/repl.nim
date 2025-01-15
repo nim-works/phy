@@ -27,15 +27,13 @@ import
     pass25,
     pass30,
     source2il,
-    spec_source,
+    syntax_source,
     trees,
   ],
   phy/[
     default_reporting,
     host_impl,
-    tree_parser
-  ],
-  common/[
+    tree_parser,
     vmexec
   ],
   vm/[

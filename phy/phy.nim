@@ -10,9 +10,6 @@ import
     streams,
     strutils
   ],
-  common/[
-    vmexec
-  ],
   generated/[
     lang0_checks,
     lang1_checks,
@@ -44,7 +41,8 @@ import
     default_reporting,
     host_impl,
     tree_parser,
-    types
+    types,
+    vmexec
   ],
   vm/[
     assembler,
@@ -56,8 +54,8 @@ import
   ]
 
 # cannot import normally, as some type names would conflict
-import passes/spec except NodeKind
-import passes/spec_source except NodeKind
+import passes/syntax except NodeKind
+import passes/syntax_source except NodeKind
 
 type
   Language = enum
@@ -120,7 +118,7 @@ template syntaxCheck(code: PackedTree, module, name: untyped) {.dirty.} =
       echo "Syntax error: \"", rule, "\" didn't match. Unexpected end"
     quit(1)
 
-proc syntaxCheck(code: PackedTree[spec.NodeKind], lang: Language) =
+proc syntaxCheck(code: PackedTree[syntax.NodeKind], lang: Language) =
   ## Runs the syntax checks for `lang` on `code`, aborting the program with an
   ## error if they don't succeed.
   case lang
@@ -149,7 +147,7 @@ template genericPrint(lang: Language, body: untyped) =
     else:
       stdout.writeLine("----")
 
-proc print(tree: PackedTree[spec.NodeKind], lang: Language) =
+proc print(tree: PackedTree[syntax.NodeKind], lang: Language) =
   genericPrint(lang):
     stdout.writeLine(pretty(tree, tree.child(0)))
     stdout.writeLine(pretty(tree, tree.child(1)))
@@ -159,14 +157,14 @@ proc print(m: VmModule) =
   genericPrint(langBytecode):
     stdout.write(disassemble(m))
 
-proc sourceToIL(text: string): (PackedTree[spec.NodeKind], SemType) =
+proc sourceToIL(text: string): (PackedTree[syntax.NodeKind], SemType) =
   ## Given an S-expression representation of the source language (`text`),
   ## analyzes it and translates it to the highest-level IL. Also returns the
   ## return of the procedure to executre, or ``tkError`` if there is no
   ## procedure to run.
   ##
   ## A failure during analysis aborts the program.
-  var code = fromSexp[spec_source.NodeKind](text)
+  var code = fromSexp[syntax_source.NodeKind](text)
 
   var reporter = initDefaultReporter[string]()
   var ctx = source2il.open(reporter)
@@ -180,7 +178,7 @@ proc sourceToIL(text: string): (PackedTree[spec.NodeKind], SemType) =
     # it's a standalone expression
     syntaxCheck(code, source_checks, expr)
     discard ctx.exprToIL(code)
-  of spec_source.NodeKind.Module:
+  of syntax_source.NodeKind.Module:
     # it's a full module. Translate all declarations
     syntaxCheck(code, source_checks, module)
     for it in code.items(NodeIndex(0)):
@@ -202,7 +200,7 @@ proc sourceToIL(text: string): (PackedTree[spec.NodeKind], SemType) =
     else:               prim(tkError)
   result[0] = ctx.close()
 
-proc compile(tree: var PackedTree[spec.NodeKind], source, target: Language) =
+proc compile(tree: var PackedTree[syntax.NodeKind], source, target: Language) =
   assert source != langSource
   assert ord(source) >= ord(target)
   var current = source
@@ -313,7 +311,7 @@ proc main(args: openArray[string]) =
 
   var
     module: VmModule
-    code: PackedTree[spec.NodeKind]
+    code: PackedTree[syntax.NodeKind]
     typ: SemType
 
   if source == langBytecode:
@@ -342,9 +340,9 @@ proc main(args: openArray[string]) =
     elif gRunner:
       # in order to reduce visual noise in tests, the ``(Module ...)`` top
       # level node is added implicitly
-      code = fromSexp[spec.NodeKind]("(Module " & text & ")")
+      code = fromSexp[syntax.NodeKind]("(Module " & text & ")")
     else:
-      code = fromSexp[spec.NodeKind](text)
+      code = fromSexp[syntax.NodeKind](text)
 
     if target == langBytecode:
       # compile to L0 code and then translate to bytecode

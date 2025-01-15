@@ -1,0 +1,13 @@
+discard """
+  description: "
+    The dynamic array access and index check happen after all non-lvalue
+    operands in the enclosing lvalue expression were evaluated
+  "
+  output: "2: int"
+"""
+(Exprs
+  (Decl x (Seq (IntTy)))
+  (At x
+    (Exprs
+      (Asgn x (Seq (IntTy) 1 2 3))
+      1)))

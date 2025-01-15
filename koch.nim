@@ -19,10 +19,10 @@ Commands:
   Programs: seq[(string, string, bool, bool)] = @[
     ("tester", "tools/tester.nim", true, true),
     ("passtool", "tools/passtool/passtool.nim", true, true),
-    ("repl", "tools/repl.nim", false, true),
+    ("repl", "phy/repl.nim", false, true),
     ("phy", "phy/phy.nim", false, true),
     ("skully", "skully/skully.nim", true, false)
-    # ^^ excluded from 'all' because it takes too long to compile
+    # ^^ excluded from 'all' because the program takes too long to compile
   ]
     ## program name, module path, whether the program doesn't depend on
     ## generated modules, and whether the program is built with 'all'
@@ -71,10 +71,10 @@ proc generateModules(dir: string) =
   createDir(dir)
 
   # generate the modules:
-  require run(passtool, "gen-checks", "passes", "lang30", "passes/spec",
+  require run(passtool, "gen-checks", "languages", "lang30", "passes/syntax",
               dir / "*_checks.nim")
-  require run(passtool, "gen-checks", "spec", "specification",
-              "passes/spec_source", dir / "source_checks.nim")
+  require run(passtool, "gen-checks", "languages", "specification",
+              "passes/syntax_source", dir / "source_checks.nim")
 
 proc buildSingle(args: string): bool
 

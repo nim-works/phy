@@ -16,7 +16,7 @@
 
 import
   std/[intsets, tables],
-  passes/[changesets, spec, trees],
+  passes/[changesets, syntax, trees],
   vm/utils
 
 type
@@ -79,7 +79,7 @@ proc signature(c; tree; n): NodeIndex =
 proc typeof(c; tree; n): Node =
   case tree[n].kind
   of Path, Load, Deref, Add, Sub, Mul, Div, Mod, BitNot, BitAnd, BitOr, BitXor,
-     AddChck, SubChck, Shl, Shr, Conv, Reinterp, Neg:
+     AddChck, SubChck, MulChck, Shl, Shr, Conv, Reinterp, Neg:
     # these are all expression that store their result type as the first
     # node
     tree[n, 0]
@@ -237,7 +237,7 @@ proc lowerExpr(c; tree; n, bu) =
     c.lowerExpr(tree, tree.child(n, 1), bu)
   of Reinterp, Conv:
     c.lowerExpr(tree, tree.child(n, 2), bu)
-  of Add, Sub, Mul, Div, Mod, BitAnd, BitOr, BitXor, AddChck, SubChck,
+  of Add, Sub, Mul, Div, Mod, BitAnd, BitOr, BitXor, AddChck, SubChck, MulChck,
      Eq, Lt, Le, Shl, Shr:
     let (_, a, b) = tree.triplet(n)
     let reference = c.stmts.len

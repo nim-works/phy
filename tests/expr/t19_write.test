@@ -1,0 +1,4 @@
+discard """
+  output: "test\n(): unit"
+"""
+(Call write (Seq "test\n"))
