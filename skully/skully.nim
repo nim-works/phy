@@ -35,7 +35,7 @@ import
   ],
   passes/[
     debugutils,
-    spec,
+    syntax,
     trees
   ],
   skully/[

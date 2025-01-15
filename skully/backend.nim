@@ -48,7 +48,7 @@ import
   ],
   passes/[
     builders,
-    spec,
+    syntax,
     trees
   ],
   skully/[
