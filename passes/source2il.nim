@@ -1339,6 +1339,19 @@ proc importIoProcedures(c) =
     buildTree Import:
       bu.add Node(kind: Type, val: c.genProcType(procTy))
       bu.add Node(kind: StringVal, val: c.literals.pack("core.writeErr"))
+  procTy = SemType(kind: tkProc,
+                    elems: @[prim(tkInt), pointerType, prim(tkInt)])
+  let fileSizePrc = c.addProc(procTy):
+    buildTree Import:
+      bu.add Node(kind: Type, val: c.genProcType(procTy))
+      bu.add Node(kind: StringVal, val: c.literals.pack("core.fileSize"))
+  procTy = SemType(kind: tkProc,
+                   elems: @[prim(tkInt), pointerType, prim(tkInt),
+                            pointerType, prim(tkInt)])
+  let readFileHostPrc = c.addProc(procTy):
+    buildTree Import:
+      bu.add Node(kind: Type, val: c.genProcType(procTy))
+      bu.add Node(kind: StringVal, val: c.literals.pack("core.readFile"))
 
   # both write and writeErr use the same wrapper body, just with a different
   # external procedure to call
@@ -1381,6 +1394,48 @@ proc importIoProcedures(c) =
                                 $intTypeIL, $payloadType],
                         c.literals)
   c.addDecl("writeErr", Entity(kind: ekProc, id: writeErrPrc))
+
+  # build the readFile procedure, which is a wrapper around the external
+  # `fileSize` and `readFile` core procedures. It works as follows:
+  # 1. query the size of the file
+  # 2. create a sequence fitting N characters (N is the result of the previous
+  #    size query)
+  # 3. read N bytes from the file
+  # 4. truncate the sequence to the number of actually read bytes
+  # The file is not locked for the duration of the whole operation, and thus
+  # it's possible (though unlikely) for the file to change in-between the size
+  # query and read. While not ideal, the truncation takes care of that case.
+  # XXX: in the future, the use of a handle-based file core API will resolve
+  #      this problem
+  var readFileBody = IrNode(kind: Stmts)
+  readFileBody.add newAsgn(newFieldExpr(newLocal(1), 0),
+    newCall(fileSizePrc.uint32, @[
+      newAddr(newFieldExpr(c.genPayloadAccess(newLocal(0), stringType), 1)),
+      newFieldExpr(newLocal(0), 0)]))
+  readFileBody.add newAsgn(newFieldExpr(newLocal(1), 1),
+    newCall(AllocProc,
+      c.newIntOp(Add,
+        newIntVal(size(prim(tkInt))),
+        newFieldExpr(newLocal(1), 0))))
+  readFileBody.add newAsgn(newFieldExpr(newLocal(1), 0),
+    newCall(readFileHostPrc.uint32, @[
+      newAddr(newFieldExpr(c.genPayloadAccess(newLocal(0), stringType), 1)),
+      newFieldExpr(newLocal(0), 0),
+      newAddr(newFieldExpr(c.genPayloadAccess(newLocal(1), stringType), 1)),
+      newFieldExpr(newLocal(1), 0)]))
+  readFileBody.add newReturn(newLocal(1))
+
+  procTy = SemType(kind: tkProc, elems: @[stringType, stringType])
+  let readFilePrc = c.addProc(procTy):
+    buildTree ProcDef:
+      bu.add Node(kind: Type, val: c.genProcType(procTy))
+      bu.subTree Params:
+        bu.add Node(kind: Local, val: 0)
+      bu.subTree Locals:
+        bu.add Node(kind: Type, val: c.typeToIL(stringType))
+        bu.add Node(kind: Type, val: c.typeToIL(stringType))
+      convert(readFileBody, c.literals, bu)
+  c.addDecl("readFile", Entity(kind: ekProc, id: readFilePrc))
 
 proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   ## Creates a new empty module translation/analysis context.

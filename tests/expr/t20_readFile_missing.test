@@ -1,0 +1,5 @@
+discard """
+  description: "Reading from a non-existent file produces an empty sequence"
+  output: "[]: seq(char)"
+"""
+(Call readFile (Seq "doesn't exist"))
