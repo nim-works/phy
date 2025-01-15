@@ -16,7 +16,7 @@
 
 import
   std/[intsets, tables],
-  passes/[changesets, spec, trees],
+  passes/[changesets, syntax, trees],
   vm/utils
 
 type

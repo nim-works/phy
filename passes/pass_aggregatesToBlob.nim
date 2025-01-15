@@ -2,7 +2,7 @@
 ## address value arithmetic (|L3| -> |L3|).
 
 import
-  passes/[changesets, spec, trees],
+  passes/[changesets, syntax, trees],
   vm/utils
 
 type

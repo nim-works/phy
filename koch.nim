@@ -19,7 +19,7 @@ Commands:
   Programs: seq[(string, string, bool)] = @[
     ("tester", "tools/tester.nim", true),
     ("passtool", "tools/passtool/passtool.nim", true),
-    ("repl", "tools/repl.nim", false),
+    ("repl", "phy/repl.nim", false),
     ("phy", "phy/phy.nim", false)
   ]
     ## maps program names to the associated path and whether the program
@@ -69,10 +69,10 @@ proc generateModules(dir: string) =
   createDir(dir)
 
   # generate the modules:
-  require run(passtool, "gen-checks", "passes", "lang30", "passes/spec",
+  require run(passtool, "gen-checks", "languages", "lang30", "passes/syntax",
               dir / "*_checks.nim")
-  require run(passtool, "gen-checks", "spec", "specification",
-              "passes/spec_source", dir / "source_checks.nim")
+  require run(passtool, "gen-checks", "languages", "specification",
+              "passes/syntax_source", dir / "source_checks.nim")
 
 proc buildSingle(args: string): bool
 

@@ -6,7 +6,7 @@ import
   ],
   passes/[
     trees,
-    spec
+    syntax
   ],
   vm/[
     utils,

@@ -3,7 +3,7 @@
 ## (|L2| -> |L1|).
 
 import
-  passes/[changesets, spec, trees],
+  passes/[changesets, syntax, trees],
   vm/utils
 
 type

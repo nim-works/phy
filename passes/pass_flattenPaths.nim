@@ -3,7 +3,7 @@
 
 import
   std/[tables],
-  passes/[changesets, spec, trees],
+  passes/[changesets, syntax, trees],
   vm/utils
 
 type
