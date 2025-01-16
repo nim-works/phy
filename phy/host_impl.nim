@@ -81,7 +81,7 @@ template toHost(a: VirtualAddr, size: uint64): HostPointer =
   let x = a # prevent double evaluation
   var p: HostPointer = nil
   # nil address values are allowed
-  if checkmem(env.allocator, a, size, p):
+  if checkmem(env.allocator, x, size, p):
     return CallbackResult(code: cecError)
   p
 
