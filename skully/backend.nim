@@ -2099,7 +2099,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
           bu.subTree Deref:
             bu.add node(Type, c.genFlexArrayType(env.types, CharType))
             value tree.child(n, 0)
-        bu.use startExpr
+          bu.use startExpr
     of tkPtr:
       # can only be a pointer to an unchecked array
       let arr  = env.types.headerFor(typ, Canonical).elem
@@ -2108,7 +2108,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
           bu.subTree Deref:
             bu.add c.typeRef(env, arr)
             value tree.child(n, 0)
-        bu.use startExpr
+          bu.use startExpr
     of tkArray:
       stmts.putInto dataExpr, Addr:
         bu.subTree At:
