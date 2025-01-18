@@ -59,7 +59,7 @@ jobs:
       # use a pinned version in order to make CI runs reproducible
       - uses: nim-works/setup-nimskull@0.1.2
         with:
-          nimskull-version: "0.1.0-dev.21431"
+          nimskull-version: "0.1.0-dev.21434"
 
       - name: Build koch
         run: nim c -d:nimStrictMode --outdir:bin koch.nim
@@ -88,7 +88,7 @@ jobs:
       # use a pinned version in order to make CI runs reproducible
       - uses: nim-works/setup-nimskull@0.1.2
         with:
-          nimskull-version: "0.1.0-dev.21431"
+          nimskull-version: "0.1.0-dev.21434"
 
       - name: Build koch
         run: nim c -d:nimStrictMode --outdir:bin koch.nim
@@ -102,3 +102,44 @@ jobs:
 
       - name: "Check the source language grammar"
         run: bin/passtool verify languages specification
+
+  skully:
+    name: "Test skully"
+    # use the M1 runner because it's the fastest
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: tree:0
+
+      # use a pinned version in order to make CI runs reproducible
+      - uses: nim-works/setup-nimskull@0.1.2
+        with:
+          nimskull-version: "0.1.0-dev.21434"
+
+      - name: Build koch
+        run: nim c -d:nimStrictMode --outdir:bin koch.nim
+
+      - name: Build phy
+        run: bin/koch single phy -d:release
+
+      - name: Build skully
+        run: bin/koch single skully -d:nimStrictMode -d:release
+
+      - name: Compile phy to L25 code with skully
+        run: bin/skully phy/phy.nim build/phy.txt
+
+      # to make sure the skully-compiled phy program works at least somewhat,
+      # use it to compile and run a source-language test
+      - name: Compile and run the L25 code
+        run: |
+          result=$(bin/phy --source:L25 e build/phy.txt -- --runner e $TEST_FILE)
+          if [[ "$result" != $TEST_OUTPUT ]]; then
+            echo "::error::Got $result , but expected $TEST_OUTPUT"
+            exit 1
+          fi
+        env:
+          TEST_FILE: tests/expr/t06_call_proc_with_tuple_return_type.test
+          TEST_OUTPUT: "(100, 200): (int, int)(Done 0)"
