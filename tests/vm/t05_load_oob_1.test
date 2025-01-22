@@ -1,0 +1,10 @@
+discard """
+  output: "(Error ecIllegalAccess)"
+"""
+.type P1 () -> void
+.start P1 main
+LdImmInt 2097152    # outside of the available memory region
+LdInt64 0
+Drop
+Ret
+.end

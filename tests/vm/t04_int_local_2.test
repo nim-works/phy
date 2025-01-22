@@ -1,0 +1,10 @@
+discard """
+  output: "(Done 1)"
+"""
+.type P1 () -> int
+.start P1 main
+.local tmp int
+LdImmInt 1
+SetLocal tmp
+Ret
+.end

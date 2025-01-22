@@ -1,0 +1,5 @@
+discard """
+  output: "<no procedures>"
+"""
+.global g int 1
+.export global g "test.global"

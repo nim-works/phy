@@ -1,7 +1,6 @@
-.type t0 (Int)
-.type t1 (Proc t0)
-.global g0 1
-.start t1 p0
+.type t0 () -> int
+.global g0 int 1
+.start t0 p0
   GetGlobal g0
   Ret
 .end

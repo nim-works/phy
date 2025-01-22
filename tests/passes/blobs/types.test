@@ -1,0 +1,18 @@
+discard """
+  description: "
+    Ensure that aggregate types are correctly turned into blob types
+  "
+  output: "(Done)"
+"""
+(TypeDefs
+  (Record 12 8
+    (Field 0 (Int 8))
+    (Field 8 (Int 4)))
+  (Union 4 4 (Int 4) (Int 4))
+  (Array 64 1 64 (Int 1))
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 3) (Locals)
+    (List
+      (Block (Params) (Return)))))

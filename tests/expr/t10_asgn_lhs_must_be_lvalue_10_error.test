@@ -1,0 +1,7 @@
+discard """
+  description: "A projection from an r-value is not an l-value expression"
+  reject: true
+"""
+(Asgn
+  (At (Seq (IntTy) 1 2 3) 0)
+  4)

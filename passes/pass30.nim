@@ -4,7 +4,7 @@
 
 import
   std/options,
-  passes/[builders, changesets, trees, spec],
+  passes/[builders, changesets, trees, syntax],
   vm/utils
 
 type
@@ -54,7 +54,7 @@ proc join(bu; label: LabelId) =
     bu.add Node(kind: Immediate, val: label)
 
 proc goto(bu; label: LabelId) =
-  bu.subTree Continue:
+  bu.subTree Goto:
     bu.add Node(kind: Immediate, val: label)
 
 proc pushContext(c) =
@@ -130,7 +130,7 @@ proc lowerStmt(c; tree; n, bu): bool =
         (cond, a) = tree.pair(n)
         then      = c.newLabel()
 
-      bu.subTree SelectBool:
+      bu.subTree Branch:
         bu.copyFrom(tree, cond)
         bu.goto(c.leave(1)) # the false branch
         bu.goto(then)       # the true branch
@@ -143,7 +143,7 @@ proc lowerStmt(c; tree; n, bu): bool =
         then         = c.newLabel()
         els          = c.newLabel()
 
-      bu.subTree SelectBool:
+      bu.subTree Branch:
         bu.copyFrom(tree, cond)
         bu.goto(els)  # the false branch
         bu.goto(then) # the true branch
@@ -187,11 +187,11 @@ proc lowerStmt(c; tree; n, bu): bool =
 
 proc lowerProc(c: var PassCtx, tree; n; changes) =
   c.nextLabel = 0
-  c.locals = tree.child(n, 1)
+  c.locals = tree.child(n, 2)
 
-  changes.replace(tree.child(n, 2), Stmts):
+  changes.replace(tree.child(n, 3), Stmts):
     # the body of a procedure must always end with a terminator
-    doAssert c.lowerStmt(tree, tree.child(n, 2), bu),
+    doAssert c.lowerStmt(tree, tree.child(n, 3), bu),
               "control-flow falls out of the body"
 
   assert c.context.len == 0, "context stack is not empty"
@@ -202,4 +202,5 @@ proc lower*(tree): Changeset[NodeKind] =
   var c = PassCtx(types: tree.child(0))
 
   for it in tree.items(tree.child(2)):
-    c.lowerProc(tree, it, result)
+    if tree[it].kind == ProcDef:
+      c.lowerProc(tree, it, result)

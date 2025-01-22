@@ -16,14 +16,16 @@ Commands:
   single <name> [args]        builds the single program with the given name
   generate [dir]              generates the various language-related modules
 """
-  Programs: seq[(string, string, bool)] = @[
-    ("tester", "tools/tester.nim", true),
-    ("passtool", "tools/passtool/passtool.nim", true),
-    ("repl", "tools/repl.nim", false),
-    ("phy", "phy/phy.nim", false)
+  Programs: seq[(string, string, bool, bool)] = @[
+    ("tester", "tools/tester.nim", true, true),
+    ("passtool", "tools/passtool/passtool.nim", true, true),
+    ("repl", "phy/repl.nim", false, true),
+    ("phy", "phy/phy.nim", false, true),
+    ("skully", "skully/skully.nim", true, false)
+    # ^^ excluded from 'all' because the program takes too long to compile
   ]
-    ## maps program names to the associated path and whether the program
-    ## doesn't depend on generated modules
+    ## program name, module path, whether the program doesn't depend on
+    ## generated modules, and whether the program is built with 'all'
 
   DefaultGenerated = "generated"
     ## the default path for the generated modules
@@ -69,10 +71,10 @@ proc generateModules(dir: string) =
   createDir(dir)
 
   # generate the modules:
-  require run(passtool, "gen-checks", "passes", "lang30", "passes/spec",
+  require run(passtool, "gen-checks", "languages", "lang30", "passes/syntax",
               dir / "*_checks.nim")
-  require run(passtool, "gen-checks", "spec", "spec", "passes/spec_source",
-              dir / "source_checks.nim")
+  require run(passtool, "gen-checks", "languages", "specification",
+              "passes/syntax_source", dir / "source_checks.nim")
 
 proc buildSingle(args: string): bool
 
@@ -97,7 +99,7 @@ proc buildSingle(args: string): bool =
 
   result = true
 
-  for (name, path, standalone) in Programs.items:
+  for (name, path, standalone, _) in Programs.items:
     if name == progName:
       if not standalone:
         # depends on some generated modules; first make sure they're
@@ -118,8 +120,8 @@ proc buildAll(args: string): bool =
   ## Builds all programs, passing `args` along to the compiler.
   let extra = args.saneSplit()
   # build all standalone programs first:
-  for (name, path, standalone) in Programs.items:
-    if standalone:
+  for (name, path, standalone, inAll) in Programs.items:
+    if standalone and inAll:
       if not compile(getCurrentDir() / path, name, extra):
         echo "Failure"
         quit(1)
@@ -128,8 +130,8 @@ proc buildAll(args: string): bool =
   generateModules(DefaultGenerated)
 
   # finally, build the remaining programs:
-  for (name, path, standalone) in Programs.items:
-    if not standalone:
+  for (name, path, standalone, inAll) in Programs.items:
+    if not standalone and inAll:
       if not compile(getCurrentDir() / path, name, extra):
         echo "Failure"
         quit(1)

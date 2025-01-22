@@ -1,7 +1,5 @@
-.type t0 (Int)
-.type t1 (Proc t0)
-.start t1 p0
-.local lo0 int
+.type t0 () -> int
+.start t0 p0
   LdImmInt 1
   Ret
 .end

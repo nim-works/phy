@@ -1,7 +1,7 @@
 discard """
   output: "(Done 1.5)"
 """
-.type P1 (Proc (Float))
+.type P1 () -> float
 .start P1 main
 .local tmp Int
 StackAlloc 8

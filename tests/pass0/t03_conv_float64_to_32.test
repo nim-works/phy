@@ -1,0 +1,12 @@
+discard """
+  output: "(Done 0.5)"
+"""
+(TypeDefs
+  (ProcTy (Float 4)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0) 0 (Locals)
+    (List
+      (Block (Params)
+        (Return
+          (Conv (Float 4) (Float 8) (FloatVal 0.5000000149)))))))

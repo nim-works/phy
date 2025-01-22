@@ -1,0 +1,8 @@
+.type t0 (int) -> int
+.type t1 () -> int
+.import t0 p0 "core.test"
+.start t1 p1
+  LdImmInt 100
+  Call p0 1
+  Ret
+.end

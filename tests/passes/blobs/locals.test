@@ -1,0 +1,29 @@
+discard """
+  description: "
+    Ensure that locals of non-blob type that have their address taken are
+    turned into blob locals and that parameters are handled correctly
+  "
+  output: "(Done)"
+"""
+(TypeDefs
+  (ProcTy (Void) (Int 4))
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0)
+    (Locals (Int 4))
+    (List
+      (Block (Params (Local 0))
+        (Asgn (Local 0) (IntVal 0))
+        (Drop (Copy (Local 0)))
+        (Drop (Addr (Local 0)))
+        (Return))))
+
+  (ProcDef (Type 1)
+    (Locals (Int 8))
+    (List
+      (Block (Params)
+        (Drop (Addr (Local 0)))
+        (Return))
+      (Except (Params (Local 0))
+        (Return)))))

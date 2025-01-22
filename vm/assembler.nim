@@ -16,13 +16,11 @@ import
     streams,
     tables
   ],
-  experimental/[
-    sexp_parse
-  ],
   vm/[
     utils,
     vmspec,
     vmenv,
+    vmmodules,
     vmtypes
   ]
 
@@ -48,6 +46,7 @@ type
 
   AssemblerState* = object
     stack: seq[ProcState] ## in-progress procedures
+    module: VmModule ## in-progress module
 
     procs: Table[string, ProcIndex]
     consts: Table[string, int32]
@@ -60,6 +59,8 @@ type
     dirConst  = "const"  ## define a constant
     dirGlobal = "global" ## define a global
     dirType   = "type"   ## define a type
+    dirExport = "export" ## mark a procedure or global as exported
+    dirImport = "import" ## add an imported procedure
     dirLocal  = "local"  ## define a local
     dirLabel  = "label"  ## attach a label to the next instruction
     dirEh     = "eh"     ## attach an exception handler to the previous
@@ -92,16 +93,27 @@ proc expectChar(s: Stream, c: char) =
   if s.readChar() != c:
     raise AssemblerError.newException("expected '" & c & "' got")
 
+proc expectString(s: Stream, str: string) =
+  var i = 0
+  while i < str.len and s.readChar() == str[i]:
+    inc i
+
+  if i < str.len:
+    raise AssemblerError.newException:
+      "expected '" & str & "', got '" & str[0..i] & "'"
+
 proc parseIntLike[T](s: Stream, _: typedesc[T]): T =
   var str = ""
   while (let c = s.peekChar(); c notin {' ', '\t', '\n', '\r', '\0'}):
     str.add s.readChar()
 
+  expect str.len > 0, "expected integer value"
+
   var temp: BiggestInt
-  if parseHex(str, temp) != str.len:
-    # error; might be a normal integer
-    if parseBiggestInt(str, temp) != str.len:
-      raise ValueError.newException("expected integer value")
+  if parseBiggestInt(str, temp) != str.len:
+    # error; might be an integer in hex format
+    if parseHex(str, temp) != str.len:
+        raise ValueError.newException("expected integer value")
 
   # cut off too large values
   result = cast[T](temp)
@@ -123,28 +135,6 @@ proc ident(s: Stream): string =
 
   expect result.len > 0, "expected identifier"
 
-# SexpParser helpers
-# -------------------
-
-template scopedParser(s: Stream) =
-  ## Injects a ``SexpParser`` local `p` opened with `s`. It's closed at the end of
-  ## the scope.
-  let start = s.getPosition()
-  var p {.inject.}: SexpParser
-  p.open(s)
-  defer:
-    # move the stream to the correct position
-    s.setPosition(start + p.offsetBase + p.bufpos)
-    # **important:** do not close the parser! It would also close the stream
-
-proc consumeSym(p: var SexpParser): string =
-  result = captureCurrString(p)
-  discard p.getTok() # move to the next token
-
-proc consumeTok(p: var SexpParser): TTokKind =
-  result = p.currToken
-  discard p.getTok() # move to the next token
-
 # Parsing
 # -------
 
@@ -155,57 +145,56 @@ proc parseValue(s: Stream, typ: ValueType): Value =
 
 proc parseTypedVal(s: Stream): TypedValue =
   let typ = parseEnum[ValueType]("vt" & s.ident())
+  s.space()
   TypedValue(typ: typ, val: s.parseValue(typ))
 
-proc parseType(p: var SexpParser, env: var VmEnv, a: AssemblerState, allowRef: bool): TypeId =
-  ## Parses the sexp type representation given by `sexp` and adds the
-  ## resulting type directly to `env`.
-  if p.currToken == tkSymbol:
-    expect allowRef, "cannot use type reference in this context"
-    return a.types[p.consumeSym()]
+proc parseType(s: Stream, env: var TypeEnv, a: AssemblerState): TypeId =
+  ## Parses a signature type from `s` and adds the type directly to `env`,
+  ## returning its ID.
+  s.expectChar('(')
+  s.space()
 
-  expect p.currToken == tkParensLe
-  p.space()
-  expect p.getTok == tkSymbol
+  proc parseTypeName(s: Stream): TypeKind =
+    let name = s.ident()
+    # the type names are case insensitive
+    case toLower(name)
+    of "void":    tkVoid
+    of "int":     tkInt
+    of "float":   tkFloat
+    of "foreign": tkForeign
+    else:
+      raise AssemblerError.newException("unknown type name: " & name)
 
-  var desc: VmType
-  case p.consumeSym()
-  of "Void":
-    desc = VmType(kind: tkVoid)
-  of "Int":
-    desc = VmType(kind: TypeKind.tkInt)
-  of "Float":
-    desc = VmType(kind: TypeKind.tkFloat)
-  of "Foreign":
-    desc = VmType(kind: tkForeign)
-  of "Proc":
-    desc = VmType(kind: tkProc)
-    var params: seq[TypeId]
+  var params: seq[VmType]
 
-    p.space()
-    while p.currToken != tkParensRi:
-      params.add parseType(p, env, a, true)
-      p.space()
-
-    desc.a = env.types.params.len.uint32
-    desc.b = desc.a + uint32(params.len)
-    env.types.params.add params
+  if s.peekChar() == ')':
+    discard s.readChar() # an empt parameter list
   else:
-    expect false
+    while true:
+      params.add s.parseTypeName()
+      s.space()
+      if s.peekChar() == ',': # a trailing comma is allowed
+        discard s.readChar()
+        s.space()
+      else:
+        s.expectChar(')')
+        break
 
-  p.space()
-  expect p.consumeTok() == tkParensRi
-  if desc.kind != tkVoid:
-    env.types.add(desc)
-  else:
-    VoidType
+  s.space()
+  s.expectString("->")
+  s.space()
+  result = env.add(s.parseTypeName(), params)
 
-proc parseType(s: Stream, env: var VmEnv, a: AssemblerState): TypeId =
-  ## Parses a type description provided as an S-expression from `s`. The type
-  ## description is added directly to `env`.
-  scopedParser(s)
-  discard p.getTok() # read the first token
-  result = parseType(p, env, a, false)
+proc parseInterface(s: Stream): string =
+  ## Parses an interface name.
+  # interface names don't need to support the whole ASCII range
+  const Allowed = {'A'..'Z', 'a'..'z', '0'..'9', '_', '.', '#', '(', ')'}
+  expect s.readChar() == '"', "expected '\"'"
+  var c: char
+  while (c = s.readChar(); c in Allowed):
+    result.add c
+
+  expect c == '"', "expected closing '\"'"
 
 proc prc(a: var AssemblerState): var ProcState {.inline.} =
   a.stack[a.stack.len - 1]
@@ -230,9 +219,6 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
   template instrA(): Instr =
     makeInstr(s.parseIntLike(int32), 0, 0)
 
-  template instrAB(): Instr =
-    makeInstr(s.parseIntLike(int32), (s.space(); s.parseIntLike(int8)))
-
   template instrAC(): Instr =
     makeInstr(s.parseIntLike(int32), 0, (s.space(); s.parseIntLike(int8)))
 
@@ -241,14 +227,15 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
 
   case op
   of opcNop, opcDrop, opcDup, opcSwap, opcAddInt, opcSubInt, opcMulInt,
-     opcDivInt, opcDivU, opcModInt, opcModU, opcNegInt, opcBitAnd, opcBitOr,
+     opcDivInt, opcDivU, opcModInt, opcModU, opcNegInt, opcMulChck,
+     opcBitAnd, opcBitOr,
      opcBitXor, opcBitNot, opcShr, opcAshr, opcShl, opcRet, opcAddFloat,
      opcSubFloat, opcMulFloat, opcDivFloat, opcNegFloat, opcEqInt, opcLtInt,
      opcLeInt, opcLtu, opcLeu, opcEqFloat, opcLtFloat, opcLeFloat, opcNot,
      opcReinterpF32, opcReinterpF64, opcReinterpI32, opcReinterpI64,
      opcExcept, opcUnreachable, opcRaise, opcMemCopy, opcMemClear, opcGrow:
     Instr(op) # instruction with no immediate operands
-  of opcAddImm, opcLdConst, opcLdImmInt, opcOffset,
+  of opcAddImm, opcLdImmInt, opcOffset,
      opcLdInt8, opcLdInt16, opcLdInt32, opcLdInt64, opcLdFlt32, opcLdFlt64,
      opcWrInt8, opcWrInt16, opcWrInt32, opcWrInt64, opcWrFlt32, opcWrFlt64,
      opcWrRef, opcStackAlloc, opcStackFree:
@@ -258,6 +245,8 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
   of opcMask, opcSignExtend, opcAddChck, opcSubChck, opcUIntToFloat,
      opcFloatToUint, opcSIntToFloat, opcFloatToSInt:
     instrC()
+  of opcLdConst:
+    makeInstr(a.consts[s.ident()])
   of opcBranch:
     makeInstr(s.parseLabel(a), c = (s.space(); s.parseIntLike(int8)))
   of opcJmp:
@@ -265,7 +254,7 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
   of opcCall:
     makeInstr(int32 a.procs[s.ident()], (s.space(); s.parseIntLike(int16)))
   of opcIndCall:
-    instrAB()
+    makeInstr(int32 a.types[s.ident()], (s.space(); s.parseIntLike(int16)))
   of opcGetLocal, opcSetLocal, opcPopLocal:
     makeInstr(a.prc.localLookup[s.ident()])
   of opcGetGlobal:
@@ -273,7 +262,7 @@ proc parseOp(s: Stream, op: Opcode, a: var AssemblerState): Instr =
   of opcYield:
     instrAC()
 
-proc patch(prc: var ProcState, c: VmEnv) =
+proc patch(prc: var ProcState) =
   ## Patches all jump instructions and prepares the content of `prc` for being
   ## added to `c`.
   for name, it in prc.labelLookup.pairs:
@@ -297,12 +286,11 @@ proc slice[T](old, with: seq[T]): Slice[uint32] =
 proc hoSlice[T](old, with: seq[T]): HOslice[uint32] =
   hoSlice(old.len.uint32, uint32(old.len + with.len))
 
-proc process*(a: var AssemblerState, line: sink string, env: var VmEnv) =
+proc process*(a: var AssemblerState, line: sink string) =
   ## Processes `line`, which must be a single line without the line terminator.
   ## An `AssemblerError <#AssemblerError>`_ or ``ValueError`` is raised when
-  ## something goes wrong. The `env` might have been modified already in this
-  ## case, but not to a point where it's in an invalid state, meaning that both
-  ## `a` and `env` can continue to be used after the exception is handled.
+  ## something goes wrong. After the exception is handled, `a` can continue to
+  ## be used.
   let s = newStringStream(line)
   s.space()
   if s.atEnd():
@@ -314,53 +302,83 @@ proc process*(a: var AssemblerState, line: sink string, env: var VmEnv) =
     s.expectChar('.')
     case parseEnum[Directive](s.ident())
     of dirStart:
-      # .start <type-id> <name>
-      var prc = ProcState(id: env.procs.len.ProcIndex)
+      # .start <type> <name>
+      var prc = ProcState(id: a.module.procs.len.ProcIndex)
       s.space()
       prc.typ = a.types[s.ident()]
       s.space()
       # register in the lookup table already in order to support self-
       # references
       a.procs[s.ident()] = prc.id
-      env.procs.add ProcHeader() # reserve a slot already
+      a.module.procs.add ProcHeader() # reserve a slot already
       a.stack.add prc
     of dirEnd:
       var prc = a.stack.pop()
-      patch(prc, env)
-      env.procs[int prc.id] =
+      patch(prc)
+      a.module.procs[int prc.id] =
         ProcHeader(kind: pkDefault, typ: prc.typ,
-                   code: slice(env.code, prc.code),
-                   locals: hoSlice(env.locals, prc.locals),
-                   eh: hoSlice(env.ehTable, prc.ehTable))
-      env.locals.add prc.locals
-      env.code.add prc.code
-      env.ehTable.add prc.ehTable
+                   code: slice(a.module.code, prc.code),
+                   locals: hoSlice(a.module.locals, prc.locals),
+                   eh: hoSlice(a.module.ehTable, prc.ehTable))
+      a.module.locals.add prc.locals
+      a.module.code.add prc.code
+      a.module.ehTable.add prc.ehTable
     of dirConst:
       # .const <name> <type> <value>
       s.space()
       let name = s.ident()
       s.space()
-      let id = env.constants.len
-      env.constants.add parseTypedVal(s)
+      let id = a.module.constants.len
+      a.module.constants.add parseTypedVal(s)
       a.consts[name] = int32 id
     of dirGlobal:
       # .global <name> <type> <value>
       s.space()
       let name = s.ident()
       s.space()
-      let id = env.globals.len
-      env.globals.add parseTypedVal(s)
+      let id = a.module.globals.len
+      a.module.globals.add parseTypedVal(s)
       a.globals[name] = int32 id
     of dirType:
       # .type <name> <type-desc>
       s.space()
       let name = s.ident()
       s.space()
-      let t = parseType(s, env, a)
+      let t = parseType(s, a.module.types, a)
       a.types[name] = t
+    of dirExport:
+      # .export <kind> <name> <interface>
+      s.space()
+      let kind = parseEnum[ExportKind]("exp" & s.ident())
+      s.space()
+      let id =
+        case kind
+        of expProc:   a.procs[s.ident()].uint32
+        of expGlobal: a.globals[s.ident()].uint32
+      s.space()
+      let iface = s.parseInterface()
+      # parse the interface name *before* modifying the module
+      a.module.exports.add:
+        Export(kind: kind, id: id, name: a.module.names.len.uint32)
+      a.module.names.add iface
+    of dirImport:
+      # .import <type> <name> <interface>
+      var prc = ProcHeader(kind: pkCallback)
+      s.space()
+      prc.typ = a.types[s.ident()]
+      s.space()
+      let name = s.ident()
+      s.space()
+      prc.code.a = a.module.names.len.uint32
+      expect name notin a.procs:
+        "a procedure with the given name already exists"
+      a.procs[name] = a.module.procs.len.ProcIndex
+      let iface = s.parseInterface()
+      # parse the interface name *before* modifying the module
+      a.module.procs.add prc
+      a.module.names.add iface
     of dirLocal:
       # .local <name> <type>
-      expect a.stack.len > 0, "only allowed in procedure"
       s.space()
       let name = s.ident()
       s.space()
@@ -388,3 +406,7 @@ proc process*(a: var AssemblerState, line: sink string, env: var VmEnv) =
   s.space()
   s.comment()
   expect s.atEnd
+
+proc close*(a: sink AssemblerState): VmModule =
+  ## Closes the assembler and returns the built module.
+  move a.module

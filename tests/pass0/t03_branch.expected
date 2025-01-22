@@ -1,0 +1,12 @@
+.type t0 () -> int
+.start t0 p0
+  LdImmInt 1
+  Branch L3 0
+  Jmp L5
+.label L3
+  LdImmInt 1
+  Ret
+.label L5
+  LdImmInt 2
+  Ret
+.end

@@ -21,24 +21,27 @@ type
     tkVoid
     tkUnit
     tkBool
+    tkChar  ## UTF-8 byte
     tkInt
     tkFloat
     tkTuple ## an anonymous product type
     tkUnion ## an anonymous sum type
+    tkProc
+    tkSeq
 
   SemType* = object
     ## Represents a source-language type. The "Sem" prefix is there to prevent
     ## name conflicts with other types named `Type`.
     case kind*: TypeKind
-    of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:
+    of tkError, tkVoid, tkUnit, tkBool, tkChar, tkInt, tkFloat:
       discard
-    of tkTuple, tkUnion:
+    of tkTuple, tkUnion, tkProc, tkSeq:
       elems*: seq[SemType]
 
 const
-  ComplexTypes* = {tkTuple, tkUnion}
-    ## types that can currently not be used as procedure return or parameter
-    ## types in the target IL
+  AggregateTypes* = {tkTuple, tkUnion, tkSeq}
+  ComplexTypes*   = AggregateTypes + {tkProc}
+    ## non-primitive types
 
 proc cmp*(a, b: SemType): int =
   ## Establishes a total order for types, intended mainly for sorting them.
@@ -50,9 +53,9 @@ proc cmp*(a, b: SemType): int =
 
   # same kind, compare operands
   case a.kind
-  of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:
+  of tkError, tkVoid, tkUnit, tkBool, tkChar, tkInt, tkFloat:
     result = 0 # equal
-  of tkTuple, tkUnion:
+  of tkTuple, tkUnion, tkProc, tkSeq:
     result = a.elems.len - b.elems.len
     if result != 0:
       return
@@ -71,15 +74,19 @@ proc prim*(kind: TypeKind): SemType {.inline.} =
   ## Returns the primitive type with the given kind.
   SemType(kind: kind)
 
+proc procType*(ret: sink SemType): SemType =
+  ## Constructs a procedure type with `ret` as the return type.
+  SemType(kind: tkProc, elems: @[ret])
+
 proc `==`*(a, b: SemType): bool =
   ## Compares two types for equality.
   if a.kind != b.kind:
     return false
 
   case a.kind
-  of tkError, tkVoid, tkUnit, tkBool, tkInt, tkFloat:
+  of tkError, tkVoid, tkUnit, tkBool, tkChar, tkInt, tkFloat:
     result = true
-  of tkTuple, tkUnion:
+  of tkTuple, tkUnion, tkProc, tkSeq:
     result = a.elems == b.elems
 
 proc isSubtypeOf*(a, b: SemType): bool =
@@ -99,8 +106,9 @@ proc size*(t: SemType): int =
   case t.kind
   of tkVoid: unreachable()
   of tkError: 8 # TODO: return a value indicating "unknown"
-  of tkUnit, tkBool: 1
+  of tkUnit, tkBool, tkChar: 1
   of tkInt, tkFloat: 8
+  of tkProc: 8 # size of a pointer
   of tkTuple:
     var s = 0
     for it in t.elems.items:
@@ -111,6 +119,8 @@ proc size*(t: SemType): int =
     for it in t.elems.items:
       s = max(s, size(it))
     s + 8 # +8 for the tag
+  of tkSeq:
+    size(prim(tkInt)) * 2 # length + pointer
 
 proc commonType*(a, b: SemType): SemType =
   ## Finds the common type between `a` and `b`, or produces an error.
@@ -120,3 +130,20 @@ proc commonType*(a, b: SemType): SemType =
     b
   else:
     errorType()
+
+proc isTriviallyCopyable*(typ: SemType): bool =
+  ## Whether a value of `typ` can be trivially copied (that is, via a
+  ## single block copy).
+  case typ.kind
+  of tkError, tkUnit, tkBool, tkChar, tkInt, tkFloat, tkProc:
+    true
+  of tkSeq:
+    false
+  of tkUnion, tkTuple:
+    # trivially copyable only if all element types are
+    for it in typ.elems.items:
+      if not isTriviallyCopyable(it):
+        return false
+    true
+  of tkVoid:
+    unreachable()

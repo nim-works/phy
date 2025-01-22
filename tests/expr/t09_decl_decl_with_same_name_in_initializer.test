@@ -1,0 +1,9 @@
+discard """
+  output: "200: int"
+"""
+(Exprs
+  (Decl (Ident "x")
+    (Exprs
+      (Decl (Ident "x") (IntVal 100))
+      (IntVal 200)))
+  (Ident "x"))

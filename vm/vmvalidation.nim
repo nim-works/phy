@@ -2,7 +2,7 @@
 ## environment state (procedure headers, types, etc.).
 ##
 ## The validation layer makes sure that at run-time, the VM can rely on
-## the code and environment are well-formed, with the only possible errors
+## the code and environment being well-formed, with the only possible errors
 ## being guest errors (e.g., illegal memory access).
 
 import
@@ -16,6 +16,7 @@ import
   vm/[
     utils,
     vmspec,
+    vmmodules,
     vmtypes,
     vmenv
   ]
@@ -36,20 +37,19 @@ type
 
 const
   errNotForwardJump = "not a forward jump"
-  errNotAProcType   = "type is not a proc type"
 
 proc toValueType(t: VmType): ValueType =
-  case t.kind
-  of tkInt, tkProc: vtInt
-  of tkFloat:       vtFloat
-  of tkForeign:     vtRef
-  of tkVoid:        unreachable()
+  case t
+  of tkInt:     vtInt
+  of tkFloat:   vtFloat
+  of tkForeign: vtRef
+  of tkVoid:    unreachable()
+
+template `[]`(m: VmModule, idx: ProcIndex): ProcHeader =
+  m.procs[ord idx]
 
 proc param(env: TypeEnv, t: TypeId, i: int): ValueType =
-  toValueType(env[env.params[env[t].a + i.uint32 + 1]])
-
-proc numArgs(typ: VmType): int =
-  typ.len - 1
+  toValueType(vmtypes.param(env, t, i))
 
 proc test(a: seq|openArray, i: SomeInteger): bool =
   when i is SomeUnsignedInt:
@@ -68,7 +68,7 @@ template check(res: CheckResult) =
   if tmp.isErr:
     return tmp
 
-proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
+proc run(ctx: var ValidationState, env: VmModule, pos: PrgCtr, instr: Instr
         ): CheckResult =
   ## * applies the operand-stack effects of instruction `instr` at `pos`
   ## * verifies that the instruction is well-formed
@@ -145,6 +145,9 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
     check imm8(instr) in 1..64, "width not in range 1..64"
     pop(vtInt); pop(vtInt)
     push(vtInt); push(vtInt)
+  of opcMulChck:
+    pop(vtInt); pop(vtInt)
+    push(vtInt); push(vtInt)
   of opcMask, opcSignExtend:
     pop(vtInt)
     push(vtInt)
@@ -168,7 +171,11 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
   of opcUIntToFloat, opcSIntToFloat:
     pop(vtInt)
     push(vtFloat)
-  of opcFloatToSInt, opcFloatToUint, opcReinterpI32, opcReinterpI64:
+  of opcFloatToSInt, opcFloatToUInt:
+    check imm8(instr) in 1..64, "width out of range"
+    pop(vtFloat)
+    push(vtInt)
+  of opcReinterpI32, opcReinterpI64:
     pop(vtFloat)
     push(vtInt)
   of opcLdInt8, opcLdInt16, opcLdInt32, opcLdInt64:
@@ -203,8 +210,8 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
     expectEmpty()
     jump(rel)
   of opcRet:
-    let expect = env.types[env.types.returnType(env[ctx.prc].typ)]
-    if expect.kind != tkVoid:
+    let expect = env.types.returnType(env[ctx.prc].typ)
+    if expect != tkVoid:
       pop(toValueType expect)
     expectEmpty()
     ctx.active = false
@@ -220,21 +227,21 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
     of opcCall:
       typ = checked(env.procs, idx).typ
     of opcIndCall:
-      check checked(env.types.types, idx).kind == tkProc, errNotAProcType
+      discard checked(env.types.types, idx)
       typ = TypeId idx
       pop(vtInt) # callee
     else:
       unreachable()
 
-    check env.types[typ].numArgs() == num, "arity doesn't match"
+    check env.types.numParams(typ) == num, "arity doesn't match"
 
     # pop all arguments from the stack, expecting the given kinds
     for i in 0..<num:
       pop(env.types.param(typ, num - i - 1))
 
     # push the return value, if any
-    let ret = env.types[env.types.returnType(typ)]
-    if ret.kind != tkVoid:
+    let ret = env.types.returnType(typ)
+    if ret != tkVoid:
       push(toValueType ret)
   of opcExcept:
     check not ctx.active, "control-flow reaches 'opcExcept'"
@@ -252,7 +259,7 @@ proc run(ctx: var ValidationState, env: VmEnv, pos: PrgCtr, instr: Instr
 
   result.initSuccess()
 
-proc verify(ctx: ValidationState, env: VmEnv, tbl: HOslice[uint32],
+proc verify(ctx: ValidationState, env: VmModule, tbl: HOslice[uint32],
             code: openArray[Instr]): CheckResult =
   ## Verifies the EH table `tbl`. Code is code of the procedure the table
   ## is associated with.
@@ -271,7 +278,7 @@ proc verify(ctx: ValidationState, env: VmEnv, tbl: HOslice[uint32],
 
   result.initSuccess()
 
-proc verify*(hdr: ProcHeader, env: VmEnv): CheckResult =
+proc verify*(hdr: ProcHeader, env: VmModule): CheckResult =
   ## Verifies that `hdr` is a valid procedure header.
   const Error = "proc header is illformed"
   case hdr.kind
@@ -284,22 +291,21 @@ proc verify*(hdr: ProcHeader, env: VmEnv): CheckResult =
             Error
     # the EH table is checked later
   of pkCallback:
-    check test(env.callbacks, hdr.code.a), Error
+    check test(env.names, hdr.code.a), Error
   of pkStub:
-    discard
+    result = CheckResult.err("stub procedures are not allowed in modules")
 
-  check test(env.types.types, hdr.typ.uint32), Error
-  check env.types[hdr.typ].kind == tkProc, errNotAProcType
+  check test(env.types.types, hdr.typ.uint32), "signature type is missing"
   result.initSuccess()
 
-proc verify*(env: VmEnv, prc: ProcIndex, code: openArray[Instr]): CheckResult =
+proc verify*(env: VmModule, prc: ProcIndex, code: openArray[Instr]): CheckResult =
   ## Verifies that the `code` belonging to procedure `prc` is valid. The
   ## associated EH table and instructions are also verified.
   var ctx = ValidationState(prc: prc, length: code.len, active: true)
 
   # push all parameters to the operand stack:
   for _, it in parameters(env.types, env[prc].typ):
-    ctx.stack.add(toValueType env.types[it])
+    ctx.stack.add(toValueType it)
 
   # run abstract evaluation for all instructions:
   for pos, instr in code.pairs:
@@ -314,58 +320,59 @@ proc verify*(env: VmEnv, prc: ProcIndex, code: openArray[Instr]): CheckResult =
 
 proc verify*(types: TypeEnv): CheckResult =
   ## Verifies the type environment, making sure it is well-formed.
-  check types.types.len > 0, "type environment is empty"
-  check types[VoidType].kind == tkVoid, "void type is not valid"
-
   for i, it in types.types.pairs:
-    let i = uint32(i)
-    case it.kind
-    of tkInt, tkFloat, tkForeign:
-      discard "nothing to check"
-    of tkVoid:
-      check i == 0, "only the very first type can be a 'tkVoid'"
-    of tkProc:
-      check it.b > it.a, "proc type has no elements"
+    check it.a <= it.b, "illformed signature entry"
+    check test(types.params, it.a), "illformed signature entry"
+    check test(types.params, it.b), "illformed signature entry"
 
-      for x in it.a..<it.b:
-        let typ = types.params[x]
-        check uint32(typ) < i, "forward reference"
-        var se = {tkInt, tkFloat, tkForeign}
-        if x == it.a:
-          se.incl tkVoid # void is only allowed for the return type
-
-        check types[typ].kind in se, "parameter type isn't valid"
+    for _, p in parameters(types, TypeId i):
+      check p != tkVoid, "void is not a valid parameter type"
 
   result.initSuccess()
 
-proc validate*(env: VmEnv): seq[string] =
-  ## Validates the full environment, returning a log of errors encountered.
+proc validate*(m: VmModule): seq[string] =
+  ## Validates the full module `m`, returning a log of errors encountered.
   ## If the log is empty, the environment is valid.
   template handle(res: CheckResult) =
     let tmp = res
     if tmp.isErr:
       result.add tmp.takeErr()
 
-  handle verify(env.types)
+  handle verify(m.types)
 
   # make sure the constants' types are sane:
-  for it in env.constants.items:
+  for it in m.constants.items:
     if it.typ notin {vtInt, vtFloat}:
       result.add fmt"{it.typ} is not valid for constant ({it})"
 
   # make sure the globals' types are sane:
-  for it in env.globals.items:
+  for it in m.globals.items:
     if it.typ notin {vtInt, vtFloat}:
       result.add fmt"{it.typ} is not valid for global ({it})"
 
   # check all procedure headers first:
-  for i, it in env.procs.pairs:
-    handle verify(it, env)
+  for i, it in m.procs.pairs:
+    handle verify(it, m)
 
   if result.len > 0:
     # don't validate the bytecode if there were any errors so far
     return
 
   # check the bodies:
-  for i, it in env.procs.pairs:
-    handle verify(env, ProcIndex(i), env.code.toOpenArray(it.code.a.int, it.code.b.int))
+  for i, it in m.procs.pairs:
+    if it.kind == pkDefault:
+      handle verify(m, ProcIndex(i),
+                    m.code.toOpenArray(it.code.a.int, it.code.b.int))
+
+  # check the export table:
+  for i, it in m.exports.pairs:
+    if not test(m.names, it.name):
+      result.add fmt"invalid export {i}: interface name doesn't exist"
+
+    case it.kind
+    of expGlobal:
+      if not test(m.globals, it.id):
+        result.add fmt"invalid export {i}: global {it.id} doesn't exist"
+    of expProc:
+      if not test(m.procs, it.id):
+        result.add fmt"invalid export {i}: procedure {it.id} doesn't exist"

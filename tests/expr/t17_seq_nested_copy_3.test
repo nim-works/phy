@@ -1,0 +1,12 @@
+discard """
+  description: "Sequences part of unions are fully copied when the union is"
+  output: "[1, 2, 3]: union(int, seq(int))"
+"""
+(Module
+  (ProcDecl union (UnionTy (IntTy) (SeqTy (IntTy))) (Params)
+    (Return (Seq (IntTy) 1 2 3)))
+  (ProcDecl main (UnionTy (IntTy) (SeqTy (IntTy))) (Params)
+    (Exprs
+      (Decl x (Call union))
+      (Decl y x)
+      (Return y))))

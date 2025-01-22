@@ -1,0 +1,4 @@
+discard """
+  output: "[1, 2.5, 3]: seq(union(int, float))"
+"""
+(Seq (UnionTy (IntTy) (FloatTy)) 1 2.5 3)

@@ -1,0 +1,7 @@
+discard """
+  description: "A projection from an l-value is an l-value expression"
+  output: "(): unit"
+"""
+(Exprs
+  (Decl x (Seq (IntTy) 1 2 3))
+  (Asgn (At x 0) 4))

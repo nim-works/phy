@@ -312,12 +312,12 @@ if file.len == 0:
 
   # discover all test directories and build the associated runner
   # executables:
-  for it in walkDir(testDir, relative=false):
-    if it.kind == pcDir:
-      let runner = it.path / "runner.nim"
+  for it in walkDirRec(testDir, {pcDir}, relative=false, checkDir=false):
+    if true:
+      let runner = it / "runner.nim"
       if fileExists(runner):
         let
-          name = it.path.relativePath(testDir) & "_runner"
+          name = it.relativePath(testDir) & "_runner"
           exe = changeFileExt("build" / "tests" / name, ExeExt)
 
         stdout.write("[Building] " & runner.relativePath(currDir) & "... ")
@@ -332,10 +332,10 @@ if file.len == 0:
           stdout.write(p.output)
           quit(1)
 
-        dirs.add (it.path, initDesc(exe))
-      elif fileExists(it.path / "runner.txt"):
+        dirs.add (it, initDesc(exe))
+      elif fileExists(it / "runner.txt"):
         # an external runner is used for the directory
-        let cmdFile = it.path / "runner.txt"
+        let cmdFile = it / "runner.txt"
         stdout.write("[Parsing] ")
         stdout.writeLine(cmdFile)
 
@@ -346,7 +346,7 @@ if file.len == 0:
 
         let desc = parseDesc(line)
         if desc.isSome:
-          dirs.add (it.path, desc.unsafeGet)
+          dirs.add (it, desc.unsafeGet)
         else:
           stdout.writeLine("Failure" + fgRed)
           quit(1)

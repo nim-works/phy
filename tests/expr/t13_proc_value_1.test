@@ -1,0 +1,11 @@
+discard """
+  output: "...: proc() -> int"
+"""
+(Module
+  (ProcDecl (Ident "p") (IntTy) (Params)
+    (Return (IntVal 100)))
+
+  (ProcDecl (Ident "main") (ProcTy (IntTy)) (Params)
+    (Exprs
+      (Decl (Ident "x") (Ident "p"))
+      (Return (Ident "x")))))

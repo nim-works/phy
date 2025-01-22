@@ -1,0 +1,11 @@
+discard """
+  reject: true
+"""
+(Module
+  (ProcDecl (Ident "p") (UnitTy) (Params)
+    (Return))
+
+  (ProcDecl (Ident "main") (ProcTy (IntTy)) (Params)
+    (Exprs
+      (Decl (Ident "x") (Ident "p"))
+      (Return (Ident "x")))))

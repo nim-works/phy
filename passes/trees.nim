@@ -88,6 +88,10 @@ proc len*(t: PackedTree, i: NodeIndex): int =
 proc last*(tree: PackedTree, n: NodeIndex): NodeIndex =
   tree.child(n, tree.len(n) - 1)
 
+proc fin*(tree: PackedTree, n: NodeIndex): NodeIndex =
+  ## Returns the node one past the last node part of the subtree at `n`.
+  tree.next(n)
+
 iterator items*(t: PackedTree, at: NodeIndex): NodeIndex =
   ## Returns the index of each child node of the node at `at`.
   var n = t.first(at)
@@ -233,23 +237,3 @@ proc toSexp*[T](tree: PackedTree[T], at: NodeIndex): SexpNode =
     result.add newSSymbol($tree[at].kind)
     for it in tree.items(at):
       result.add toSexp(tree, it)
-
-proc fromSexp[T](n: SexpNode, to: var PackedTree[T]) =
-  mixin isAtom, fromSexp
-  case n.kind
-  of SList:
-    assert n.len > 0
-    let kind = parseEnum[T](n[0].symbol)
-    if isAtom(kind):
-      to.nodes.add fromSexp(to, kind, n)
-    else:
-      to.nodes.add TreeNode[T](kind: kind, val: uint32(n.len - 1))
-      for i in 1..<n.len:
-        fromSexp(n[i], to)
-  of SInt:
-    to.nodes.add fromSexp(n.num, T)
-  else:
-    doAssert false
-
-proc fromSexp*[T](n: SexpNode): PackedTree[T] =
-  fromSexp(n, result)
