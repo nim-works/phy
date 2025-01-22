@@ -15,6 +15,8 @@ Commands:
   all [args]                  builds all programs
   single <name> [args]        builds the single program with the given name
   generate [dir]              generates the various language-related modules
+  build-defs                  verifies the language definitions and generates
+                              the textual representation for them
 """
   Programs: seq[(string, string, bool, bool)] = @[
     ("tester", "tools/tester.nim", true, true),
@@ -52,6 +54,13 @@ proc compile(file: sink string, name: string, extra: varargs[string]): bool =
   ## directory, using `name` as the name.
   var args = @["c", "--nimcache:build/cache/" & name,
                "-o:bin/" & addFileExt(name, ExeExt)]
+  args.add extra
+  args.add file
+  result = run(nimExe, args)
+
+proc check(file: sink string, extra: varargs[string]): bool =
+  ## Runs the ``check`` command on the given NimSkull `file`.
+  var args = @["check"]
   args.add extra
   args.add file
   result = run(nimExe, args)
@@ -155,6 +164,20 @@ proc generate(args: string): bool =
 
   result = true
 
+proc buildDefs(args: string): bool =
+  ## Handles verifying the language definitions and producing the artifacts
+  ## based on them.
+  if args.len > 0:
+    return false
+
+  # there's nothing to do with the compiled language definition, making sure
+  # the macro succeeds is enough
+  if not check(getCurrentDir() / "languages" / "source.nim"):
+    echo "Failure"
+    quit(1)
+
+  result = true
+
 proc showHelp(): bool =
   ## Shows the help text.
   echo HelpText
@@ -184,6 +207,8 @@ while true:
         buildSingle(opts.cmdLineRest)
       of "generate":
         generate(opts.cmdLineRest)
+      of "build-defs":
+        buildDefs(opts.cmdLineRest)
       of "help":
         showHelp()
       else:
