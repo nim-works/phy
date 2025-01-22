@@ -164,9 +164,11 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
     var env = initVm(mem.total, mem.total)
     link(env, hostProcedures(includeTest = false), [module])
 
+    let cl = HostEnv(outStream: newFileStream(stdout),
+                     errStream: newFileStream(stderr))
     # eval and print:
     echo run(env, hoSlice(mem.stackStart, mem.stackStart + mem.stackSize),
-             ProcIndex(entry), typ)
+             ProcIndex(entry), typ, cl)
   else:
     echo "Error: unexpected node: ", tree[NodeIndex(0)].kind
 

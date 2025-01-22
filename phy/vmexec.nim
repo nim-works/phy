@@ -148,7 +148,7 @@ proc readMemConfig*(m: VmModule): Option[MemoryConfig] =
                       stackSize: uint(stackSize))
 
 proc run*(env: var VmEnv, stack: HOslice[uint], prc: ProcIndex,
-          typ: SemType): string =
+          typ: SemType, cl: RootRef): string =
   ## Runs the nullary procedure with index `prc`, and returns the result
   ## rendered as a string. `typ` is the type of the resulting value.
   var thread: VmThread
@@ -160,7 +160,7 @@ proc run*(env: var VmEnv, stack: HOslice[uint], prc: ProcIndex,
   else:
     thread = vm.initThread(env, prc, stack, @[])
 
-  let res = run(env, thread, nil)
+  let res = run(env, thread, cl)
   env.dispose(thread)
 
   case res.kind

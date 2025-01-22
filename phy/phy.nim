@@ -399,8 +399,10 @@ proc main(args: openArray[string]) =
       let stack = hoSlice(mem.stackStart, mem.stackStart + mem.stackSize)
 
       if source == langSource:
+        let cl = HostEnv(outStream: newFileStream(stdout),
+                         errStream: newFileStream(stderr))
         # we have type high-level type information
-        stdout.write run(env, stack, entry.unsafeGet, typ)
+        stdout.write run(env, stack, entry.unsafeGet, typ, cl)
       else:
         # program arguments are only supported for non-source-language
         # programs at the moment
