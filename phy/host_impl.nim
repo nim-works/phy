@@ -2,7 +2,10 @@
 
 import
   system/ansi_c,
-  std/tables,
+  std/[
+    streams,
+    tables
+  ],
   vm/[
     vmalloc,
     vmenv
@@ -13,6 +16,10 @@ type
     ## Dynamic type of the object passed to the VM callbacks.
     params*: seq[string]
       ## the program's command-line parameters
+    outStream*: Stream
+      ## the output stream
+    errStream*: Stream
+      ## the error output stream
 
 proc c_fopen(name, mode: cstring): CFilePtr {.
   importc: "fopen", header: "<stdio.h>".}
@@ -95,15 +102,15 @@ proc toString(x: openArray[char]): string =
     result = newString(x.len)
     copyMem(addr result[0], addr x[0], x.len)
 
-proc writeToFile(env: var VmEnv, file: File, data: VirtualAddr, len: int
-                ): CallbackResult =
+proc writeToStream(env: var VmEnv, s: Stream, data: VirtualAddr, len: int
+                  ): CallbackResult =
   if len < 0: trap() # guard against misuse
 
   let chars = toHostChars(data, len.uint64)
   try:
-    discard stdout.writeChars(toOpenArray(chars, 0, len - 1), 0, len)
+    s.writeData(chars, len)
     result = CallbackResult(code: cecNothing)
-  except IOError:
+  except OSError, IOError:
     # TODO: I/O errors need to be turned into either exceptions (very hard) or
     #       error codes that the callsite then turns into exception (or
     #       something else; easy). Trapping is a temporary solution to at
@@ -133,12 +140,12 @@ proc hostProcedures*(includeTest: bool): Table[string, VmCallback] =
     hostProc "core.test":
       CallbackResult(code: cecValue, value: args[0])
 
-  # TODO: the streams to write to need to be configurable from
-  #       the outside, through the ref object passed to the callbacks
   hostProc "core.write":
-    writeToFile(env, stdout, args[0].addrVal, args[1].intVal.int)
+    writeToStream(env, HostEnv(cl).outStream, args[0].addrVal,
+                  args[1].intVal.int)
   hostProc "core.writeErr":
-    writeToFile(env, stderr, args[0].addrVal, args[1].intVal.int)
+    writeToStream(env, HostEnv(cl).errStream, args[0].addrVal,
+                  args[1].intVal.int)
   # XXX: the current file API is meant to be temporary. It needs to be
   #      replaced with a handle-based one at some point
   hostProc "core.fileSize":
