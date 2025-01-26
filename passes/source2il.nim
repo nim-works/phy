@@ -149,6 +149,12 @@ using
   expr: var IrNode
   stmts: var seq[IrNode]
 
+func align(val: SizeUnit, to: SizeUnit): SizeUnit =
+  ## Rounds `val` to the multiple of `to`, the latter which must be a power of
+  ## two.
+  let mask = val - 1
+  (val + mask) and not mask
+
 template `+`(t: SemType, a: set[ExprFlag]): ExprType =
   ## Convenience shortcut for creating an ``ExprType``.
   (typ: t, attribs: a)
@@ -315,8 +321,7 @@ proc typeToIL(c; typ: SemType): uint32 =
       c.types.add Node(kind: Immediate, val: alignment(typ).uint32)
       var off = 0 ## the current field offset
       for i, it in args.pairs:
-        let mask = alignment(typ.elems[i]) - 1
-        off = (off + mask) and not mask
+        off = align(off, alignment(typ.elems[i]))
         c.types.subTree Field:
           c.types.add Node(kind: Immediate, val: off.uint32)
           c.types.add Node(kind: Type, val: it)
@@ -451,6 +456,9 @@ proc genCapAccess(c; e: sink IrNode, typ: SemType): IrNode =
 proc newIntOp(c; op: NodeKind, a, b: sink IrNode): IrNode =
   newBinaryOp(op, c.typeToIL(prim(tkInt)), a, b)
 
+proc newAllocCall(size, align: sink IrNode): IrNode =
+  newCall(AllocProc, @[size, align])
+
 proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
   ## Synthesizes and emits the `op` type-bound operator for `typ`. Returns the
   ## ID of the synthesized procedure; no caching is performed.
@@ -484,13 +492,15 @@ proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
 
       var els = IrNode(kind: Stmts)
       els.add newAsgn(dstLen, srcLen)
-      # the size of the payload is sizeof(capacity) + sizeof(element) * length
-      els.add newAsgn(newFieldExpr(dst, 1), newCall(AllocProc,
-        newBinaryOp(Add, c.typeToIL(prim(tkInt)),
-          newBinaryOp(Mul, c.typeToIL(prim(tkInt)),
+      # the size of the payload is:
+      #   align(sizeof(capacity), alignment(element)) + sizeof(element) * length
+      els.add newAsgn(newFieldExpr(dst, 1), newAllocCall(
+        c.newIntOp(Add,
+          c.newIntOp(Mul,
             srcLen,
-            newIntVal(size(typ.elems[0]))),
-          newIntVal(size(prim(tkInt))))))
+            newIntVal(paddedSize(typ.elems[0]))),
+          newIntVal(align(size(prim(tkInt)), alignment(typ.elems[0])))),
+        newIntVal(alignment(typ.elems[0]))))
 
       els.add newAsgn(c.genCapAccess(dst, typ), srcLen)
 
@@ -955,7 +965,8 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
           newDeref(c.typeToIL(elem.typ),
             newCall(PrepareAddProc, @[newAddr(newFieldExpr(tmp, 0)),
                                       newAddr(newFieldExpr(tmp, 1)),
-                                      newIntVal(size(elem.typ))])),
+                                      newIntVal(paddedSize(elem.typ)),
+                                      newIntVal(alignment(elem.typ))])),
           use(c, elem, stmts))
 
         expr = tmp
@@ -1154,8 +1165,9 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
 
       # emit the payload field assignment:
       if str.len > 0:
-        let size = size(prim(tkInt)) + size(elem) * str.len
-        stmts.add newAsgn(payloadField, newCall(AllocProc, newIntVal(size)))
+        let size = size(prim(tkInt)) + paddedSize(elem) * str.len
+        stmts.add newAsgn(payloadField,
+          newAllocCall(newIntVal(size), newIntVal(alignment(elem))))
 
         let payloadExpr = newDeref(c.genPayloadType(elem), payloadField)
         # emit the capacity assignment:
@@ -1197,9 +1209,11 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
 
     # emit the payload field assignment:
     if length > 0:
-      let size = size(prim(tkInt)) + size(typ) * length
+      let size = align(size(prim(tkInt)), alignment(typ)) +
+                 (paddedSize(typ) * length)
       # the size of the payload is sizeof(capacity) + sizeof(element) * length
-      stmts.add newAsgn(payloadField, newCall(AllocProc, newIntVal(size)))
+      stmts.add newAsgn(payloadField,
+        newAllocCall(newIntVal(size), newIntVal(alignment(typ))))
 
       let payloadExpr = newDeref(c.genPayloadType(typ), payloadField)
       # emit the capacity assignment:
@@ -1416,10 +1430,11 @@ proc importIoProcedures(c) =
       newAddr(newFieldExpr(c.genPayloadAccess(newLocal(0), stringType), 1)),
       newFieldExpr(newLocal(0), 0)]))
   readFileBody.add newAsgn(newFieldExpr(newLocal(1), 1),
-    newCall(AllocProc,
+    newAllocCall(
       c.newIntOp(Add,
         newIntVal(size(prim(tkInt))),
-        newFieldExpr(newLocal(1), 0))))
+        newFieldExpr(newLocal(1), 0)),
+      newIntVal(payloadAlignment(stringType.elems[0]))))
   readFileBody.add newAsgn(newFieldExpr(newLocal(1), 0),
     newCall(readFileHostPrc.uint32, @[
       newAddr(newFieldExpr(c.genPayloadAccess(newLocal(0), stringType), 1)),
@@ -1504,12 +1519,23 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   # exception/panic is raised
   const AllocBody = """
     (ProcDef (Type $1)
-      (Params (Local 0))
-      (Locals (Type $2) (Type $2))
+      (Params (Local 0) (Local 2))
+      (Locals (Type $2) (Type $2) (Type $2))
       (Stmts
         (If (Eq (Type $2) (Load (Type $2) (Copy (Global 3))) (IntVal 0))
           (Asgn (Local 1) (Copy (Global 1)))
           (Asgn (Local 1) (Load (Type $2) (Copy (Global 3)))))
+        (Asgn (Local 1)
+          (BitAnd (Type $2)
+            (Add (Type $2)
+              (Copy (Local 1))
+              (Sub (Type $2)
+                (Copy (Local 2))
+                (IntVal 1)))
+            (BitNot (Type $2)
+              (Sub (Type $2)
+                (Copy (Local 2))
+                (IntVal 1)))))
         (If
           (Le (Type $2)
             (Add (Type $2)
@@ -1525,7 +1551,8 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
             (Return (Copy (Local 1))))
           (Raise (IntVal 0)))))
   """
-  var procTy = SemType(kind: tkProc, elems: @[pointerType, prim(tkInt)])
+  var procTy = SemType(kind: tkProc,
+                       elems: @[pointerType, prim(tkInt), prim(tkInt)])
   addProc procTy, AllocBody,
           [$c.genProcType(procTy), $c.typeToIL(prim(tkInt))]
 
@@ -1539,18 +1566,23 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   addProc procTy, DeallocBody,
           [$c.genProcType(procTy), $c.typeToIL(prim(tkInt))]
 
-  # realloc(ptr: pointer, oldsize: int, newsize: int) -> pointer
+  # realloc(ptr: pointer, oldsize: int, newsize: int, align: int) -> pointer
   const ReallocBody = """
     (ProcDef (Type $1)
-      (Params (Local 0) (Local 1) (Local 2))
-      (Locals (Type $2) (Type $2) (Type $2) (Type $2))
+      (Params (Local 0) (Local 1) (Local 2) (Local 4))
+      (Locals (Type $2) (Type $2) (Type $2) (Type $2) (Type $2))
       (If
         (Eq (Type $2)
           (Copy (Local 0))
           (IntVal 0))
-        (Return (Call (Proc 0) (Copy (Local 2))))
+        (Return (Call (Proc 0)
+          (Copy (Local 2))
+          (Copy (Local 4))))
         (Stmts
-          (Asgn (Local 3) (Call (Proc 0) (Copy (Local 2))))
+          (Asgn (Local 3)
+            (Call (Proc 0)
+              (Copy (Local 2))
+              (Copy (Local 4))))
           (Blit (Copy (Local 3)) (Copy (Local 0)) (Copy (Local 1)))
           (Drop (Call (Proc 1) (Copy (Local 0))))
           (Return (Copy (Local 3))))
@@ -1559,18 +1591,23 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   """
   procTy = SemType(kind: tkProc,
                    elems: @[pointerType, pointerType, prim(tkInt),
-                            prim(tkInt)])
+                            prim(tkInt), prim(tkInt)])
   addProc procTy, ReallocBody,
           [$c.genProcType(procTy), $c.typeToIL(prim(tkInt))]
 
-  # grow(payload: pointer, capacity: int, stride: int) -> pointer
+  # grow(payload: pointer, capacity: int, stride: int, align: int) -> pointer
   # reallocates the given payload if its capacity is less than the requested
   # one. The new payload is returned
   const GrowBody = """
     (ProcDef (Type $1)
-      (Params (Local 0) (Local 1) (Local 2))
-      (Locals (Type $2) (Type $2) (Type $2))
+      (Params (Local 0) (Local 1) (Local 2) (Local 3))
+      (Locals (Type $2) (Type $2) (Type $2) (Type $2))
       (Stmts
+        (If
+          (Lt (Type $2)
+            (Copy (Local 3))
+            (IntVal 8))
+          (Asgn (Local 3) (IntVal 8)))
         (If
           (Eq (Type $2)
             (Copy (Local 0))
@@ -1581,7 +1618,8 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
                 (IntVal $3)
                 (Mul (Type $2)
                   (Copy (Local 1))
-                  (Copy (Local 2))))))
+                  (Copy (Local 2))))
+              (Copy (Local 3))))
           (If
             (Not
               (Lt (Type $2)
@@ -1600,7 +1638,8 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
                   (IntVal $3)
                   (Mul (Type $2)
                     (Copy (Local 1))
-                    (Copy (Local 2))))))))
+                    (Copy (Local 2))))
+                (Copy (Local 3))))))
         (Store (Type $2)
           (Copy (Local 0))
           (Copy (Local 1)))
@@ -1610,14 +1649,14 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
           [$c.genProcType(procTy), $c.typeToIL(prim(tkInt)),
            $size(prim(tkInt)) #[<- offset of payload's data field]#]
 
-  # prepareAdd(lenAddr: pointer, payloadAddr: pointer, stride: int) -> pointer
+  # prepareAdd(lenAddr: pointer, payloadAddr: pointer, stride: int, align: int) -> pointer
   # increments the length and resizes the payload (via the grow procedure)
   # when needed. The implementation works with all seq types in order to not
   # having to synthesize a version for each used seq type
   const PrepareAddBody = """
     (ProcDef (Type $1)
-      (Params (Local 0) (Local 1) (Local 2))
-      (Locals (Type $2) (Type $2) (Type $2) (Type $2))
+      (Params (Local 0) (Local 1) (Local 2) (Local 4))
+      (Locals (Type $2) (Type $2) (Type $2) (Type $2) (Type $2))
       (Stmts
         (Asgn (Local 3)
           (Load (Type $2)
@@ -1634,7 +1673,8 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
               (Copy (Local 1)))
             (Load (Type $2)
               (Copy (Local 0)))
-            (Copy (Local 2))))
+            (Copy (Local 2))
+            (Copy (Local 4))))
         (Return
           (Add (Type $2)
             (Add (Type $2)
