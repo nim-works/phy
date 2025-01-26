@@ -311,29 +311,28 @@ proc typeToIL(c; typ: SemType): uint32 =
   of tkTuple:
     let args = mapIt(typ.elems, c.typeToIL(it))
     c.addType Record:
-      c.types.add Node(kind: Immediate, val: size(typ).uint32)
-      # XXX: for the sake of ease of implementation, records use the maximum
-      #      possible alignment
-      c.types.add Node(kind: Immediate, val: 8)
+      c.types.add Node(kind: Immediate, val: paddedSize(typ).uint32)
+      c.types.add Node(kind: Immediate, val: alignment(typ).uint32)
       var off = 0 ## the current field offset
       for i, it in args.pairs:
+        let mask = alignment(typ.elems[i]) - 1
+        off = (off + mask) and not mask
         c.types.subTree Field:
           c.types.add Node(kind: Immediate, val: off.uint32)
           c.types.add Node(kind: Type, val: it)
-        off += size(typ.elems[i])
+        off += paddedSize(typ.elems[i])
   of tkUnion:
     let args = mapIt(typ.elems, c.typeToIL(it))
     let inner = c.addType Union:
-      c.types.add Node(kind: Immediate, val: size(typ).uint32 - 8)
-      c.types.add Node(kind: Immediate, val: 8)
+      c.types.add Node(kind: Immediate, val: innerSize(typ).uint32)
+      c.types.add Node(kind: Immediate, val: innerAlignment(typ).uint32)
       for it in args.items:
         c.types.add Node(kind: Type, val: it)
 
     let tag = c.typeToIL(prim(tkInt))
     c.addType Record:
-      c.types.add Node(kind: Immediate, val: size(typ).uint32)
-      # XXX: alignment is ignored at the moment and just set to 1
-      c.types.add Node(kind: Immediate, val: 8)
+      c.types.add Node(kind: Immediate, val: paddedSize(typ).uint32)
+      c.types.add Node(kind: Immediate, val: alignment(typ).uint32)
       # the tag field:
       c.types.subTree Field:
         c.types.add Node(kind: Immediate, val: 0)
@@ -351,8 +350,8 @@ proc typeToIL(c; typ: SemType): uint32 =
       lengthType  = c.typeToIL(prim(tkInt))
       pointerType = c.typeToIL(pointerType)
     c.addType Record:
-      c.types.add Node(kind: Immediate, val: size(typ).uint32)
-      c.types.add Node(kind: Immediate, val: 8)
+      c.types.add Node(kind: Immediate, val: paddedSize(typ).uint32)
+      c.types.add Node(kind: Immediate, val: alignment(typ).uint32)
       # the length field:
       c.types.subTree Field:
         c.types.add Node(kind: Immediate, val: 0)
@@ -399,6 +398,10 @@ proc genProcType(c; typ: SemType): uint32 =
     result = rawGenProcType(c, typ)
     c.procTypeCache[typ] = result
 
+proc payloadAlignment(typ: SemType): SizeUnit =
+  ## Computes the alignment for a seq payload for type `typ`.
+  max(alignment(prim(tkInt)), alignment(typ))
+
 proc genPayloadType(c; typ: SemType): uint32 =
   ## Generates and emits the payload type for a sequence with the given
   ## element type (`typ`). Returns the ID of the payload type.
@@ -410,13 +413,13 @@ proc genPayloadType(c; typ: SemType): uint32 =
 
   let arrayType = c.addType Array:
     c.types.add Node(kind: Immediate, val: 1) # size
-    c.types.add Node(kind: Immediate, val: 8) # alignment
+    c.types.add Node(kind: Immediate, val: alignment(typ).uint32) # alignment
     c.types.add Node(kind: Immediate, val: 0)
     c.types.add Node(kind: Type, val: elem)
 
   c.addType Record:
     c.types.add Node(kind: Immediate, val: 9)
-    c.types.add Node(kind: Immediate, val: 8)
+    c.types.add Node(kind: Immediate, val: payloadAlignment(typ).uint32)
     # the capacity field:
     c.types.subTree Field:
       c.types.add Node(kind: Immediate, val: 0)

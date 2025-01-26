@@ -149,6 +149,20 @@ proc alignment*(t: SemType): SizeUnit =
   of tkSeq:
     alignment(prim(tkInt))
 
+proc innerSize*(t: SemType): SizeUnit =
+  ## Computes the size without padding of a union (`t`) without the tag.
+  assert t.kind == tkUnion
+  result = 0
+  for it in t.elems.items:
+    result = max(size(it), result)
+
+proc innerAlignment*(t: SemType): SizeUnit =
+  ## Computes the size without padding of a union (`t`) without the tag.
+  assert t.kind == tkUnion
+  result = 0
+  for it in t.elems.items:
+    result = max(alignment(it), result)
+
 proc paddedSize*(t: SemType): SizeUnit =
   ## Computes the size of an array element of type `t`.
   let mask = alignment(t) - 1
