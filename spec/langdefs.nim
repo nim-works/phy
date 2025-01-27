@@ -564,7 +564,10 @@ proc parseRelationHeader(n: NimNode): Relation =
       # infix :(
       if n[1][i].eqIdent("inp"):
         result.params.add true
+      else:
+        error("expected either 'inp' or 'out'", n[1][i])
     of nnkMutableTy:
+      # 'out' is parsed as ``nnkMutableTy``
       n[1][i].expectLen 0
       result.params.add false
     else:
