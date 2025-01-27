@@ -48,9 +48,14 @@ using
 
 proc name(n: NimNode): string =
   case n.kind
-  of nnkIdent:     n.strVal
-  of nnkAccQuoted: name n[0]
-  else:            (error("not an identifier", n); "")
+  of nnkIdent:
+    n.strVal
+  of nnkAccQuoted:
+    n.expectLen 1
+    name n[0]
+  else:
+    error("not an identifier", n)
+    ""
 
 proc ellipsis(n: NimNode): NimNode =
   if n.kind == nnkPrefix and n[0].strVal == "...":
