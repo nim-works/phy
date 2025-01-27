@@ -112,7 +112,7 @@ type
     output*: ExprNode
 
   Function* = object
-    ## Describes a meta-language function. A function maps one ore more input
+    ## Describes a meta-language function. A function maps one or more input
     ## terms to an output term. It is not required to be *total* (i.e., not all
     ## terms matching the parameter pattern need to map to an output).
     name*: string
@@ -131,7 +131,7 @@ const
                    nkAnySymbol, nkNonTerminal, nkHole}
     ## nodes that may only appear in patterns
 
-  TermNode* = {nkNumber, nkSymbol, nkTree, nkList}
+  TermNodes* = {nkNumber, nkSymbol, nkTree, nkList}
     ## nodes that may only appear in terms
 
   MetaNodes* = {nkUnpack}

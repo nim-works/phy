@@ -7,7 +7,7 @@
 ## **work in progress**.
 ##
 ## **Important:** as is, the language definition **does not** match
-## the originally intended semantics, and does thus not model the behaviour
+## the originally intended semantics, and thus does not model the behaviour
 ## of the implementation. This'll be fixed eventually.
 
 import
