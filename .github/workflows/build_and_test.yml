@@ -93,6 +93,9 @@ jobs:
       - name: Build koch
         run: nim c -d:nimStrictMode --outdir:bin koch.nim
 
+      - name: Build language definitions
+        run: bin/koch build-defs
+
       - name: Build passtool
         run: bin/koch single passtool -d:nimStrictMode -d:release
 
