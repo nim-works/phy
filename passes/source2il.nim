@@ -150,8 +150,7 @@ using
   stmts: var seq[IrNode]
 
 func align(val: SizeUnit, to: SizeUnit): SizeUnit =
-  ## Rounds `val` to the multiple of `to`, the latter which must be a power of
-  ## two.
+  ## Rounds `val` to the multiple of `to`, the latter must be a power of two.
   let mask = val - 1
   (val + mask) and not mask
 
