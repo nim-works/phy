@@ -1,0 +1,13 @@
+discard """
+  output: "[1, 2, 3]: union(int, seq(int))"
+"""
+(Module
+  (ProcDecl union (UnionTy (IntTy) (SeqTy (IntTy))) (Params)
+    (Return 1))
+  (ProcDecl main (UnionTy (IntTy) (SeqTy (IntTy))) (Params)
+    (Exprs
+      (Decl x (Seq (IntTy) 1 2 3))
+      (Decl y (Call union))
+      (Asgn y x)
+      (Asgn (At x 0) 4)
+      (Return y))))

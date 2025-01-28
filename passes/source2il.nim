@@ -654,7 +654,8 @@ proc fitExpr(c; e: sink Expr, target: SemType): Expr =
     if e.typ.kind == tkVoid:
       result = e
     else:
-      result = Expr(stmts: e.stmts, typ: target)
+      result = Expr(stmts: move e.stmts, typ: target)
+      # the destructive move of `e.stmts` is deliberate
       case target.kind
       of tkUnion:
         # construct a union
@@ -670,7 +671,8 @@ proc fitExpr(c; e: sink Expr, target: SemType): Expr =
           newAsgn(newFieldExpr(tmp, 0), newIntVal(idx))
         # emit the value assignment:
         result.stmts.add:
-          newAsgn(newFieldExpr(newFieldExpr(tmp, 1), idx), e.expr)
+          newAsgn(newFieldExpr(newFieldExpr(tmp, 1), idx),
+                  use(c, e, result.stmts))
 
         result.expr = tmp
       of tkError:
@@ -1090,8 +1092,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       c.error("`While` body must be a unit or void expression")
 
     var sub = IrNode(kind: Stmts)
-    sub.add cond.stmts
-    sub.add newIf(newNot(cond.expr), newBreak(1))
+    sub.add newIf(newNot(use(c, cond, sub.children)), newBreak(1))
     sub.add body.stmts
     if body.typ.kind != tkVoid:
       sub.add newDrop(body.expr)
@@ -1123,9 +1124,8 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
           c.error("tuple element cannot be 'void'")
           return errorType() + {}
 
-        stmts.add e.stmts
         # add an assignment for the field:
-        stmts.add newAsgn(newFieldExpr(tmp, i), e.expr)
+        stmts.add newAsgn(newFieldExpr(tmp, i), use(c, e, stmts))
 
       # now that we know the type, correct it:
       c.locals[tmp.id] = SemType(kind: tkTuple, elems: elems)
