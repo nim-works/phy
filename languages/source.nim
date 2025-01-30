@@ -110,17 +110,18 @@ const lang* = language:
 
   function desugar, expr -> e:
     # FIXME: the sub-expressions need to be desugared too!
-    desugar And(expr_1, expr_2) =
+    case _
+    of And(expr_1, expr_2):
       If(expr_1, expr_2, "false")
-    desugar Or(expr_1, expr_2) =
+    of Or(expr_1, expr_2):
       If(expr_1, "true", expr_2)
-    desugar Decl(x_1, expr_1) =
+    of Decl(x_1, expr_1):
       Let(x_1, expr_1, TupleCons())
-    desugar Exprs(*expr_1, Decl(x_1, expr_2), +expr_3) =
+    of Exprs(*expr_1, Decl(x_1, expr_2), +expr_3):
       Exprs(...expr_1, Let(x_1, expr_2, Exprs(...expr_3)))
-    desugar If(expr_1, expr_2) =
+    of If(expr_1, expr_2):
       If(expr_1, expr_2, TupleCons())
-    desugar If(Exprs(*expr_1, expr_2), expr_3, expr_4) =
+    of If(Exprs(*expr_1, expr_2), expr_3, expr_4):
       Exprs(...expr_1, If(expr_2, expr_3, expr_4))
 
   ## Type Relations
@@ -174,22 +175,25 @@ const lang* = language:
   function common, (typ, typ) -> typ:
     ## Computes the closest common ancestor type for a type pair. The function
     ## is not total, as not all two types have a common ancestor type.
-    common(typ_1, typ_1) = typ_1
-    common(typ_1, typ_2) = block:
+    case _
+    of typ_1, typ_1: typ_1
+    of typ_1, typ_2:
       premise typ_1 <: typ_2
       typ_2
-    common(typ_1, typ_2) = block:
+    of typ_1, typ_2:
       premise typ_2 <: typ_1
       typ_1
 
   function uniqueTypes, (+typ) -> z:
     ## Returns true (1) if all types are unique (in the sense of type
     ## equality), false (0) otherwise.
-    uniqueTypes(typ) = 1
-    uniqueTypes(typ_1, *typ, typ_2, *typ) = block:
+    case _
+    of typ: 1
+    of typ_1, *typ, typ_2, *typ:
       premise eq(typ_1, typ_2)
       0
-    uniqueTypes(typ_1, +typ_2) = uniqueTypes(...typ_2)
+    of typ_1, +typ_2:
+      uniqueTypes(...typ_2)
 
   inductive ttypes(inp, inp, out), "$1 \\vdash_{\\tau} $2 : $3":
     axiom "S-void-type",        C, VoidTy(),  "void"
@@ -235,9 +239,10 @@ const lang* = language:
     ## Returns true (1) when all symbols are unique, false (0) otherwise.
     # there are no "real" booleans in the meta-language, hence 1 and 0 being
     # used
-    unique(x) = 1
-    unique(x_1, *x, x_1, *x) = 0
-    unique(x_1, x_2, *x_3) = unique(x_2, ...x_3)
+    case _
+    of x: 1
+    of x_1, *x, x_1, *x: 0
+    of x_1, x_2, *x_3: unique(x_2, ...x_3)
 
   inductive types(inp, inp, out), "$1 \\vdash $2 : $3":
     axiom "S-int",   C, n, IntTy()
@@ -492,51 +497,58 @@ const lang* = language:
   function substitute, (e, +[x, e]) -> (e, +[x, e]):
     ## The substitution function, which handles binding values/expressions to
     ## identifiers. Identifiers cannot be shadowed.
-    substitute(any_1(*e_1), *any_2) = block:
+    case _
+    of any_1(*e_1), *any_2:
       where *e_2, ...substitute(e_1, ...any_2)
       term any_1(...e_2)
-    # the actual substitution:
-    substitute(x_1, *[!x_1, _], [x_1, e_1], *[!x_1, _]) = e_1
-    substitute(e_1, +any) = e_1 # nothing to replace
+    of x_1, *[!x_1, _], [x_1, e_1], *[!x_1, _]:
+      e_1 # the actual substitution
+    of e_1, +any:
+      e_1 # nothing to replace
 
   function trunc, r -> n:
     ## Round towards zero.
 
   function intAdd, (n, n) -> n:
-    intAdd(n_1, n_2) = block:
+    case _
+    of n_1, n_2:
       where n_3, n_1 + n_2
       condition -(2 ^ 63) <= n_3
       condition n_3 < (2 ^ 63)
       n_3
-    intAdd(n_1, n_2) = {}
+    else: {}
 
   function intSub, (n, n) -> n:
-    intSub(n_1, n_2) = block:
+    case _
+    of n_1, n_2:
       where n_3, n_1 - n_2
       condition -(2 ^ 63) <= n_3
       condition n_3 < (2 ^ 63)
       n_3
-    intSub(n_1, n_2) = {}
+    else: {}
 
   function intMul, (n, n) -> n:
-    intMul(n_1, n_2) = block:
+    case _
+    of n_1, n_2:
       where n_3, n_1 * n_2
       condition -(2 ^ 63) <= n_3
       condition n_3 < (2 ^ 63)
       n_3
-    intMul(n_1, n_2) = {}
+    else: {}
 
   function intDiv, (n, n) -> n:
-    intDiv(n_1, 0)   = {}
-    intDiv(n_1, n_2) = block:
+    case _
+    of n_1, 0: {}
+    of n_1, n_2:
       condition n_1 == (-2 ^ 63)
       condition n_2 == -1
       {}
-    intDiv(n_1, n_2) = trunc(n_1 / n_2)
+    of n_1, n_2: trunc(n_1 / n_2)
 
   function intMod, (n, n) -> n:
-    intMod(n_1, 0)   = {}
-    intMod(n_1, n_2) = n_1 - (n_2 * trunc(n_1 / n_2))
+    case _
+    of n_1, 0:   {}
+    of n_1, n_2: n_1 - (n_2 * trunc(n_1 / n_2))
 
   function float_add, (r, r) -> r:
     ## XXX: not defined
@@ -544,26 +556,29 @@ const lang* = language:
     ## XXX: not defined
 
   function valEq, (val, val) -> val:
-    valEq(val_1, val_1) = "true"
-    valEq(val_1, val_2) = "false" # otherwise
+    case _
+    of val_1, val_1: "true"
+    else:            "false"
 
   function lt, (val, val) -> val:
-    lt(n_1, n_2) = block:
+    case _
+    of n_1, n_2:
       condition n_1 < n_2
       "true"
-    lt(r_1, r_2) = block:
+    of r_1, r_2:
       condition r_1 < r_2
       "true"
-    lt(val_1, val_2) = "false" # otherwise
+    else: "false"
 
   function lessEqual, (val, val) -> val:
-    lessEqual(val_1, val_2) = block:
+    case _
+    of val_1, val_2:
       where "true", valEq(val_1, val_2)
       "true"
-    lessEqual(val_1, val_2) = block:
+    of val_1, val_2:
       where "true", lt(val_1, val_2)
       "true"
-    lessEqual(val_1, val_2) = "false" # otherwise
+    else: "false"
 
   # TODO: the floating-point operations need to be defined according to the
   #       IEEE 754.2008 standard
@@ -571,11 +586,12 @@ const lang* = language:
   function copy, (C, val) -> val:
     ## The `copy` function takes a context and value and maps them to a value
     ## that is neither a location nor contains any.
-    copy(C, c_1)                               = c_1
-    copy(C_1, l_1)                             = copy(C_1, C_1.locs(l_1))
-    copy(C, `proc`(typ_r, *[x_1, typ_1], e_1)) = `proc`(typ_r, ...[x_1, typ_1], e_1)
-    copy(C, `array`(*val_1))                   = `array`(...val_1)
-    copy(C, `tuple`(*val_1))                   = `tuple`(...val_1)
+    case _
+    of C, c_1:                               c_1
+    of C_1, l_1:                             copy(C_1, C_1.locs(l_1))
+    of C, `proc`(typ_r, *[x_1, typ_1], e_1): `proc`(typ_r, ...[x_1, typ_1], e_1)
+    of C, `array`(*val_1):                   `array`(...val_1)
+    of C, `tuple`(*val_1):                   `tuple`(...val_1)
 
   function utf8_bytes, x -> (+ch,):
     # TODO: the function is mostly self-explanatory, but it should be defined in
@@ -584,8 +600,9 @@ const lang* = language:
 
   function len, (val) -> z:
     ## Computes the number of elements in an array value.
-    len(`array`()) = 0
-    len(`array`(val_1, *val_2)) = 1 + len(...val_2)
+    case _
+    of `array`(): 0
+    of `array`(val_1, *val_2): 1 + len(...val_2)
 
   ## Evaluation Contexts
   ## ~~~~~~~~~~~~~~~~~~~
