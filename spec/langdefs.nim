@@ -519,41 +519,58 @@ proc parseNonTerminal(lookup; body: NimNode): TreeNode =
 
 proc parseFunction(lookup; def: NimNode): Function =
   result = Function(name: $def[1])
-  for it in def[3].items:
-    case it.kind
-    of nnkCommentStmt:
-      # TODO: implement
-      discard
-    of nnkAsgn:
-      let left = it[0]
-      left.expectKind nnkCallKinds
-      if not left[0].eqIdent(result.name):
-        error(fmt"name must be '{result.name}'", left[0])
+  var i = 0
+  # skip/parse the leading comment statements
+  while i < def[3].len and def[3][i].kind == nnkCommentStmt:
+    # TODO: handle
+    inc i
 
-      var
-        impl = FunctionImpl()
-        c = Context()
+  if i == def[3].len:
+    # empty function; this is currently allowed
+    return
 
-      for i in 1..<left.len:
-        impl.params.add parsePattern(lookup, c, left[i])
+  let signature = def[2]
+  signature.expectKind nnkInfix
+  signature.expectLen 3
 
-      case it[1].kind
-      of nnkBlockStmt:
-        let body = it[1][1]
-        body.expectKind nnkStmtList
-        body.expectMinLen 1
-        # everything prior to the result must be a predicate
-        for j in 0..<body.len-1:
-          body[j].expectKind nnkCallKinds
-          let x = body[j]
-          impl.predicates.add parsePredicate(lookup, c, x)
-        impl.output = parseExpr(lookup, c, body[^1])
+  let stmt = def[3][i]
+  stmt.expectKind nnkCaseStmt
+  # ignore the selector expression
+  stmt.expectMinLen 2
+  for i in 1..<stmt.len:
+    let branch = stmt[i]
+    var
+      impl = FunctionImpl()
+      c = Context()
+    case branch.kind
+    of nnkOfBranch:
+      for j in 0..<branch.len-1:
+        impl.params.add parsePattern(lookup, c, branch[j])
+    of nnkElse, nnkElseExpr:
+      # take the patterns from the signature
+      if signature[1].kind == nnkTupleConstr:
+        for it in signature[1].items:
+          impl.params.add parsePattern(lookup, c, it)
       else:
-        impl.output = parseExpr(lookup, c, it[1])
-      result.impls.add impl
+        # it's only a single argument
+        impl.params.add parsePattern(lookup, c, signature[1])
     else:
-      error(fmt"expected assignment of the form `{result.name}(...) = ...`",
-            it)
+      error("expected 'else' or 'of' branch", branch)
+
+    case branch[^1].kind
+    of nnkStmtList:
+      let body = branch[^1]
+      body.expectKind nnkStmtList
+      body.expectMinLen 1
+      # everything prior to the result must be a predicate
+      for j in 0..<body.len-1:
+        body[j].expectKind nnkCallKinds
+        let x = body[j]
+        impl.predicates.add parsePredicate(lookup, c, x)
+      impl.output = parseExpr(lookup, c, body[^1])
+    else:
+      impl.output = parseExpr(lookup, c, branch[^1])
+    result.impls.add impl
 
 proc parseRelationHeader(n: NimNode): Relation =
   n.expectLen 4
