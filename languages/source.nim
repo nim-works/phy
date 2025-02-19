@@ -84,12 +84,12 @@ const lang* = language:
     `tuple`(+val)
     `proc`(typ, *[x, typ], e)
   nterminal typ:
-    "void"            # corresponds to `(VoidTy)`
-    "unit"            # corresponds to `(UnitTy)`
-    "bool"            # corresponds to `(BoolTy)`
-    "char"            # corresponds to `(CharTy)`
-    "int"             # corresponds to `(IntTy)`
-    "float"           # corresponds to `(FloatTy)`
+    VoidTy()
+    UnitTy()
+    BoolTy()
+    CharTy()
+    IntTy()
+    FloatTy()
     mut(typ)
     `type`(typ)
     TupleTy(+typ)
@@ -133,8 +133,8 @@ const lang* = language:
     rule "void":
       ## :math:`\text{void}` is the subtype of all other types, except for
       ## itself.
-      where !"void", typ_1
-      conclusion "void", typ_1
+      where !VoidTy(), typ_1
+      conclusion VoidTy(), typ_1
     rule "union-subtyping":
       ## A type is a subtype of a union if it's a part of the union (in
       ## any position).
@@ -196,13 +196,13 @@ const lang* = language:
       uniqueTypes(...typ_2)
 
   inductive ttypes(inp, inp, out), "$1 \\vdash_{\\tau} $2 : $3":
-    axiom "S-void-type",        C, VoidTy(),  "void"
-    axiom "S-unit-type",        C, UnitTy(),  "unit"
-    axiom "S-bool-type",        C, BoolTy(),  "bool"
-    axiom "S-char-type",        C, CharTy(),  "char"
-    axiom "S-int-type",         C, IntTy(),   "int"
-    axiom "S-float-type",       C, FloatTy(), "float"
-    axiom "S-empty-tuple-type", C, TupleTy(), "unit"
+    axiom "S-void-type",        C, VoidTy(),  VoidTy()
+    axiom "S-unit-type",        C, UnitTy(),  UnitTy()
+    axiom "S-bool-type",        C, BoolTy(),  BoolTy()
+    axiom "S-char-type",        C, CharTy(),  CharTy()
+    axiom "S-int-type",         C, IntTy(),   IntTy()
+    axiom "S-float-type",       C, FloatTy(), FloatTy()
+    axiom "S-empty-tuple-type", C, TupleTy(), UnitTy()
 
     rule "S-type-ident":
       condition x_1 in C_1.symbols
@@ -211,24 +211,24 @@ const lang* = language:
 
     rule "S-tuple-type":
       premise ...ttypes(C_1, e_1, typ_1)
-      where *(!"void"), ...typ_1
+      where *(!VoidTy()), ...typ_1
       conclusion C_1, TupleTy(+e_1), TupleTy(...typ_1)
 
     rule "S-union-type":
       premise ...ttypes(C_1, e_1, typ_1)
-      where *(!"void"), ...typ_1
+      where *(!VoidTy()), ...typ_1
       condition uniqueTypes(...typ_1)
       conclusion C_1, UnionTy(+e_1), TupleTy(...typ_1)
 
     rule "S-proc-type":
       premise ttypes(C_1, e_1, typ_1)
       premise ...ttypes(C_1, e_2, typ_2)
-      where *(!"void"), ...typ_2
+      where *(!VoidTy()), ...typ_2
       conclusion C_1, ProcTy(e_1, *e_2), ProcTy(typ_1, ...typ_2)
 
     rule "S-seq-type":
       premise ttypes(C_1, e_1, typ_1)
-      where !"void", typ_1
+      where !VoidTy(), typ_1
       conclusion C_1, SeqTy(e_1), SeqTy(typ_1)
 
   alias built_in,
@@ -249,8 +249,8 @@ const lang* = language:
     axiom "S-float", C, r, FloatTy()
     axiom "S-false", C, "false", BoolTy()
     axiom "S-true",  C, "true", BoolTy()
-    axiom "S-unit",  C, TupleCons(), "unit"
-    axiom "S-unreachable", C, Unreachable(), "void"
+    axiom "S-unit",  C, TupleCons(), UnitTy()
+    axiom "S-unreachable", C, Unreachable(), VoidTy()
 
     rule "S-identifier":
       condition x_1 in C_1.symbols
@@ -260,7 +260,7 @@ const lang* = language:
 
     rule "S-tuple":
       premise ...types(C_1, e_1, All[typ_1])
-      where *(!"void"), ...typ_1
+      where *(!VoidTy()), ...typ_1
       conclusion C_1, TupleCons(+e_1), TupleTy(...typ_1)
 
     rule "S-seq-cons":
@@ -269,18 +269,18 @@ const lang* = language:
       premise ...(typ_2 <:= typ_1)
       conclusion C_1, Seq(e_1, *e_2), SeqTy(typ_1)
 
-    axiom "S-string-cons", C, Seq(StringVal(x)), SeqTy("char")
+    axiom "S-string-cons", C, Seq(StringVal(x)), SeqTy(CharTy())
 
     rule "S-return":
       premise types(C_1, e_1, All[typ_1])
       where typ_2, C_1.ret
       premise typ_1 <:= typ_2
-      conclusion C_1, Return(e_1), "void"
+      conclusion C_1, Return(e_1), VoidTy()
 
     rule "S-return-unit":
       where typ_1, C_1.ret
-      premise eq(typ_1, "unit")
-      conclusion C_1, Return(), "void"
+      premise eq(typ_1, UnitTy())
+      conclusion C_1, Return(), VoidTy()
 
     rule "S-field":
       premise types(C_1, e_1, typ_1)
@@ -296,13 +296,13 @@ const lang* = language:
 
     rule "S-at":
       premise types(C_1, e_1, typ_1)
-      premise types(C_1, e_2, All["int"])
+      premise types(C_1, e_2, All[IntTy()])
       where SeqTy(typ_2), typ_1
       conclusion C_1, At(e_1, e_2), typ_2
 
     rule "S-mut-at":
       premise types(C_1, e_1, mut(typ_1))
-      premise types(C_1, e_2, All["int"])
+      premise types(C_1, e_2, All[IntTy()])
       where SeqTy(typ_2), typ_1
       conclusion C_1, At(e_1, e_2), mut(typ_2)
 
@@ -310,7 +310,7 @@ const lang* = language:
       premise types(C_1, e_1, mut(typ_1))
       premise types(C_1, e_2, All[typ_2])
       premise typ_2 <:= typ_1
-      conclusion C_1, Asgn(e_1, e_2), "unit"
+      conclusion C_1, Asgn(e_1, e_2), UnitTy()
 
     rule "S-let":
       condition x_1 notin C_1.symbols
@@ -321,17 +321,17 @@ const lang* = language:
       conclusion C_1, Let(x_1, e_1, e_2), typ_2
 
     rule "S-exprs":
-      premise ...types(C_1, e_1, All["unit"])
+      premise ...types(C_1, e_1, All[UnitTy()])
       premise types(C_1, e_2, typ_2)
       conclusion C_1, Exprs(*e_1, e_2), typ_2
 
     rule "S-void-short-circuit":
       # if any expression in the list is of type void, so is the list itself
-      premise ...types(C_1, e_1, All["unit"])
-      premise types(C_1, e_2, All["void"])
-      premise ...types(C_1, e_3, All["unit"])
+      premise ...types(C_1, e_1, All[UnitTy()])
+      premise types(C_1, e_2, All[VoidTy()])
+      premise ...types(C_1, e_3, All[UnitTy()])
       premise types(C_1, e_4, typ)
-      conclusion C_1, Exprs(*e_1, e_2, *e_3, e_4), "void"
+      conclusion C_1, Exprs(*e_1, e_2, *e_3, e_4), VoidTy()
 
     rule "S-if":
       premise types(C_1, e_1, All[BoolTy()])
@@ -343,13 +343,13 @@ const lang* = language:
     rule "S-while":
       premise types(C_1, e_1, All[BoolTy()])
       premise types(C_1, e_2, All[typ_1])
-      condition typ_1 in {"void", "unit"}
-      conclusion C_1, While(e_1, e_2), "unit"
+      condition typ_1 in {VoidTy(), UnitTy()}
+      conclusion C_1, While(e_1, e_2), UnitTy()
 
     rule "S-while":
       premise types(C_1, e_1, All[typ_1])
-      condition typ_1 in {"void", "unit"}
-      conclusion C_1, While("true", e_1), "void"
+      condition typ_1 in {VoidTy(), UnitTy()}
+      conclusion C_1, While("true", e_1), VoidTy()
 
     rule "S-builtin-plus":
       premise types(C_1, e_1, All[typ_1])
@@ -360,19 +360,19 @@ const lang* = language:
     rule "S-builtin-minus":
       premise types(C_1, e_1, All[typ_1])
       premise types(C_1, e_2, All[typ_1])
-      condition typ_1 in {"int", FloatTy()}
+      condition typ_1 in {IntTy(), FloatTy()}
       conclusion C_1, Call("-", e_1, e_2), typ_1
 
     rule "S-builtin-mul":
       premise types(C_1, e_1, All[typ_1])
       premise types(C_1, e_2, All[typ_1])
-      premise eq(typ_1, "int")
+      premise eq(typ_1, IntTy())
       conclusion C_1, Call("*", e_1, e_2), typ_1
 
     rule "S-builtin-div":
       premise types(C_1, e_1, All[typ_1])
       premise types(C_1, e_2, All[typ_1])
-      premise eq(typ_1, "int")
+      premise eq(typ_1, IntTy())
       conclusion C_1, Call("div", e_1, e_2), typ_1
 
     rule "S-builtin-eq":
@@ -396,26 +396,26 @@ const lang* = language:
     rule "S-builtin-mod":
       premise types(C_1, e_1, All[typ_1])
       premise types(C_1, e_2, All[typ_1])
-      premise eq(typ_1, "int")
+      premise eq(typ_1, IntTy())
       conclusion C_1, Call("mod", e_1, e_2), typ_1
 
     rule "S-builtin-len":
       premise types(C_1, e_1, All[SeqTy(typ)])
-      conclusion C_1, Call("len", e_1), "int"
+      conclusion C_1, Call("len", e_1), IntTy()
 
     rule "S-builtin-concat":
       premise types(C_1, e_1, All[SeqTy(typ_1)])
       premise types(C_1, e_2, All[typ_2])
       premise typ_2 <:= typ_1
-      conclusion C_1, Call("concat", e_1, e_2), "unit"
+      conclusion C_1, Call("concat", e_1, e_2), UnitTy()
 
     rule "S-builtin-write":
       premise types(C_1, e_1, All[SeqTy(CharTy())])
-      conclusion C_1, Call("write", e_1), "unit"
+      conclusion C_1, Call("write", e_1), UnitTy()
 
     rule "S-builtin-writeErr":
       premise types(C_1, e_1, All[SeqTy(CharTy())])
-      conclusion C_1, Call("writeErr", e_1), "unit"
+      conclusion C_1, Call("writeErr", e_1), UnitTy()
 
     rule "S-builtin-readFile":
       premise types(C_1, e_1, All[SeqTy(CharTy())])
@@ -462,11 +462,11 @@ const lang* = language:
       condition uniqueNames(x_1, ...x_2)
       premise ttypes(C_1, e_1, typ_1)
       premise ...ttypes(C_1, e_2, typ_2)
-      condition ...(typ_2 != "void")
+      condition ...(typ_2 != VoidTy())
       where typ_3, ProcTy(typ_1, ...typ_2)
       where C_2, C_1 + {"symbols": {x_1: typ_3}}
       where C_3, C_2 + {"return": typ_1, "symbols": { ...x_2: ...typ_2 }}
-      premise types(C_3, e_3, "void")
+      premise types(C_3, e_3, VoidTy())
       conclusion C_1, ProcDecl(x_1, e_1, Params(*ParamDecl(x_2, e_2)), e_3), C_2
 
     axiom "S-empty-module", C_1, Module(), C_1
