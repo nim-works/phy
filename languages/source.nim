@@ -782,9 +782,9 @@ const lang* = language:
       conclusion DC_1, Seq(typ, *val_1), DC_1, `array`(...val_2)
 
     rule "E-string-cons":
-      where (*val_1,), utf8Bytes(string_1)
       # FIXME: doesn't need to be an impure reduction
-      conclusion DC_1, Seq(StringVal(string_1)), DC_1, `array`(...val_1)
+      where *z_1, utf8Bytes(string_1)
+      conclusion DC_1, Seq(StringVal(string_1)), DC_1, array(...IntVal(z_1))
 
     rule "E-let-introduce":
       exists z_1, z_1 notin DC_1.locs
