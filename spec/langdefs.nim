@@ -402,9 +402,9 @@ proc fits(c; b, a: Type): TypeRel =
       elif fitsC(c, c.tvars[a.id].limit, c.tvars[b.id].limit) != relNone:
         max = c.tvars[a.id].limit
       else:
-        # unrelated upper bounds; should not be possible for related lower
-        # bounds
-        unreachable()
+        # unrelated upper bounds. Possible when the lower bound of both vars
+        # is void
+        return relNone
 
       if fitsC(c, min, max) != relNone:
         # merge the type variables by pointing one to the other
