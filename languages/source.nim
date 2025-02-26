@@ -599,7 +599,7 @@ const lang* = language:
     of DC_1, l_1: copy(DC_1, DC_1.locs(l_1))
     of DC, val_1: val_1
 
-  function utf8Bytes, x -> (+ch,):
+  function utf8Bytes, string -> *z:
     # TODO: the function is mostly self-explanatory, but it should be defined in
     #       a bit more detail nonetheless
     ##
