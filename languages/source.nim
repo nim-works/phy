@@ -455,7 +455,7 @@ const lang* = language:
       condition typ_2 <:= typ_3
       conclusion C_1, With(e_1, n_1, e_2), typ_3
 
-  inductive toplevel(inp C, inp decl, out C):
+  inductive toplevel(inp C, inp (decl + module), out C):
     rule "S-type-decl":
       premise ttypes(C_1, texpr_1, typ_1)
       where C_2, C_1 + C(symbols: {string_1: type(typ_1)})
