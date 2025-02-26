@@ -366,57 +366,57 @@ const lang* = language:
       premise mtypes(C_1, e_2, typ_2)
       condition typ_1 == typ_2
       condition typ_1 == IntTy()
-      conclusion C_1, Call("div", e_1, e_2), typ_1
+      conclusion C_1, Call(Ident("div"), e_1, e_2), typ_1
 
     rule "S-builtin-eq":
       premise mtypes(C_1, e_1, typ_1)
       premise mtypes(C_1, e_2, typ_2)
       condition typ_1 == typ_2
       condition typ_1 in {BoolTy(), IntTy(), FloatTy()}
-      conclusion C_1, Call("==", e_1, e_2), BoolTy()
+      conclusion C_1, Call(Ident("=="), e_1, e_2), BoolTy()
 
     rule "S-builtin-lt":
       premise mtypes(C_1, e_1, typ_1)
       premise mtypes(C_1, e_2, typ_2)
       condition typ_1 == typ_2
       condition typ_1 in {IntTy(), FloatTy()}
-      conclusion C_1, Call("<", e_1, e_2), BoolTy()
+      conclusion C_1, Call(Ident("<"), e_1, e_2), BoolTy()
 
     rule "S-builtin-le":
       premise mtypes(C_1, e_1, typ_1)
       premise mtypes(C_1, e_2, typ_2)
       condition typ_1 == typ_2
       condition typ_1 in {IntTy(), FloatTy()}
-      conclusion C_1, Call("<=", e_1, e_2), BoolTy()
+      conclusion C_1, Call(Ident("<="), e_1, e_2), BoolTy()
 
     rule "S-builtin-mod":
       premise mtypes(C_1, e_1, typ_1)
       premise mtypes(C_1, e_2, typ_2)
       condition typ_1 == typ_2
       condition typ_1 == IntTy()
-      conclusion C_1, Call("mod", e_1, e_2), typ_1
+      conclusion C_1, Call(Ident("mod"), e_1, e_2), typ_1
 
     rule "S-builtin-len":
       premise mtypes(C_1, e_1, SeqTy(typ))
-      conclusion C_1, Call("len", e_1), IntTy()
+      conclusion C_1, Call(Ident("len"), e_1), IntTy()
 
     rule "S-builtin-concat":
       premise mtypes(C_1, e_1, SeqTy(typ_1))
       premise mtypes(C_1, e_2, typ_2)
       condition typ_2 <:= typ_1
-      conclusion C_1, Call("concat", e_1, e_2), UnitTy()
+      conclusion C_1, Call(Ident("concat"), e_1, e_2), UnitTy()
 
     rule "S-builtin-write":
       premise mtypes(C_1, e_1, SeqTy(CharTy()))
-      conclusion C_1, Call("write", e_1), UnitTy()
+      conclusion C_1, Call(Ident("write"), e_1), UnitTy()
 
     rule "S-builtin-writeErr":
       premise mtypes(C_1, e_1, SeqTy(CharTy()))
-      conclusion C_1, Call("writeErr", e_1), UnitTy()
+      conclusion C_1, Call(Ident("writeErr"), e_1), UnitTy()
 
     rule "S-builtin-readFile":
       premise mtypes(C_1, e_1, SeqTy(CharTy()))
-      conclusion C_1, Call("readFile", e_1), SeqTy(CharTy())
+      conclusion C_1, Call(Ident("readFile"), e_1), SeqTy(CharTy())
 
     rule "S-call":
       premise mtypes(C_1, e_1, typ_1)
@@ -699,62 +699,62 @@ const lang* = language:
 
     rule "E-add-int":
       let n_3 = addInt(n_1, n_2)
-      conclusion Call("+", IntVal(n_1), IntVal(n_2)), IntVal(n_3)
+      conclusion Call(Ident("+"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-add-int-overflow":
       condition (n_1, n_2) notin addInt(n_1, n_2)
-      conclusion Call("+", IntVal(n_1), IntVal(n_2)), Unreachable()
+      conclusion Call(Ident("+"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-sub-int":
       let n_3 = subInt(n_1, n_2)
-      conclusion Call("-", IntVal(n_1), IntVal(n_2)), IntVal(n_3)
+      conclusion Call(Ident("-"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-sub-int-overflow":
       condition (n_1, n_2) notin subInt(n_1, n_2)
-      conclusion Call("-", IntVal(n_1), IntVal(n_2)), Unreachable()
+      conclusion Call(Ident("-"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-mul-int":
       let n_3 = mulInt(n_1, n_2)
-      conclusion Call("*", IntVal(n_1), IntVal(n_2)), IntVal(n_3)
+      conclusion Call(Ident("*"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-mul-int-overflow":
       condition (n_1, n_2) notin mulInt
-      conclusion Call("*", IntVal(n_1), IntVal(n_2)), Unreachable()
+      conclusion Call(Ident("*"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-div-int":
       let n_3 = divInt(n_1, n_2)
-      conclusion Call("div", IntVal(n_1), IntVal(n_2)), IntVal(n_3)
+      conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-div-int-overflow":
       condition (n_1, n_2) notin divInt
-      conclusion Call("div", IntVal(n_1), IntVal(n_2)), Unreachable()
+      conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-mod-int":
       let n_3 = divInt(n_1, n_2)
-      conclusion Call("div", IntVal(n_1), IntVal(n_2)), IntVal(n_3)
+      conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-mod-int-overflow":
       condition (n_1, n_2) notin divInt
-      conclusion Call("div", IntVal(n_1), IntVal(n_2)), Unreachable()
+      conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-add-float":
       let r_3 = floatAdd(r_1, r_2)
-      conclusion Call("+", FloatVal(r_1), FloatVal(r_2)), FloatVal(r_3)
+      conclusion Call(Ident("+"), FloatVal(r_1), FloatVal(r_2)), FloatVal(r_3)
     rule "E-sub-float":
       let r_3 = floatSub(r_1, r_2)
-      conclusion Call("-", FloatVal(r_1), FloatVal(r_2)), FloatVal(r_3)
+      conclusion Call(Ident("-"), FloatVal(r_1), FloatVal(r_2)), FloatVal(r_3)
 
     rule "E-builtin-eq":
       let val_3 = valEq(val_1, val_2)
-      conclusion Call("==", val_1, val_2), val_3
+      conclusion Call(Ident("=="), val_1, val_2), val_3
     rule "E-builtin-le":
       let val_3 = lessEqual(val_1, val_2)
-      conclusion Call("<=", val_1, val_2), val_3
+      conclusion Call(Ident("<="), val_1, val_2), val_3
     rule "E-builtin-lt":
       let val_3 = lt(val_1, val_2)
-      conclusion Call("<", val_1, val_2), val_3
+      conclusion Call(Ident("<"), val_1, val_2), val_3
 
     rule "E-builtin-len":
       let n_1 = len(val_1)
-      conclusion Call("len", array(*val_1)), IntVal(n_1)
+      conclusion Call(Ident("len"), array(*val_1)), IntVal(n_1)
 
     rule "E-builtin-concat":
-      conclusion Call("concat", `array`(*val_1), val_2), `array`(...val_1, val_2)
+      conclusion Call(Ident("concat"), `array`(*val_1), val_2), `array`(...val_1, val_2)
 
     rule "E-call-reduce":
       # the call is replaced with the procedure's body (in which all
@@ -804,12 +804,12 @@ const lang* = language:
     rule "E-builtin-write":
       where `array`(*val_2), C_1.output
       let C_2 = C_1 + C(output: `array`(...val_2, ...val_1))
-      conclusion C_1, Call("write", `array`(*val_1)), C_2, TupleCons()
+      conclusion C_1, Call(Ident("write"), `array`(*val_1)), C_2, TupleCons()
 
     rule "E-builtin-writeErr":
       where `array`(*val_2), C_1.errOutput
       where C_2, C_1 + C(errOutput: `array`(...val_2, ...val_1))
-      conclusion C_1, Call("writeErr", val_1), C_2, TupleCons()
+      conclusion C_1, Call(Ident("writeErr"), val_1), C_2, TupleCons()
 
     rule "E-builtin-readFile":
       # the extra time parameter is used to model the fact that the file
@@ -819,7 +819,7 @@ const lang* = language:
       where `array`(*ch), val_2
       where n_1, C_1.time + 1
       where C_2, C_1 + {"time": n_1}
-      conclusion C_1, Call("readFile", val_1), C_2, val_2
+      conclusion C_1, Call(Ident("readFile"), val_1), C_2, val_2
 
   inductive step(inp C, inp e, out C, out e):
     rule "E-reduce-pure":
