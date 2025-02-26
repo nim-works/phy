@@ -674,8 +674,9 @@ const lang* = language:
     Return(E)
 
   context B:
-    hole
-    E[B]
+    E
+    #E[B]
+    # FIXME: not allowed according to the new rules. Needs a workaround...
     Frame(typ, B)
 
   ## Reductions and Steps
