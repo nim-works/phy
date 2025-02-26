@@ -768,8 +768,8 @@ const lang* = language:
       # the call is replaced with the procedure's body (in which all
       # occurrences of the parameters were substituted with a copy of the
       # respective argument), which is wrapped in a `Frame` tree
-      where `proc`(typ_r, *[x_1, typ_p], e_1), val_1
-      where e_2, substitute(e_1, ...[x_1, val_2])
+      where `proc`(typ_r, *[Ident(string_1), typ_p], e_1), val_1
+      where e_2, substitute(e_1, map(zip(string_1, val_2)))
       conclusion Call(val_1, *val_2), Frame(typ_r, e_2)
 
   inductive reducesTo(inp DC, inp e, out DC, out e):
@@ -790,8 +790,8 @@ const lang* = language:
       exists z_1, z_1 notin DC_1.locs
       let val_2 = copy(DC_1, val_1)
       let DC_2 = DC_1 + DC(locs: {z_1 : val_2})
-      let e_2 = substitute(e_1, x_1, loc(z_1))
-      conclusion DC_1, Let(x_1, val_1, e_1), DC_2, e_2
+      let e_2 = substitute(e_1, {string_1: loc(z_1)})
+      conclusion DC_1, Let(Ident(string_1), val_1, e_1), DC_2, e_2
     # TODO: the location needs to be removed from the execution context once
     #       `e_2` is reduced to a value, otherwise it remains accessible. This
     #       is not a problem at the moment, but it will be once there are
