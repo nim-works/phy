@@ -16,9 +16,11 @@ type
     ekString
     ekFunc
     ekVar
+    ekNil
     ekWildcard
     # non-leafs
     ekUp     ## up(up | var) - de-Bruijn indexing
+    ekCons   ## cons(e, cons|nil) - list constructor
     ekTuple
     ekLambda ## lambda(num, var, e)
     ekLetrec ## letrec(var, lambda, e) - self-recursive lambda
@@ -32,13 +34,13 @@ type
 
   Expr* = object
     case kind*: ExprKind
-    of ekFail, ekFalse, ekTrue, ekWildcard:
+    of ekFail, ekFalse, ekTrue, ekNil, ekWildcard:
       discard
     of ekVar, ekFunc:
       id*: int
     of ekString, ekNumber:
       val*: string
-    of ekUp, ekTuple, ekApp, ekIf, ekTry, ekMatch, ekBranch, ekLambda,
+    of ekUp, ekCons, ekTuple, ekApp, ekIf, ekTry, ekMatch, ekBranch, ekLambda,
        ekLetrec:
       children*: seq[Expr]
 
@@ -107,12 +109,26 @@ proc render*(e: Expr, indent = 0): string =
   of ekFail:     result = "fail"
   of ekTrue:     result = "true"
   of ekFalse:    result = "false"
+  of ekNil:      result = "."
   of ekWildcard: result = "_"
   of ekFunc:     result = "f_" & $e.id
   of ekNumber:   result = e.val
   of ekVar:      result = "v_" & $e.id
   of ekString:   result = escape(e.val)
   of ekUp:       result = "λ" & render(e[0], indent)
+  of ekCons:
+    result = "["
+    var it {.cursor.} = e
+    while it.kind == ekCons:
+      if result.len > 1:
+        result.add ", "
+      result.add render(it[0], indent)
+      it = it[1]
+    if it.kind != ekNil:
+      result.add ", "
+      result.add render(it, indent)
+      result.add " ..."
+    result.add "]"
   of ekMatch:
     result = "match "
     result.add render(e[0], indent + 1)
@@ -174,6 +190,8 @@ proc match(f: var Frame, pat: Expr, val: Value): bool =
   case pat.kind
   of ekWildcard:
     true
+  of ekNil:
+    val.kind == ekNil
   of ekNumber:
     val.kind == ekNumber and val.val == pat.val
   of ekString:
@@ -183,6 +201,9 @@ proc match(f: var Frame, pat: Expr, val: Value): bool =
     # need to undo the binding if a latter pattern doesn't match
     f.vars[pat.id] = val
     true
+  of ekCons:
+    val.kind == ekCons and match(f, pat[0], val[0]) and
+      match(f, pat[1], val[1])
   of ekTuple:
     if val.kind == ekTuple and pat.len == val.len:
       for i in 0..<val.len:
@@ -218,7 +239,7 @@ proc eval*(funcs; c; e: Expr): Expr =
   template eval(e): Expr =
     eval(funcs, c, e)
   case e.kind
-  of ekTrue, ekFalse, ekString, ekNumber, ekFunc:
+  of ekTrue, ekFalse, ekString, ekNumber, ekFunc, ekNil:
     e
   of ekFail:
     raise Failure.newException("")
@@ -231,6 +252,8 @@ proc eval*(funcs; c; e: Expr): Expr =
       f = c.frames[f].parent
       n = n[0]
     c.frames[f].vars[n.id]
+  of ekCons:
+    expr(ekCons, eval(e[0]), eval(e[1]))
   of ekTuple:
     var elems = newSeq[Expr](e.len)
     for i, it in e.children.pairs:
