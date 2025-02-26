@@ -86,6 +86,8 @@ const lang* = language:
 
   subtype val, e:
     ## A value is an irreducible expression.
+    IntVal(n)
+    FloatVal(z)
     true
     false
     char(z)
