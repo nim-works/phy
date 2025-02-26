@@ -1,14 +1,14 @@
-## Provides the formal definition for the source language, written using
-## Phy's meta-language.
+## Provides a reference implementation of the source language, written using
+## Phy's meta-language. The formal definition is derived from the reference
+## implementation.
 ##
 ## This is the one and only authoritative definition of the source language.
 ##
-## As with most language-related things, the language definition is a
-## **work in progress**.
+## As with most language-related things, the reference implementation /
+## definition is a **work in progress**.
 ##
 ## **Important:** as is, the language definition **does not** match
-## the originally intended semantics, and thus does not model the behaviour
-## of the implementation. This'll be fixed eventually.
+## the originally intended semantics. This'll be fixed eventually.
 
 import
   spec/[langdefs]
