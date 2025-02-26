@@ -1,5 +1,5 @@
 ## Implements the data types and evaluator for a simple purely functional
-## StandardML-esque language called LLM (low-level meta-language).
+## ML-like language called LLM (low-level meta-language).
 ##
 ## It's meant as an intermediate language to lower the higher-level meta-
 ## language to.
