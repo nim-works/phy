@@ -434,15 +434,15 @@ const lang* = language:
       conclusion C_1, `proc`(typ_r, *[x, typ_p], e), ProcTy(typ_r, ...typ_p)
 
     rule "S-seq-with":
-      premise ttypes(C_1, e_1, All[typ_1])
-      premise ttypes(C_1, e_2, All[typ_3])
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_3)
       where SeqTy(typ_2), typ_1
       condition typ_3 <:= typ_2
       conclusion C_1, With(e_1, n_1, e_2), typ_1
 
     rule "S-tuple-with":
-      premise ttypes(C_1, e_1, All[typ_1])
-      premise ttypes(C_1, e_2, All[typ_2])
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
       where TupleTy(+typ), typ_1
       where typ_3, typ_1[n_1]
       condition typ_2 <:= typ_3
