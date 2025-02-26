@@ -213,11 +213,11 @@ const lang* = language:
       premise ttypes(C_1, texpr_1, typ_1)
       premise ...ttypes(C_1, texpr_2, typ_2)
       condition ...(typ_2 != VoidTy())
-      conclusion C_1, ProcTy(texpr_1, *texpr_2), ProcTy(typ_1, typ_2)
+      conclusion C_1, ProcTy(texpr_1, *texpr_2), ProcTy(typ_1, ...typ_2)
 
     rule "S-seq-type":
       premise ttypes(C_1, texpr_1, typ_1)
-      condition ...(typ_1 != VoidTy())
+      condition typ_1 != VoidTy()
       conclusion C_1, SeqTy(texpr_1), SeqTy(typ_1)
 
   def builtIn,
@@ -252,7 +252,7 @@ const lang* = language:
     rule "S-tuple":
       premise ...mtypes(C_1, e_1, typ_1)
       condition ...(typ_1 != VoidTy())
-      conclusion C_1, TupleCons(+e_1), TupleTy(typ_1)
+      conclusion C_1, TupleCons(+e_1), TupleTy(...typ_1)
 
     rule "S-seq-cons":
       premise ttypes(C_1, texpr_1, typ_1)
