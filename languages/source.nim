@@ -779,7 +779,7 @@ const lang* = language:
 
     rule "E-seq-cons":
       where +val_2, ...copy(DC_1, val_1)
-      conclusion DC_1, Seq(typ, val_1), DC_1, `array`(...val_2)
+      conclusion DC_1, Seq(typ, *val_1), DC_1, `array`(...val_2)
 
     rule "E-string-cons":
       where (*val_1,), utf8Bytes(string_1)
