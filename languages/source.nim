@@ -235,6 +235,11 @@ const lang* = language:
       premise types(C_1, e_1, typ_1)
       conclusion C_1, e_1, stripMut(typ_1)
 
+  function isType, typ -> bool:
+    case _
+    of type(typ): true
+    of typ:       false
+
   inductive types(inp C, inp e, out typ):
     axiom "S-int",   C, IntVal(n), IntTy()
     axiom "S-float", C, FloatVal(r), FloatTy()
@@ -246,7 +251,9 @@ const lang* = language:
     rule "S-identifier":
       condition string_1 in C_1.symbols
       let typ_1 = C_1.symbols(string_1)
-      where !type(any), typ_1 # normal identifiers don't bind types
+      # TODO: split symbols into two maps, one for value and one for type
+      #       identifiers, which would allow getting rid of the `type` modifier
+      condition not isType(typ_1) # normal identifiers don't bind types
       conclusion C_1, Ident(string_1), typ_1
 
     rule "S-tuple":
