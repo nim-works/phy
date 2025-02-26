@@ -215,7 +215,7 @@ const lang* = language:
       condition ...(typ_1 != VoidTy())
       conclusion C_1, SeqTy(texpr_1), SeqTy(typ_1)
 
-  alias built_in,
+  def built_in,
     {"==", "<=", "<", "+", "-", "*", "div", "mod", "true", "false", "write",
      "writeErr", "readFile"}
 
