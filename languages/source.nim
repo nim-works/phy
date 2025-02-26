@@ -468,22 +468,39 @@ const lang* = language:
   ## Auxiliary Functions
   ## ~~~~~~~~~~~~~~~~~~~
 
-  function substitute, (e, +[x, e]) -> (e, +[x, e]):
+  function substitute, (e, (string -> e)) -> e:
     ## The substitution function, which handles binding values/expressions to
     ## identifiers. Identifiers cannot be shadowed.
     case _
-    of e_1, ():
-      e_1 # nothing more to substitute
-    of Exprs(+e_1), +any_2:
-      Exprs(...(substitute(e_1, any_2)))
-    of Let(ident_1, e_1, e_2), +any_1:
+    of Exprs(+e_1), any_1:
+      Exprs(...(substitute(e_1, any_1)))
+    of Let(ident_1, e_1, e_2), any_1:
       Let(ident_1, substitute(e_1, any_1), substitute(e_2, any_1))
-    of If(e_1, e_2, e_3), +any_1:
+    of If(e_1, e_2, e_3), any_1:
       If(substitute(e_1, any_1), substitute(e_2, any_1), substitute(e_3, any_1))
-    # TODO: handle the remaining trees
-    of Ident(string_1), *[!string_1, _], [string_1, e_1], *[!string_1, _]:
-      e_1 # the actual substitution
-    of e_1, +any:
+    of Call(+e_1), any_1:
+      Call(...substitute(e_1, any_1))
+    of Asgn(e_1, e_2), any_1:
+      Asgn(substitute(e_1, any_1), substitute(e_2, any_1))
+    of TupleCons(*e_1), any_1:
+      TupleCons(...substitute(e_1, any_1))
+    of Seq(texpr, *e_1), any_1:
+      Seq(texpr, ...substitute(e_1, any_1))
+    of FieldAccess(e_1, IntVal(z_1)), any_1:
+      FieldAccess(substitute(e_1, any_1), IntVal(z_1))
+    of At(e_1, e_2), any_1:
+      At(substitute(e_1, any_1), substitute(e_2, any_1))
+    of While(e_1, e_2), any_1:
+      While(substitute(e_1, any_1), substitute(e_2, any_1))
+    of Return(e_1), any_1:
+      Return(substitute(e_1, any_1))
+    of Ident(string_1), any_1:
+      # the actual substitution
+      if string_1 in any_1:
+        any_1(string_1)
+      else:
+        Ident(string_1)
+    of e_1, _:
       e_1 # nothing to replace
 
   function trunc, r -> n:
