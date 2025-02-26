@@ -84,7 +84,7 @@ const lang* = language:
     Module(*decl)
 
   subtype val, e:
-    ## A value is an irreducible expression.
+    # A value is an irreducible expression.
     IntVal(n)
     FloatVal(z)
     True
@@ -96,7 +96,7 @@ const lang* = language:
     `proc`(typ, *[x, typ], e)
 
   subtype le, e:
-    ## Lvalue expression with all non-lvalue operands already evaluated.
+    # Lvalue expression with all non-lvalue operands already evaluated.
     l
     FieldAccess(le, IntVal(n))
     At(le, IntVal(n))
