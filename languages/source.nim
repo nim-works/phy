@@ -706,38 +706,38 @@ const lang* = language:
       conclusion With(array(*val_1), n_1, val_2), Unreachable()
 
     rule "E-add-int":
-      let n_3 = addInt(n_1, n_2)
+      let n_3 = intAdd(n_1, n_2)
       conclusion Call(Ident("+"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-add-int-overflow":
-      condition (n_1, n_2) notin addInt(n_1, n_2)
+      condition (n_1, n_2) notin intAdd(n_1, n_2)
       conclusion Call(Ident("+"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-sub-int":
-      let n_3 = subInt(n_1, n_2)
+      let n_3 = intSub(n_1, n_2)
       conclusion Call(Ident("-"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-sub-int-overflow":
-      condition (n_1, n_2) notin subInt(n_1, n_2)
+      condition (n_1, n_2) notin intSub(n_1, n_2)
       conclusion Call(Ident("-"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-mul-int":
-      let n_3 = mulInt(n_1, n_2)
+      let n_3 = intMul(n_1, n_2)
       conclusion Call(Ident("*"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-mul-int-overflow":
-      condition (n_1, n_2) notin mulInt
+      condition (n_1, n_2) notin intMul
       conclusion Call(Ident("*"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-div-int":
-      let n_3 = divInt(n_1, n_2)
+      let n_3 = intDiv(n_1, n_2)
       conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-div-int-overflow":
-      condition (n_1, n_2) notin divInt
+      condition (n_1, n_2) notin intDiv
       conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-mod-int":
-      let n_3 = divInt(n_1, n_2)
+      let n_3 = intDiv(n_1, n_2)
       conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-mod-int-overflow":
-      condition (n_1, n_2) notin divInt
+      condition (n_1, n_2) notin intDiv
       conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-add-float":
