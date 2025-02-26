@@ -48,7 +48,7 @@ const lang* = language:
     False
     char(z) # UTF-8 byte
     loc(z) # first-class location
-    `array`(+val)
+    `array`(*val)
     `tuple`(+val)
     `proc`(typ, *[x, typ], e)
 
@@ -92,7 +92,7 @@ const lang* = language:
     False
     char(z)
     loc(z)
-    `array`(+val)
+    `array`(*val)
     `tuple`(+val)
     `proc`(typ, *[x, typ], e)
 
