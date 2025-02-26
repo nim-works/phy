@@ -450,21 +450,21 @@ const lang* = language:
 
   inductive toplevel(inp C, inp decl, out C):
     rule "S-type-decl":
-      premise ttypes(C_1, e_1, typ_1)
+      premise ttypes(C_1, texpr_1, typ_1)
       where C_2, C_1 + {"symbols": {x_1: type(typ_1)}}
-      conclusion C_1, TypeDecl(x_1, e_1), C_2
+      conclusion C_1, TypeDecl(x_1, texpr_1), C_2
 
     rule "S-proc-decl":
       condition x_1 notin C_1.symbols
       condition len({x_1} + { ...x_2 }) == 1 + len(x_2) # all symbols must be unique
-      premise ttypes(C_1, e_1, typ_1)
-      premise ...ttypes(C_1, e_2, typ_2)
+      premise ttypes(C_1, texpr_1, typ_1)
+      premise ...ttypes(C_1, texpr_2, typ_2)
       condition ...(typ_2 != VoidTy())
       let typ_3 = ProcTy(typ_1, ...typ_2)
       let C_2 = C_1 + C(symbols: {x_1: typ_3})
       let C_3 = C_2 + C(`return`: typ_1, symbols: { ...x_2: ...typ_2 })
-      premise types(C_3, e_3, VoidTy())
-      conclusion C_1, ProcDecl(x_1, e_1, Params(*ParamDecl(x_2, e_2)), e_3), C_2
+      premise types(C_3, e_1, VoidTy())
+      conclusion C_1, ProcDecl(x_1, texpr_1, Params(*ParamDecl(x_2, texpr_2)), e_1), C_2
 
     axiom "S-empty-module", C_1, Module(), C_1
 
