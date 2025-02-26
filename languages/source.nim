@@ -172,12 +172,6 @@ const lang* = language:
   record C, (symbols: (string -> typ), ret: typ)
   ## :math:`C` is the symbol environment.
 
-  context All:
-    # Convenience context that is used where both mutable and non
-    # mutable types are allowed.
-    hole
-    mut(hole)
-
   function common, (typ, typ) -> typ:
     ## Computes the closest common ancestor type for a type pair. The function
     ## is not total, as not all two types have a common ancestor type.
@@ -227,6 +221,17 @@ const lang* = language:
     {"==", "<=", "<", "+", "-", "*", "div", "mod", "true", "false", "write",
      "writeErr", "readFile"}
 
+  function stripMut, typ -> typ:
+    case _
+    of mut(typ_1): typ_1
+    of typ_1:      typ_1
+
+  inductive mtypes(inp C, inp e, out typ):
+    # relates an expression to its non-mut-qualified type
+    rule "":
+      premise types(C_1, e_1, typ_1)
+      conclusion C_1, e_1, stripMut(typ_1)
+
   inductive types(inp C, inp e, out typ):
     axiom "S-int",   C, IntVal(n), IntTy()
     axiom "S-float", C, FloatVal(r), FloatTy()
@@ -242,7 +247,7 @@ const lang* = language:
       conclusion C_1, x_1, typ_1
 
     rule "S-tuple":
-      premise ...types(C_1, e_1, All[typ_1])
+      premise ...mtypes(C_1, e_1, typ_1)
       condition ...(typ_1 != VoidTy())
       conclusion C_1, TupleCons(+e_1), TupleTy(typ_1)
 
@@ -255,7 +260,7 @@ const lang* = language:
     axiom "S-string-cons", C, Seq(StringVal(string)), SeqTy(CharTy())
 
     rule "S-return":
-      premise types(C_1, e_1, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
       condition typ_1 <:= C_1.ret
       conclusion C_1, Return(e_1), VoidTy()
 
@@ -277,135 +282,135 @@ const lang* = language:
 
     rule "S-at":
       premise types(C_1, e_1, typ_1)
-      premise types(C_1, e_2, All[IntTy()])
+      premise mtypes(C_1, e_2, IntTy())
       where SeqTy(typ_2), typ_1
       conclusion C_1, At(e_1, e_2), typ_2
 
     rule "S-mut-at":
       premise types(C_1, e_1, mut(typ_1))
-      premise types(C_1, e_2, All[IntTy()])
+      premise mtypes(C_1, e_2, IntTy())
       where SeqTy(typ_2), typ_1
       conclusion C_1, At(e_1, e_2), mut(typ_2)
 
     rule "S-asgn":
       premise types(C_1, e_1, mut(typ_1))
-      premise types(C_1, e_2, All[typ_2])
+      premise mtypes(C_1, e_2, typ_2)
       condition typ_2 <:= typ_1
       conclusion C_1, Asgn(e_1, e_2), UnitTy()
 
     rule "S-let":
       condition x_1 notin C_1.symbols
       condition x_1 notin builtIn
-      premise types(C_1, e_1, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
       let C_2 = C_1 + C(symbols: {x_1: mut(typ_1)})
-      premise types(C_2, e_2, All[typ_2])
+      premise mtypes(C_2, e_2, typ_2)
       conclusion C_1, Let(x_1, e_1, e_2), typ_2
 
     rule "S-exprs":
-      premise ...types(C_1, e_1, All[UnitTy()])
+      premise ...mtypes(C_1, e_1, UnitTy())
       premise types(C_1, e_2, typ_2)
       conclusion C_1, Exprs(*e_1, e_2), typ_2
 
     rule "S-void-short-circuit":
       # if any expression in the list is of type void, so is the list itself
-      premise ...types(C_1, e_1, All[e_3])
+      premise ...mtypes(C_1, e_1, e_3)
       condition ...(e_3 in {VoidTy(), UnitTy()})
       condition VoidTy() in e_3
       premise types(C_1, e_2, typ)
       conclusion C_1, Exprs(*e_1, e_2), VoidTy()
 
     rule "S-if":
-      premise types(C_1, e_1, All[BoolTy()])
-      premise types(C_1, e_2, All[typ_1])
-      premise types(C_1, e_3, All[typ_2])
+      premise mtypes(C_1, e_1, BoolTy())
+      premise mtypes(C_1, e_2, typ_1)
+      premise mtypes(C_1, e_3, typ_2)
       let typ_3 = common(typ_1, typ_2)
       conclusion C_1, If(e_1, e_2, e_3), typ_3
 
     rule "S-while":
-      premise types(C_1, e_1, All[BoolTy()])
-      premise types(C_1, e_2, All[typ_1])
+      premise mtypes(C_1, e_1, BoolTy())
+      premise mtypes(C_1, e_2, typ_1)
       condition typ_1 in {VoidTy(), UnitTy()}
       conclusion C_1, While(e_1, e_2), UnitTy()
 
     rule "S-while":
-      premise types(C_1, e_1, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
       condition typ_1 in {VoidTy(), UnitTy()}
       conclusion C_1, While(True, e_1), VoidTy()
 
     rule "S-builtin-plus":
-      premise types(C_1, e_1, All[typ_1])
-      premise types(C_1, e_2, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_1)
       condition typ_1 in {IntTy(), FloatTy()}
       conclusion C_1, Call(Ident("+"), e_1, e_2), typ_1
 
     rule "S-builtin-minus":
-      premise types(C_1, e_1, All[typ_1])
-      premise types(C_1, e_2, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_1)
       condition typ_1 in {IntTy(), FloatTy()}
       conclusion C_1, Call(Ident("-"), e_1, e_2), typ_1
 
     rule "S-builtin-mul":
-      premise types(C_1, e_1, All[typ_1])
-      premise types(C_1, e_2, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_1)
       condition typ_1 == IntTy()
       conclusion C_1, Call(Ident("*"), e_1, e_2), typ_1
 
     rule "S-builtin-div":
-      premise types(C_1, e_1, All[typ_1])
-      premise types(C_1, e_2, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_1)
       condition typ_1 == IntTy()
       conclusion C_1, Call("div", e_1, e_2), typ_1
 
     rule "S-builtin-eq":
-      premise types(C_1, e_1, All[typ_1])
-      premise types(C_1, e_2, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_1)
       condition typ_1 in {BoolTy(), IntTy(), FloatTy()}
       conclusion C_1, Call("==", e_1, e_2), BoolTy()
 
     rule "S-builtin-lt":
-      premise types(C_1, e_1, All[typ_1])
-      premise types(C_1, e_2, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_1)
       condition typ_1 in {IntTy(), FloatTy()}
       conclusion C_1, Call("<", e_1, e_2), BoolTy()
 
     rule "S-builtin-le":
-      premise types(C_1, e_1, All[typ_1])
-      premise types(C_1, e_2, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_1)
       condition typ_1 in {IntTy(), FloatTy()}
       conclusion C_1, Call("<=", e_1, e_2), BoolTy()
 
     rule "S-builtin-mod":
-      premise types(C_1, e_1, All[typ_1])
-      premise types(C_1, e_2, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_1)
       condition typ_1 == IntTy()
       conclusion C_1, Call("mod", e_1, e_2), typ_1
 
     rule "S-builtin-len":
-      premise types(C_1, e_1, All[SeqTy(typ)])
+      premise mtypes(C_1, e_1, SeqTy(typ))
       conclusion C_1, Call("len", e_1), IntTy()
 
     rule "S-builtin-concat":
-      premise types(C_1, e_1, All[SeqTy(typ_1)])
-      premise types(C_1, e_2, All[typ_2])
+      premise mtypes(C_1, e_1, SeqTy(typ_1))
+      premise mtypes(C_1, e_2, typ_2)
       condition typ_2 <:= typ_1
       conclusion C_1, Call("concat", e_1, e_2), UnitTy()
 
     rule "S-builtin-write":
-      premise types(C_1, e_1, All[SeqTy(CharTy())])
+      premise mtypes(C_1, e_1, SeqTy(CharTy()))
       conclusion C_1, Call("write", e_1), UnitTy()
 
     rule "S-builtin-writeErr":
-      premise types(C_1, e_1, All[SeqTy(CharTy())])
+      premise mtypes(C_1, e_1, SeqTy(CharTy()))
       conclusion C_1, Call("writeErr", e_1), UnitTy()
 
     rule "S-builtin-readFile":
-      premise types(C_1, e_1, All[SeqTy(CharTy())])
+      premise mtypes(C_1, e_1, SeqTy(CharTy()))
       conclusion C_1, Call("readFile", e_1), SeqTy(CharTy())
 
     rule "S-call":
-      premise types(C_1, e_1, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
       where ProcTy(typ_r, *typ_p), typ_1
-      premise ...types(C_1, e_2, All[typ_a])
+      premise ...mtypes(C_1, e_2, typ_a)
       condition ...(typ_a <:= typ_p)
       conclusion C_1, Call(e_1, *e_2), typ_r
 
