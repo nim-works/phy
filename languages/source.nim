@@ -323,9 +323,9 @@ const lang* = language:
 
     rule "S-void-short-circuit":
       # if any expression in the list is of type void, so is the list itself
-      premise ...mtypes(C_1, e_1, e_3)
-      condition ...(e_3 in {VoidTy(), UnitTy()})
-      condition VoidTy() in e_3
+      premise ...mtypes(C_1, e_1, typ_3)
+      condition ...(typ_3 in {VoidTy(), UnitTy()})
+      condition VoidTy() in typ_3
       premise types(C_1, e_2, typ)
       conclusion C_1, Exprs(*e_1, e_2), VoidTy()
 
