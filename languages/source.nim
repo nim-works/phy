@@ -830,17 +830,17 @@ const lang* = language:
     rule "E-builtin-writeErr":
       where `array`(*val_2), DC_1.errOutput
       where DC_2, DC_1 + DC(errOutput: array(...val_2, ...val_1))
-      conclusion DC_1, Call(Ident("writeErr"), val_1), DC_2, TupleCons()
+      conclusion DC_1, Call(Ident("writeErr"), array(*val_1)), DC_2, TupleCons()
 
     rule "E-builtin-readFile":
       # the extra time parameter is used to model the fact that the file
       # access doesn't always yield the same result, even when the program
       # does nothing
-      where val_2, DC_1.files(val_1, DC_1.time)
-      where `array`(*ch), val_2
+      where val_2, DC_1.files(z_1, DC_1.time)
+      where `array`(*char(z)), val_2
       where n_1, DC_1.time + 1
       where DC_2, DC_1 + DC(time: n_1)
-      conclusion DC_1, Call(Ident("readFile"), val_1), DC_2, val_2
+      conclusion DC_1, Call(Ident("readFile"), array(*char(z_1))), DC_2, val_2
 
   inductive step(inp DC, inp e, out DC, out e):
     rule "E-reduce-pure":
@@ -865,7 +865,6 @@ const lang* = language:
       conclusion DC_1, B_1[Frame(typ, E_1[Return()])], DC_1, B_1[TupleCons()]
 
     rule "E-unreachable":
-      condition B_1 != ()
       conclusion DC_1, B_1[Unreachable()], DC_1, Unreachable()
 
     # XXX: theorem support is not implemented...
