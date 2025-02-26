@@ -43,8 +43,8 @@ const lang* = language:
     Let(ident, expr, expr)
 
     # syntax not available at the source level:
-    true
-    false
+    True
+    False
     char(z) # UTF-8 byte
     loc(z) # first-class location
     `array`(+val)
@@ -87,8 +87,8 @@ const lang* = language:
     ## A value is an irreducible expression.
     IntVal(n)
     FloatVal(z)
-    true
-    false
+    True
+    False
     char(z)
     loc(z)
     `array`(+val)
@@ -105,9 +105,9 @@ const lang* = language:
     # FIXME: the sub-expressions need to be desugared too!
     case _
     of And(expr_1, expr_2):
-      If(expr_1, expr_2, false)
+      If(expr_1, expr_2, Ident("false"))
     of Or(expr_1, expr_2):
-      If(expr_1, true, expr_2)
+      If(expr_1, Ident("true"), expr_2)
     of Decl(x_1, expr_1):
       Let(x_1, expr_1, TupleCons())
     of Exprs(*expr_1, Decl(x_1, expr_2), +expr_3):
@@ -223,8 +223,8 @@ const lang* = language:
   inductive types(inp C, inp e, out typ):
     axiom "S-int",   C, IntVal(n), IntTy()
     axiom "S-float", C, FloatVal(r), FloatTy()
-    axiom "S-false", C, false, BoolTy()
-    axiom "S-true",  C, true, BoolTy()
+    axiom "S-false", C, Ident("false"), BoolTy()
+    axiom "S-true",  C, Ident("true"), BoolTy()
     axiom "S-unit",  C, TupleCons(), UnitTy()
     axiom "S-unreachable", C, Unreachable(), VoidTy()
 
@@ -323,7 +323,7 @@ const lang* = language:
     rule "S-while":
       premise types(C_1, e_1, All[typ_1])
       condition typ_1 in {VoidTy(), UnitTy()}
-      conclusion C_1, While(true, e_1), VoidTy()
+      conclusion C_1, While(True, e_1), VoidTy()
 
     rule "S-builtin-plus":
       premise types(C_1, e_1, All[typ_1])
@@ -549,28 +549,28 @@ const lang* = language:
 
   function valEq, (val, val) -> val:
     case _
-    of val_1, val_1: "true"
-    else:            "false"
+    of val_1, val_1: True
+    else:            False
 
   function lt, (val, val) -> val:
     case _
     of n_1, n_2:
       condition n_1 < n_2
-      "true"
+      True
     of r_1, r_2:
       condition r_1 < r_2
-      "true"
-    else: "false"
+      True
+    else: False
 
   function lessEqual, (val, val) -> val:
     case _
     of val_1, val_2:
-      where "true", valEq(val_1, val_2)
-      "true"
+      where True, valEq(val_1, val_2)
+      True
     of val_1, val_2:
-      where "true", lt(val_1, val_2)
-      "true"
-    else: "false"
+      where True, lt(val_1, val_2)
+      True
+    else: False
 
   # TODO: the floating-point operations need to be defined according to the
   #       IEEE 754.2008 standard
@@ -630,8 +630,8 @@ const lang* = language:
     # context
     axiom "E-exprs-fold", Exprs(val_1), val_1
     axiom "E-exprs", Exprs(TupleCons(), +e_1), Exprs(...e_1)
-    axiom "E-if-true", If(true, e_1, e_2), e_1
-    axiom "E-if-false", If(false, e_1, e_2), e_2
+    axiom "E-if-true", If(True, e_1, e_2), e_1
+    axiom "E-if-false", If(False, e_1, e_2), e_2
 
     axiom "E-while", While(e_1, e_2), If(e_1, Exprs(e_2, While(e_1, e_2)), TupleCons())
 
