@@ -570,8 +570,8 @@ const lang* = language:
     case _
     of n_1, 0: fail
     of n_1, n_2:
-      if n_1 == (-2 ^ 63):
-        if n_2 == -1:
+      if same(n_1, (-2 ^ 63)):
+        if same(n_2, -1):
           fail
         else:
           trunc(n_1 / n_2)
