@@ -133,7 +133,7 @@ const lang* = language:
       ## A type is a subtype of a union if it's a part of the union (in
       ## any position).
       condition typ_1 in typ_2
-      conclusion typ_1, UnionTy(*typ_2)
+      conclusion typ_1, UnionTy(+typ_2)
 
   inductive `==`(inp typ, inp typ):
     ## Except for union types, all type equality uses *structural equality*.
