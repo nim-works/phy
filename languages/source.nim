@@ -590,28 +590,28 @@ const lang* = language:
 
   function valEq, (val, val) -> val:
     case _
-    of val_1, val_1: True
-    else:            False
+    of val_1, val_2:
+      if same(val_1, val_2):
+        True
+      else:
+        False
 
   function lt, (val, val) -> val:
     case _
-    of n_1, n_2:
-      condition n_1 < n_2
-      True
-    of r_1, r_2:
-      condition r_1 < r_2
-      True
-    else: False
+    of IntVal(n_1), IntVal(n_2):
+      if n_1 < n_2: True
+      else:         False
+    of FloatVal(r_1), FloatVal(r_2):
+      if r_1 < r_2: True
+      else:         False
 
   function lessEqual, (val, val) -> val:
     case _
     of val_1, val_2:
-      where True, valEq(val_1, val_2)
-      True
-    of val_1, val_2:
-      where True, lt(val_1, val_2)
-      True
-    else: False
+      if same(valEq(val_1, val_2), True):
+        True
+      else:
+        lt(val_1, val_2)
 
   # TODO: the floating-point operations need to be defined according to the
   #       IEEE 754.2008 standard
