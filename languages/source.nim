@@ -342,49 +342,57 @@ const lang* = language:
 
     rule "S-builtin-plus":
       premise mtypes(C_1, e_1, typ_1)
-      premise mtypes(C_1, e_2, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
       condition typ_1 in {IntTy(), FloatTy()}
       conclusion C_1, Call(Ident("+"), e_1, e_2), typ_1
 
     rule "S-builtin-minus":
       premise mtypes(C_1, e_1, typ_1)
-      premise mtypes(C_1, e_2, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
       condition typ_1 in {IntTy(), FloatTy()}
       conclusion C_1, Call(Ident("-"), e_1, e_2), typ_1
 
     rule "S-builtin-mul":
       premise mtypes(C_1, e_1, typ_1)
-      premise mtypes(C_1, e_2, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
       condition typ_1 == IntTy()
       conclusion C_1, Call(Ident("*"), e_1, e_2), typ_1
 
     rule "S-builtin-div":
       premise mtypes(C_1, e_1, typ_1)
-      premise mtypes(C_1, e_2, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
       condition typ_1 == IntTy()
       conclusion C_1, Call("div", e_1, e_2), typ_1
 
     rule "S-builtin-eq":
       premise mtypes(C_1, e_1, typ_1)
-      premise mtypes(C_1, e_2, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
       condition typ_1 in {BoolTy(), IntTy(), FloatTy()}
       conclusion C_1, Call("==", e_1, e_2), BoolTy()
 
     rule "S-builtin-lt":
       premise mtypes(C_1, e_1, typ_1)
-      premise mtypes(C_1, e_2, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
       condition typ_1 in {IntTy(), FloatTy()}
       conclusion C_1, Call("<", e_1, e_2), BoolTy()
 
     rule "S-builtin-le":
       premise mtypes(C_1, e_1, typ_1)
-      premise mtypes(C_1, e_2, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
       condition typ_1 in {IntTy(), FloatTy()}
       conclusion C_1, Call("<=", e_1, e_2), BoolTy()
 
     rule "S-builtin-mod":
       premise mtypes(C_1, e_1, typ_1)
-      premise mtypes(C_1, e_2, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
       condition typ_1 == IntTy()
       conclusion C_1, Call("mod", e_1, e_2), typ_1
 
