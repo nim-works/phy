@@ -287,7 +287,7 @@ const lang* = language:
 
     rule "S-let":
       condition x_1 notin C_1.symbols
-      condition x_1 notin built_in
+      condition x_1 notin builtIn
       premise types(C_1, e_1, All[typ_1])
       let C_2 = C_1 + C(symbols: {x_1: mut(typ_1)})
       premise types(C_2, e_2, All[typ_2])
@@ -541,9 +541,9 @@ const lang* = language:
     of n_1, 0: fail
     of n_1, n_2: n_1 - (n_2 * trunc(n_1 / n_2))
 
-  function float_add, (r, r) -> r:
+  function floatAdd, (r, r) -> r:
     ## XXX: not defined
-  function float_sub, (r, r) -> r:
+  function floatSub, (r, r) -> r:
     ## XXX: not defined
 
   function valEq, (val, val) -> val:
@@ -581,7 +581,7 @@ const lang* = language:
     of DC_1, l_1: copy(DC_1, DC_1.locs(l_1))
     of DC, val_1: val_1
 
-  function utf8_bytes, x -> (+ch,):
+  function utf8Bytes, x -> (+ch,):
     # TODO: the function is mostly self-explanatory, but it should be defined in
     #       a bit more detail nonetheless
     ##
@@ -739,7 +739,7 @@ const lang* = language:
       conclusion C_1, Seq(typ, val_1), C_1, `array`(...val_2)
 
     rule "E-string-cons":
-      where (*val_1,), utf8_bytes(x_1)
+      where (*val_1,), utf8Bytes(x_1)
       # FIXME: doesn't need to be an impure reduction
       conclusion C_1, Seq(StringVal(x_1)), C_1, `array`(...val_1)
 
