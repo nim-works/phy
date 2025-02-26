@@ -463,7 +463,7 @@ const lang* = language:
       condition ...(typ_2 != VoidTy())
       let typ_3 = ProcTy(typ_1, ...typ_2)
       let C_2 = C_1 + C(symbols: {string_1: typ_3})
-      let C_3 = C_2 + C(ret: typ_1, symbols: { ...string_2: ...typ_2 })
+      let C_3 = C_2 + C(ret: typ_1, symbols: map(zip(string_2, typ_2)))
       premise types(C_3, e_1, VoidTy())
       conclusion C_1, ProcDecl(Ident(string_1), texpr_1, Params(*ParamDecl(Ident(string_2), texpr_2)), e_1), C_2
 
