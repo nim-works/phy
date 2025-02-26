@@ -800,11 +800,15 @@ const lang* = language:
     #       Removing the location from the store could be achieved via a new
     #       `(Pop x)` construct, where `(Let x val e)` reduces to `(Pop x e)`
 
-    rule "E-with":
-      condition 0 <= n_1
-      condition n_1 < len(val_1)
+    rule "E-with-array":
       let val_3 = val_1[n_1]
-      conclusion DC_1, With(val_1, n_1, val_2), DC_1, val_3
+      # FIXME: this is wrong. The n-th element of the array must be replaced
+      #        with val_2
+      conclusion DC_1, With(array(*val_1), n_1, val_2), DC_1, val_3
+    rule "E-with-tuple":
+      let val_3 = val_1[n_1]
+      # FIXME: same here
+      conclusion DC_1, With(`tuple`(+val_1), n_1, val_2), DC_1, val_3
 
     rule "E-asgn":
       let DC_2 = DC_1 + DC(locs: {z_1 : val_1})
