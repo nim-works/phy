@@ -99,8 +99,8 @@ const lang* = language:
   subtype le, e:
     ## Lvalue expression with all non-lvalue operands already evaluated.
     l
-    FieldAccess(le, n)
-    At(le, n)
+    FieldAccess(le, IntVal(n))
+    At(le, IntVal(n))
 
   function desugar, expr -> e:
     # FIXME: the sub-expressions need to be desugared too!
@@ -222,8 +222,8 @@ const lang* = language:
      "writeErr", "readFile"}
 
   inductive types(inp C, inp e, out typ):
-    axiom "S-int",   C, n, IntTy()
-    axiom "S-float", C, r, FloatTy()
+    axiom "S-int",   C, IntVal(n), IntTy()
+    axiom "S-float", C, FloatVal(r), FloatTy()
     axiom "S-false", C, false, BoolTy()
     axiom "S-true",  C, true, BoolTy()
     axiom "S-unit",  C, TupleCons(), UnitTy()
@@ -592,19 +592,19 @@ const lang* = language:
   ## ~~~~~~~~~~~~~~~~~~~
 
   context Etick:
-    FieldAccess(Etick, n)
+    FieldAccess(Etick, IntVal(n))
     At(Etick, e)
     At(le, E)
 
   context L:
     # evaluation context for lvalues
     hole
-    FieldAccess(L, n)
-    At(L, n)
+    FieldAccess(L, IntVal(n))
+    At(L, IntVal(n))
   context E:
     hole
     Exprs(E, *e)
-    FieldAccess(E, n)
+    FieldAccess(E, IntVal(n))
     At(E, e)
     At(le, E)
     Asgn(Etick, e)
@@ -639,20 +639,20 @@ const lang* = language:
     rule "E-tuple-access":
       where `tuple`(+val), val_1
       where val_2, val_1[n_1]
-      conclusion FieldAccess(val_1, n_1), val_2
+      conclusion FieldAccess(val_1, IntVal(n_1)), val_2
 
-    axiom "E-field-asgn", Asgn(FieldAccess(le_1, n_1), val_1), Asgn(le_1, With(le_1, n_1, val_1))
-    axiom "E-elem-asgn", Asgn(At(le_1, n_1), val_1), Asgn(le_1, With(le_1, n_1, val_1))
+    axiom "E-field-asgn", Asgn(FieldAccess(le_1, IntVal(n_1)), val_1), Asgn(le_1, With(le_1, n_1, val_1))
+    axiom "E-elem-asgn", Asgn(At(le_1, IntVal(n_1)), val_1), Asgn(le_1, With(le_1, n_1, val_1))
 
     rule "E-at":
       condition 0 <= n_1
       condition n_1 < len(val_1)
       let val_2 = val_1[n_1]
-      conclusion At(array(*val_1), n_1), val_2
+      conclusion At(array(*val_1), IntVal(n_1)), val_2
 
     rule "E-at-out-of-bounds":
       condition n_1 < 0 or len(val_1) <= n_1
-      conclusion At(array(*val_1), n_1), Unreachable()
+      conclusion At(array(*val_1), IntVal(n_1)), Unreachable()
 
     rule "E-with-out-of-bounds":
       condition n_1 < 0 or len(val_1) <= n_1
@@ -712,7 +712,7 @@ const lang* = language:
 
     rule "E-builtin-len":
       let n_1 = len(val_1)
-      conclusion Call("len", array(*val_1)), n_1
+      conclusion Call("len", array(*val_1)), IntVal(n_1)
 
     rule "E-builtin-concat":
       conclusion Call("concat", `array`(*val_1), val_2), `array`(...val_1, val_2)
@@ -793,10 +793,10 @@ const lang* = language:
 
     rule "E-tuple-loc-access":
       let val_1 = C_1.locs(z_1)
-      conclusion C_1, E_1[L_1[FieldAccess(z_1, n_1)]], C_1, E_1[L_1[FieldAccess(val_1, n_1)]]
+      conclusion C_1, E_1[L_1[FieldAccess(z_1, IntVal(n_1))]], C_1, E_1[L_1[FieldAccess(val_1, IntVal(n_1))]]
     rule "E-at-loc":
       let val_1 = C_1.locs(z_1)
-      conclusion C_1, E_1[L_1[At(z_1, n_1)]], C_1, E_1[L_1[At(val_1, n_1)]]
+      conclusion C_1, E_1[L_1[At(z_1, IntVal(n_1))]], C_1, E_1[L_1[At(val_1, IntVal(n_1))]]
 
     rule "E-return":
       let val_2 = copy(C_1, val_1)
