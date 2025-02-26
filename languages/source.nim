@@ -215,7 +215,7 @@ const lang* = language:
       condition ...(typ_1 != VoidTy())
       conclusion C_1, SeqTy(texpr_1), SeqTy(typ_1)
 
-  def built_in,
+  def builtIn,
     {"==", "<=", "<", "+", "-", "*", "div", "mod", "true", "false", "write",
      "writeErr", "readFile"}
 
@@ -586,12 +586,6 @@ const lang* = language:
     #       a bit more detail nonetheless
     ##
 
-  function len, (val) -> z:
-    ## Computes the number of elements in an array value.
-    case _
-    of `array`(): 0
-    of `array`(val_1, *val_2): 1 + len(...val_2)
-
   ## Evaluation Contexts
   ## ~~~~~~~~~~~~~~~~~~~
 
@@ -652,15 +646,15 @@ const lang* = language:
       condition 0 <= n_1
       condition n_1 < len(val_1)
       let val_2 = val_1[n_1]
-      conclusion At(val_1, n_1), val_2
+      conclusion At(array(*val_1), n_1), val_2
 
     rule "E-at-out-of-bounds":
       condition n_1 < 0 or len(val_1) <= n_1
-      conclusion At(val_1, n_1), Unreachable()
+      conclusion At(array(*val_1), n_1), Unreachable()
 
     rule "E-with-out-of-bounds":
       condition n_1 < 0 or len(val_1) <= n_1
-      conclusion With(val_1, n_1, val_2), Unreachable()
+      conclusion With(array(*val_1), n_1, val_2), Unreachable()
 
     rule "E-add-int":
       let n_3 = addInt(n_1, n_2)
@@ -716,7 +710,7 @@ const lang* = language:
 
     rule "E-builtin-len":
       let n_1 = len(val_1)
-      conclusion Call("len", val_1), n_1
+      conclusion Call("len", array(*val_1)), n_1
 
     rule "E-builtin-concat":
       conclusion Call("concat", `array`(*val_1), val_2), `array`(...val_1, val_2)
