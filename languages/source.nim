@@ -206,8 +206,8 @@ const lang* = language:
     rule "S-union-type":
       premise ...ttypes(C_1, texpr_1, typ_1)
       condition ...(typ_1 != VoidTy())
-      condition len(set(typ_1)) == len(typ_1) # there must be no duplicate types
-      conclusion C_1, UnionTy(+texpr_1), TupleTy(typ_1)
+      condition uniqueTypes(typ_1) # there must be no duplicate types
+      conclusion C_1, UnionTy(+texpr_1), UnionTy(...typ_1)
 
     rule "S-proc-type":
       premise ttypes(C_1, texpr_1, typ_1)
@@ -869,3 +869,14 @@ const lang* = language:
         contains(typ_2, typ_3)
     of _:
       false
+
+  function uniqueTypes, *typ -> bool:
+    ## Computes whether all types in the list are unique.
+    case _
+    of [typ_1, +typ_2]:
+      if not contains(typ_2, typ_1):
+        uniqueTypes(typ_2)
+      else:
+        false
+    of _:
+      true
