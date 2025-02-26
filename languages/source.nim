@@ -177,9 +177,12 @@ const lang* = language:
     ## is not total, as not all two types have a common ancestor type.
     case _
     of typ_1, typ_2:
-      if typ_1 == typ_2:   typ_1
-      elif typ_1 <: typ_2: typ_2
-      elif typ_2 <: typ_1: typ_1
+      if typ_1 == typ_2:     typ_1
+      else:
+        if typ_1 <: typ_2:   typ_2
+        else:
+          if typ_2 <: typ_1: typ_1
+          else:              fail # no common type
 
   inductive ttypes(inp C, inp texpr, out typ):
     axiom "S-void-type",        C, VoidTy(),  VoidTy()
