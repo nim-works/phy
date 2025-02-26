@@ -135,18 +135,24 @@ const lang* = language:
       condition typ_1 in typ_2
       conclusion typ_1, UnionTy(+typ_2)
 
-  inductive `==`(inp typ, inp typ):
+  function `==`, (typ, typ) -> bool:
     ## Except for union types, all type equality uses *structural equality*.
-    axiom "", typ, typ # same structure, equal type
-    rule "union":
-      # order of types is not significant
-      condition set(typ_1) == set(typ_2)
-      conclusion UnionTy(+typ_1), UnionTy(+typ_2)
+    case _
+    of UnionTy(+typ_1), UnionTy(+typ_2):
+      if (for typ_3 in typ_1: contains(typ_2, typ_3)):
+        if (for typ_3 in typ_2: contains(typ_1, typ_3)):
+          true
+        else:
+          false
+      else:
+        false
+    of typ_1, typ_2:
+      same(typ_1, typ_2) # same structure, equal type
 
-  inductive `!=`(inp typ, inp typ):
-    rule "":
-      condition not(typ_1 == typ_2)
-      conclusion typ_1, typ_2
+  function `!=`, (typ, typ) -> bool:
+    case _
+    of typ_1, typ_2:
+      not(typ_1 == typ_2)
 
   inductive `<:=`(inp typ, inp typ):
     ## :math:`<:=` is the "sub or equal type" operator.
@@ -835,3 +841,23 @@ const lang* = language:
     # ^^ progress. That is, a valid expression is either an irreducible value,
     # or it must be reducible
     ]#
+
+  # ------------
+  # boilerplate functions that should rather not exist
+
+  function `not`, bool -> bool:
+    case _
+    of true: false
+    of false: true
+
+  # XXX: the built-in `in` function should consider the custom equality
+  #      operator, which would render `contains` obsolete
+  function contains, (*typ, typ) -> bool:
+    case _
+    of [typ_1, *typ_2], typ_3:
+      if typ_1 == typ_3:
+        true
+      else:
+        contains(typ_2, typ_3)
+    of _:
+      false
