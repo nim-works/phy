@@ -194,9 +194,9 @@ const lang* = language:
     axiom "S-empty-tuple-type", C, TupleTy(), UnitTy()
 
     rule "S-type-ident":
-      condition x_1 in C_1.symbols
-      where type(typ_1), C_1.symbols(x_1)
-      conclusion C_1, x_1, typ_1
+      condition string_1 in C_1.symbols
+      where type(typ_1), C_1.symbols(string_1)
+      conclusion C_1, Ident(string_1), typ_1
 
     rule "S-tuple-type":
       premise ...ttypes(C_1, texpr_1, typ_1)
@@ -244,10 +244,10 @@ const lang* = language:
     axiom "S-unreachable", C, Unreachable(), VoidTy()
 
     rule "S-identifier":
-      condition x_1 in C_1.symbols
-      where typ_1, C_1.symbols(x_1)
+      condition string_1 in C_1.symbols
+      let typ_1 = C_1.symbols(string_1)
       where !type(any), typ_1 # normal identifiers don't bind types
-      conclusion C_1, x_1, typ_1
+      conclusion C_1, Ident(string_1), typ_1
 
     rule "S-tuple":
       premise ...mtypes(C_1, e_1, typ_1)
