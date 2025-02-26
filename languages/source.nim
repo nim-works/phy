@@ -616,7 +616,14 @@ const lang* = language:
   # TODO: the floating-point operations need to be defined according to the
   #       IEEE 754.2008 standard
 
-  function copy, (C, val) -> val:
+  record DC, {locs: (z -> val),
+              time: z,
+              output: val,
+              errOutput: val,
+              files: ((string, z) -> val)} # name + time -> content
+  ## `DC` is the dynamic context
+
+  function copy, (DC, val) -> val:
     ## The `copy` function takes a context and value and maps them to a value
     ## that is neither a location nor contains any.
     case _
@@ -765,26 +772,26 @@ const lang* = language:
       where e_2, substitute(e_1, ...[x_1, val_2])
       conclusion Call(val_1, *val_2), Frame(typ_r, e_2)
 
-  inductive reducesTo(inp C, inp e, out C, out e):
+  inductive reducesTo(inp DC, inp e, out DC, out e):
     rule "E-tuple-cons":
-      where +val_2, ...copy(C_1, val_1)
-      conclusion C_1, TupleCons(+val_1), C_1, `tuple`(...val_2)
+      where +val_2, ...copy(DC_1, val_1)
+      conclusion DC_1, TupleCons(+val_1), DC_1, `tuple`(...val_2)
 
     rule "E-seq-cons":
-      where +val_2, ...copy(C_1, val_1)
-      conclusion C_1, Seq(typ, val_1), C_1, `array`(...val_2)
+      where +val_2, ...copy(DC_1, val_1)
+      conclusion DC_1, Seq(typ, val_1), DC_1, `array`(...val_2)
 
     rule "E-string-cons":
       where (*val_1,), utf8Bytes(string_1)
       # FIXME: doesn't need to be an impure reduction
-      conclusion C_1, Seq(StringVal(string_1)), C_1, `array`(...val_1)
+      conclusion DC_1, Seq(StringVal(string_1)), DC_1, `array`(...val_1)
 
     rule "E-let-introduce":
-      exists z_1, z_1 notin C_1.locs
+      exists z_1, z_1 notin DC_1.locs
       let val_2 = copy(DC_1, val_1)
-      let C_2 = C_1 + C(locs: {z_1 : val_2})
+      let DC_2 = DC_1 + DC(locs: {z_1 : val_2})
       let e_2 = substitute(e_1, x_1, loc(z_1))
-      conclusion C_1, Let(x_1, val_1, e_1), C_2, e_2
+      conclusion DC_1, Let(x_1, val_1, e_1), DC_2, e_2
     # TODO: the location needs to be removed from the execution context once
     #       `e_2` is reduced to a value, otherwise it remains accessible. This
     #       is not a problem at the moment, but it will be once there are
@@ -796,57 +803,57 @@ const lang* = language:
       condition 0 <= n_1
       condition n_1 < len(val_1)
       let val_3 = val_1[n_1]
-      conclusion C_1, With(val_1, n_1, val_2), C_1, val_3
+      conclusion DC_1, With(val_1, n_1, val_2), DC_1, val_3
 
     rule "E-asgn":
-      let C_2 = C_1 + C(locs: {z_1 : val_1})
-      conclusion C_1, Asgn(z_1, val_1), C_2, TupleCons()
+      let DC_2 = DC_1 + DC(locs: {z_1 : val_1})
+      conclusion DC_1, Asgn(z_1, val_1), DC_2, TupleCons()
 
     rule "E-builtin-write":
-      where `array`(*val_2), C_1.output
-      let C_2 = C_1 + C(output: `array`(...val_2, ...val_1))
-      conclusion C_1, Call(Ident("write"), `array`(*val_1)), C_2, TupleCons()
+      where `array`(*val_2), DC_1.output
+      let DC_2 = DC_1 + DC(output: array(...val_2, ...val_1))
+      conclusion DC_1, Call(Ident("write"), array(*val_1)), DC_2, TupleCons()
 
     rule "E-builtin-writeErr":
-      where `array`(*val_2), C_1.errOutput
-      where C_2, C_1 + C(errOutput: `array`(...val_2, ...val_1))
-      conclusion C_1, Call(Ident("writeErr"), val_1), C_2, TupleCons()
+      where `array`(*val_2), DC_1.errOutput
+      where DC_2, DC_1 + DC(errOutput: array(...val_2, ...val_1))
+      conclusion DC_1, Call(Ident("writeErr"), val_1), DC_2, TupleCons()
 
     rule "E-builtin-readFile":
       # the extra time parameter is used to model the fact that the file
       # access doesn't always yield the same result, even when the program
       # does nothing
-      where val_2, C_1.files(val_1, C_1.time)
+      where val_2, DC_1.files(val_1, DC_1.time)
       where `array`(*ch), val_2
-      where n_1, C_1.time + 1
-      where C_2, C_1 + {"time": n_1}
-      conclusion C_1, Call(Ident("readFile"), val_1), C_2, val_2
+      where n_1, DC_1.time + 1
+      where DC_2, DC_1 + DC(time: n_1)
+      conclusion DC_1, Call(Ident("readFile"), val_1), DC_2, val_2
 
-  inductive step(inp C, inp e, out C, out e):
+  inductive step(inp DC, inp e, out DC, out e):
     rule "E-reduce-pure":
       premise pReducesTo(e_1, e_2)
-      conclusion C_1, E_1[e_1], C_1, E_1[e_2]
+      conclusion DC_1, E_1[e_1], DC_1, E_1[e_2]
 
     rule "E-reduce-impure":
-      premise reducesTo(C_1, e_1, C_2, e_2)
-      conclusion C_1, E_1[e_1], C_2, E_1[e_2]
+      premise reducesTo(DC_1, e_1, DC_2, e_2)
+      conclusion DC_1, E_1[e_1], DC_2, E_1[e_2]
 
     rule "E-tuple-loc-access":
-      let val_1 = C_1.locs(z_1)
-      conclusion C_1, E_1[L_1[FieldAccess(z_1, IntVal(n_1))]], C_1, E_1[L_1[FieldAccess(val_1, IntVal(n_1))]]
+      let val_1 = DC_1.locs(z_1)
+      conclusion DC_1, E_1[L_1[FieldAccess(z_1, IntVal(n_1))]], DC_1, E_1[L_1[FieldAccess(val_1, IntVal(n_1))]]
     rule "E-at-loc":
-      let val_1 = C_1.locs(z_1)
-      conclusion C_1, E_1[L_1[At(z_1, IntVal(n_1))]], C_1, E_1[L_1[At(val_1, IntVal(n_1))]]
+      let val_1 = DC_1.locs(z_1)
+      conclusion DC_1, E_1[L_1[At(z_1, IntVal(n_1))]], DC_1, E_1[L_1[At(val_1, IntVal(n_1))]]
 
     rule "E-return":
-      let val_2 = copy(C_1, val_1)
-      conclusion C_1, B_1[Frame(typ, E_1[Return(val_1)])], C_1, B_1[val_2]
+      let val_2 = copy(DC_1, val_1)
+      conclusion DC_1, B_1[Frame(typ, E_1[Return(val_1)])], DC_1, B_1[val_2]
     rule "E-return-unit":
-      conclusion C_1, B_1[Frame(typ, E_1[Return()])], C_1, B_1[TupleCons()]
+      conclusion DC_1, B_1[Frame(typ, E_1[Return()])], DC_1, B_1[TupleCons()]
 
     rule "E-unreachable":
       condition B_1 != ()
-      conclusion C_1, B_1[Unreachable()], C_1, Unreachable()
+      conclusion DC_1, B_1[Unreachable()], DC_1, Unreachable()
 
     # XXX: theorem support is not implemented...
     #[
