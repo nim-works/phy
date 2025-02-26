@@ -119,7 +119,7 @@ const lang* = language:
   ## Type Relations
   ## --------------
 
-  inductive `<:`(inp typ, inp typ), "$1 <: $2":
+  inductive `<:`(inp typ, inp typ):
     ## :math:`<:` is the subtype relationship operator. :math:`a <: b` means
     ## ":math:`a` is a subtype of :math:`b`"
     rule "void":
@@ -133,7 +133,7 @@ const lang* = language:
       condition typ_1 in typ_2
       conclusion typ_1, UnionTy(*typ_2)
 
-  inductive `==`(inp typ, inp typ), "$1 = $2":
+  inductive `==`(inp typ, inp typ):
     ## Except for union types, all type equality uses *structural equality*.
     axiom "", typ, typ # same structure, equal type
     rule "union":
@@ -141,12 +141,12 @@ const lang* = language:
       condition set(typ_1) == set(typ_2)
       conclusion UnionTy(+typ_1), UnionTy(+typ_2)
 
-  inductive `!=`(inp typ, inp typ), "":
+  inductive `!=`(inp typ, inp typ):
     rule "":
       condition not(typ_1 == typ_2)
       conclusion typ_1, typ_2
 
-  inductive `<:=`(inp typ, inp typ), "$1 <:= $2":
+  inductive `<:=`(inp typ, inp typ):
     ## :math:`<:=` is the "sub or equal type" operator.
     rule "equal":
       condition typ_1 == typ_2
@@ -179,7 +179,7 @@ const lang* = language:
       elif typ_1 <: typ_2: typ_2
       elif typ_2 <: typ_1: typ_1
 
-  inductive ttypes(inp C, inp texpr, out typ), "$1 \\vdash_{\\tau} $2 : $3":
+  inductive ttypes(inp C, inp texpr, out typ):
     axiom "S-void-type",        C, VoidTy(),  VoidTy()
     axiom "S-unit-type",        C, UnitTy(),  UnitTy()
     axiom "S-bool-type",        C, BoolTy(),  BoolTy()
@@ -219,7 +219,7 @@ const lang* = language:
     {"==", "<=", "<", "+", "-", "*", "div", "mod", "true", "false", "write",
      "writeErr", "readFile"}
 
-  inductive types(inp C, inp e, out typ), "$1 \\vdash $2 : $3":
+  inductive types(inp C, inp e, out typ):
     axiom "S-int",   C, n, IntTy()
     axiom "S-float", C, r, FloatTy()
     axiom "S-false", C, false, BoolTy()
@@ -424,7 +424,7 @@ const lang* = language:
       condition typ_2 <:= typ_3
       conclusion C_1, With(e_1, n_1, e_2), typ_3
 
-  inductive toplevel(inp C, inp decl, out C), "$1 \\vdash $2 \\Rightarrow $3":
+  inductive toplevel(inp C, inp decl, out C):
     rule "S-type-decl":
       premise ttypes(C_1, e_1, typ_1)
       where C_2, C_1 + {"symbols": {x_1: type(typ_1)}}
@@ -630,7 +630,7 @@ const lang* = language:
   ## Reductions and Steps
   ## ~~~~~~~~~~~~~~~~~~~~
 
-  inductive pReducesTo(inp e, out e), "$1 ~~> $2":
+  inductive pReducesTo(inp e, out e):
     # pure reductions, that is, reductions not dependent on the execution
     # context
     axiom "E-exprs-fold", Exprs(val_1), val_1
@@ -729,7 +729,7 @@ const lang* = language:
       where e_2, substitute(e_1, ...[x_1, val_2])
       conclusion Call(val_1, *val_2), Frame(typ_r, e_2)
 
-  inductive reducesTo(inp C, inp e, out C, out e), "$1; $2 ~~> $3; $4":
+  inductive reducesTo(inp C, inp e, out C, out e):
     rule "E-tuple-cons":
       where +val_2, ...copy(C_1, val_1)
       conclusion C_1, TupleCons(+val_1), C_1, `tuple`(...val_2)
@@ -786,7 +786,7 @@ const lang* = language:
       where C_2, C_1 + {"time": n_1}
       conclusion C_1, Call("readFile", val_1), C_2, val_2
 
-  inductive step(inp C, inp e, out C, out e), "$1; $2 \\rightarrow $3; $4":
+  inductive step(inp C, inp e, out C, out e):
     rule "E-reduce-pure":
       premise pReducesTo(e_1, e_2)
       conclusion C_1, E_1[e_1], C_1, E_1[e_2]
