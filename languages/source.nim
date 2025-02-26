@@ -721,11 +721,6 @@ const lang* = language:
     rule "E-builtin-concat":
       conclusion Call("concat", `array`(*val_1), val_2), `array`(...val_1, val_2)
 
-    rule "E-builtin-readFile":
-      exists val_1, z_1,
-        val_1 is array and val_1(z_1) is ch
-      conclusion Call("readFile", val), val_1
-
     rule "E-call-reduce":
       # the call is replaced with the procedure's body (in which all
       # occurrences of the parameters were substituted with a copy of the
@@ -780,6 +775,16 @@ const lang* = language:
       where `array`(*val_2), C_1.errOutput
       where C_2, C_1 + C(errOutput: `array`(...val_2, ...val_1))
       conclusion C_1, Call("writeErr", val_1), C_2, TupleCons()
+
+    rule "E-builtin-readFile":
+      # the extra time parameter is used to model the fact that the file
+      # access doesn't always yield the same result, even when the program
+      # does nothing
+      where val_2, C_1.files(val_1, C_1.time)
+      where `array`(*ch), val_2
+      where n_1, C_1.time + 1
+      where C_2, C_1 + {"time": n_1}
+      conclusion C_1, Call("readFile", val_1), C_2, val_2
 
   inductive step(inp C, inp e, out C, out e), "$1; $2 \\rightarrow $3; $4":
     rule "E-reduce-pure":
