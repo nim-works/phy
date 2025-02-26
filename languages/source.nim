@@ -98,7 +98,7 @@ const lang* = language:
 
   subtype le, e:
     # Lvalue expression with all non-lvalue operands already evaluated.
-    l
+    loc(z)
     FieldAccess(le, IntVal(n))
     At(le, IntVal(n))
 
@@ -628,8 +628,8 @@ const lang* = language:
     ## The `copy` function takes a context and value and maps them to a value
     ## that is neither a location nor contains any.
     case _
-    of DC_1, l_1: copy(DC_1, DC_1.locs(l_1))
-    of DC, val_1: val_1
+    of DC_1, loc(z_1): copy(DC_1, DC_1.locs(z_1))
+    of DC, val_1:      val_1
 
   function utf8Bytes, string -> *z:
     # TODO: the function is mostly self-explanatory, but it should be defined in
@@ -812,7 +812,7 @@ const lang* = language:
 
     rule "E-asgn":
       let DC_2 = DC_1 + DC(locs: {z_1 : val_1})
-      conclusion DC_1, Asgn(z_1, val_1), DC_2, TupleCons()
+      conclusion DC_1, Asgn(loc(z_1), val_1), DC_2, TupleCons()
 
     rule "E-builtin-write":
       where `array`(*val_2), DC_1.output
@@ -845,10 +845,10 @@ const lang* = language:
 
     rule "E-tuple-loc-access":
       let val_1 = DC_1.locs(z_1)
-      conclusion DC_1, E_1[L_1[FieldAccess(z_1, IntVal(n_1))]], DC_1, E_1[L_1[FieldAccess(val_1, IntVal(n_1))]]
+      conclusion DC_1, E_1[L_1[FieldAccess(loc(z_1), IntVal(n_1))]], DC_1, E_1[L_1[FieldAccess(val_1, IntVal(n_1))]]
     rule "E-at-loc":
       let val_1 = DC_1.locs(z_1)
-      conclusion DC_1, E_1[L_1[At(z_1, IntVal(n_1))]], DC_1, E_1[L_1[At(val_1, IntVal(n_1))]]
+      conclusion DC_1, E_1[L_1[At(loc(z_1), IntVal(n_1))]], DC_1, E_1[L_1[At(val_1, IntVal(n_1))]]
 
     rule "E-return":
       let val_2 = copy(DC_1, val_1)
