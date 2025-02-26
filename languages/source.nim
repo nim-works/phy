@@ -20,6 +20,7 @@ const lang* = language:
   typ ident: Ident(string)
   alias x, ident
   typ expr:
+    Ident(string)
     IntVal(z)
     FloatVal(r)
     TupleCons(*expr)
