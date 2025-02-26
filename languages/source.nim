@@ -169,7 +169,7 @@ const lang* = language:
   ## The language's static semantics consist of typing judgements, relating a
   ## symbol context and abstract syntax expression to a type.
 
-  record C, (symbols: (loc -> typ), ret: typ)
+  record C, (symbols: (string -> typ), ret: typ)
   ## :math:`C` is the symbol environment.
 
   context All:
