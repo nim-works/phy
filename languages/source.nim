@@ -11,7 +11,7 @@
 ## of the implementation. This'll be fixed eventually.
 
 import
-  spec/[langdefs, types]
+  spec/[langdefs]
 
 const lang* = language:
   alias n, z
