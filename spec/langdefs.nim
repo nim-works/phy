@@ -882,7 +882,7 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
     let typ = c.newTypeVar(n)
     for it in n.items:
       let term = recurse(it)
-      check(c, term.typ, typ, it)
+      check(c, typ, term.typ, it)
       result.add term
     # typed as a map from the set element to a boolean
     result.typ = fntype(typ, Type(kind: tkBool))
@@ -895,9 +895,9 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
     for it in n.items:
       it.expectKind nnkExprColonExpr
       let k = recurse(it[0])
-      check(c, k.typ, key, it[0])
+      check(c, key, k.typ, it[0])
       let v = recurse(it[1])
-      check(c, v.typ, val, it[1])
+      check(c, val, v.typ, it[1])
       result.add tree(nkAssoc, k, v)
     result.typ = fntype(key, val)
   of nnkStmtList, nnkStmtListExpr:
