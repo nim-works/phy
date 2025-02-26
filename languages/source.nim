@@ -24,8 +24,7 @@ const lang* = language:
     FloatVal(r)
     TupleCons(*expr)
     Seq(texpr, *expr)
-    StringVal(string)
-    Seq(StringVal(symbol))
+    Seq(StringVal(string))
     Call(+expr)
     FieldAccess(expr, IntVal(z))
     At(expr, expr)
@@ -735,9 +734,9 @@ const lang* = language:
       conclusion C_1, Seq(typ, val_1), C_1, `array`(...val_2)
 
     rule "E-string-cons":
-      where (*val_1,), utf8Bytes(x_1)
+      where (*val_1,), utf8Bytes(string_1)
       # FIXME: doesn't need to be an impure reduction
-      conclusion C_1, Seq(StringVal(x_1)), C_1, `array`(...val_1)
+      conclusion C_1, Seq(StringVal(string_1)), C_1, `array`(...val_1)
 
     rule "E-let-introduce":
       exists z_1, z_1 notin C_1.locs
