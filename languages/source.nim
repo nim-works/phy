@@ -273,14 +273,14 @@ const lang* = language:
 
     rule "S-field":
       premise types(C_1, e_1, typ_1)
-      where TupleTy(+any), typ_1
-      where typ_2, typ_1[n_1]
+      where TupleTy(+typ_3), typ_1
+      where typ_2, typ_3[n_1]
       conclusion C_1, FieldAccess(e_1, IntVal(n_1)), typ_2
 
     rule "S-mut-field":
       premise types(C_1, e_1, mut(typ_1))
-      where TupleTy(+any), typ_1
-      where typ_2, typ_1[n_1]
+      where TupleTy(+typ_3), typ_1
+      where typ_2, typ_3[n_1]
       conclusion C_1, FieldAccess(e_1, IntVal(n_1)), mut(typ_2)
 
     rule "S-at":
@@ -443,8 +443,8 @@ const lang* = language:
     rule "S-tuple-with":
       premise mtypes(C_1, e_1, typ_1)
       premise mtypes(C_1, e_2, typ_2)
-      where TupleTy(+typ), typ_1
-      where typ_3, typ_1[n_1]
+      where TupleTy(+typ_4), typ_1
+      where typ_3, typ_4[n_1]
       condition typ_2 <:= typ_3
       conclusion C_1, With(e_1, n_1, e_2), typ_3
 
@@ -685,8 +685,8 @@ const lang* = language:
     axiom "E-while", While(e_1, e_2), If(e_1, Exprs(e_2, While(e_1, e_2)), TupleCons())
 
     rule "E-tuple-access":
-      where `tuple`(+val), val_1
-      where val_2, val_1[n_1]
+      where `tuple`(+val_3), val_1
+      where val_2, val_3[n_1]
       conclusion FieldAccess(val_1, IntVal(n_1)), val_2
 
     axiom "E-field-asgn", Asgn(FieldAccess(le_1, IntVal(n_1)), val_1), Asgn(le_1, With(le_1, n_1, val_1))
