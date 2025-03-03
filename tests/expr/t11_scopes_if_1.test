@@ -1,6 +1,6 @@
 discard """
   description: "Both If branches are part of their own scope"
-  output: "100: int"
+  output: "100 : (IntTy)"
 """
 (If (Ident "true")
   (Exprs

@@ -1,5 +1,5 @@
 discard """
-  output: "10.5: float"
+  output: "10.5 : (FloatTy)"
 """
 (FieldAccess
   (TupleCons (IntVal 100) (FloatVal 10.5))

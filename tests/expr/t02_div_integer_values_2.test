@@ -1,5 +1,5 @@
 discard """
   description: "'div' rounds towards zero"
-  output: "2: int"
+  output: "2 : (IntTy)"
 """
 (Call (Ident "div") (IntVal 7) (IntVal 3))

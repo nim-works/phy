@@ -1,4 +1,4 @@
 discard """
-  output: "runtime error: ecUnreachable"
+  output: "(Unreachable) : (IntTy)"
 """
 (Call (Ident "div") (IntVal 1) (IntVal 0))

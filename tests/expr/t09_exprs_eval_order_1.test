@@ -3,7 +3,7 @@ discard """
     The first expression in a list has its effects computed first, then the
     second, etc.
   "
-  output: "104: int"
+  output: "104 : (IntTy)"
 """
 (Exprs
   (Decl (Ident "x") (IntVal 100))

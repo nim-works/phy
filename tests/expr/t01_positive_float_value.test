@@ -1,4 +1,4 @@
 discard """
-  output: "1.5: float"
+  output: "1.5 : (FloatTy)"
 """
 (FloatVal 1.5)

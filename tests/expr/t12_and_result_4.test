@@ -1,4 +1,4 @@
 discard """
-  output: "false: bool"
+  output: "(False) : (BoolTy)"
 """
 (And (Ident "false") (Ident "false"))

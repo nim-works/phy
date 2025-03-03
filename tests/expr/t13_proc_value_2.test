@@ -1,5 +1,5 @@
 discard """
-  output: "...: proc() -> void"
+  output: "(proc ...) : (ProcTy (VoidTy))"
 """
 (Module
   (ProcDecl (Ident "p") (VoidTy) (Params)

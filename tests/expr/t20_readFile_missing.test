@@ -1,5 +1,5 @@
 discard """
   description: "Reading from a non-existent file produces an empty sequence"
-  output: "[]: seq(char)"
+  output: "(array) : (SeqTy (CharTy))"
 """
 (Call readFile (Seq "doesn't exist"))

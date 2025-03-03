@@ -1,5 +1,5 @@
 discard """
-  output: "1.0: float"
+  output: "1.0 : (FloatTy)"
 """
 (ProcDecl (Ident "a") (FloatTy) (Params)
   (Return (FloatVal 1.0)))

@@ -1,4 +1,4 @@
 discard """
-  output: "-1: int"
+  output: "-1 : (IntTy)"
 """
 (If (Ident "false") (IntVal 1) (IntVal -1))

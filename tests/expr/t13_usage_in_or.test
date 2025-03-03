@@ -1,6 +1,6 @@
 discard """
   description: "Make sure a local can be used as both `Or` operands"
-  output: "false: bool"
+  output: "(False) : (BoolTy)"
 """
 (Exprs
   (Decl (Ident "a") (Ident "false"))

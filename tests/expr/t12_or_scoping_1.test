@@ -3,7 +3,7 @@ discard """
     Declarations in the first operand expression are visible to the `Or`s
     second operand.
   "
-  output: "true: bool"
+  output: "(True) : (BoolTy)"
 """
 (Exprs
   (Or

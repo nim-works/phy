@@ -1,4 +1,4 @@
 discard """
-  output: "3: int"
+  output: "3 : (IntTy)"
 """
 (Call (Ident "+") (IntVal 1) (IntVal 2))

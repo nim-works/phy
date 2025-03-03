@@ -3,7 +3,7 @@ discard """
     The body is evaluated repeatedly, as long as the condition evaluates
     to true
   "
-  output: "10: int"
+  output: "10 : (IntTy)"
 """
 (Exprs
   (Decl (Ident "repeat") (Ident "true"))

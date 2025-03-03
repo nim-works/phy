@@ -1,5 +1,5 @@
 discard """
   description: "An if-then with void typed body is still a unit"
-  output: "(): unit"
+  output: "(TupleCons) : (UnitTy)"
 """
 (If (Ident "false") (Unreachable))

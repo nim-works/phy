@@ -1,5 +1,5 @@
 discard """
-  output: "true: bool"
+  output: "(True) : (BoolTy)"
 """
 (Module
   (ProcDecl (Ident "a") (BoolTy) (Params)

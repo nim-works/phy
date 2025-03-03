@@ -1,5 +1,5 @@
 discard """
-  output: "100: int"
+  output: "100 : (IntTy)"
 """
 (Module
   (TypeDecl (Ident "int") (IntTy))

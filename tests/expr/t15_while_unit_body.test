@@ -1,5 +1,5 @@
 discard """
-  output: "(): unit"
+  output: "(TupleCons) : (UnitTy)"
 """
 (While (Ident "false")
   (TupleCons))
