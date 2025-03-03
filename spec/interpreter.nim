@@ -507,8 +507,8 @@ proc interpret(c; lang; n: Node, then: Next): Node =
   # for reasons of efficiency (and to keep recursion in check), evaluation of
   # some intermediate results does not use CPS, meaning that any plug pattern
   # matching within wouldn't work. In general, the same continuation may be
-  # invoked multiple and thus their output value must only depend on immediate
-  # inputs (or immutable captures)
+  # invoked multiple times and thus their output value must only depend on
+  # immediate inputs (or immutable captures)
   case n.kind
   of nkFail:
     raise Failure.newException("")

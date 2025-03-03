@@ -144,6 +144,8 @@ Patterns are made up of constructions, type names, and binders. They also
 support matching of repetitions via `*x` (zero or more) and `+x` (one or more)
 within data type constructions.
 
+### Bindings
+
 Within a pattern context, suffixing the name of a type with a `_x` (where `x`
 can be any number of identifier not including an underscore) introduces a
 named binding.
