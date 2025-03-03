@@ -10,6 +10,9 @@ import
     streams,
     strutils
   ],
+  experimental/[
+    sexp
+  ],
   generated/[
     lang0_checks,
     lang1_checks,
@@ -41,6 +44,7 @@ import
     default_reporting,
     host_impl,
     tree_parser,
+    type_rendering,
     types,
     vmexec
   ],
@@ -402,7 +406,9 @@ proc main(args: openArray[string]) =
         let cl = HostEnv(outStream: newFileStream(stdout),
                          errStream: newFileStream(stderr))
         # we have type high-level type information
-        stdout.write run(env, stack, entry.unsafeGet, typ, cl)
+        stdout.write $run(env, stack, entry.unsafeGet, typ, cl)
+        stdout.write " : "
+        stdout.write $typeToSexp(typ)
       else:
         # program arguments are only supported for non-source-language
         # programs at the moment
