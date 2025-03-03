@@ -108,7 +108,7 @@ type
     ## The full and self-contained description of a language.
     types*: seq[Type]
       ## all meta-language types reference from nodes
-    names*: Table[int, string]
+    names*: Table[TypeId, string]
       ## names given to types
     functions*: seq[Function[TypeId]]
     relations*: seq[Relation[TypeId]]

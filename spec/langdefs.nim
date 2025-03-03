@@ -1757,6 +1757,14 @@ macro language*(body: untyped): Language =
   lang.functions.convertFrom(c.functions, map, lang.types)
   lang.relations.convertFrom(c.relations, map, lang.types)
   lang.matchers.convertFrom(c.matchers, map, lang.types)
+
+  # populate the names table:
+  for name, sym in c.lookup.pairs:
+    if sym.kind == skType:
+      var id: types.TypeId
+      convertFrom(id, sym.typ, map, lang.types)
+      lang.names[id] = name
+
   result = newLit(lang)
 
 macro term*(x: untyped): TNode =
