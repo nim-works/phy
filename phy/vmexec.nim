@@ -3,11 +3,12 @@
 
 import
   std/[
-    options,
-    strutils
+    options
+  ],
+  experimental/[
+    sexp
   ],
   phy/[
-    type_rendering,
     types
   ],
   vm/[
@@ -27,94 +28,79 @@ type
     stackStart*: uint
     stackSize*: uint
 
+proc newCons(name: sink string): SexpNode =
+  newSList(@[newSSymbol(name)])
+
+proc newCons(name: sink string, elem: sink SexpNode): SexpNode =
+  newSList(@[newSSymbol(name), elem])
+
 proc readInt(p: HostPointer, size: range[1..8]): int64 =
   copyMem(addr result, p, size)
 
 proc readFloat64(p: HostPointer): float64 =
   copyMem(addr result, p, 8)
 
-proc primToString(v: Value, typ: SemType): string =
-  ## Renders the primitive value `v` of `typ` type to a string.
+proc primToSexp(v: Value, typ: SemType): SexpNode =
+  ## Renders the primitive value `v` of `typ` type to an S-expression.
   case typ.kind
-  of tkVoid:
-    # this is nonsense ('void' has no value), but it's allowed for
-    # convenience
-    ""
   of tkUnit:
-    "()"
+    newCons("TupleCons")
   of tkBool:
     case v.intVal
-    of 0: "false"
-    of 1: "true"
-    else: "unknown(" & $v.intVal & ")"
+    of 0: newCons("False")
+    of 1: newCons("True")
+    else: newCons("Error", newSInt(v.intVal))
   of tkChar:
-    case v.intVal
-    of ord('\n'):       "'\\n'"
-    of ord('\r'):       "'\\r'"
-    of ord('\''):       "'\\''"
-    of ord('\\'):       "'\\\\'"
-    of 32..38, 40..91, 93..127:
-      "'" & $char(v.intVal) & "'"
-    else:
-      "'\\x" & toHex(v.intVal, 2) & "'"
+    newCons("char", newSInt(v.intVal))
   of tkInt:
-    $v.intVal
+    newSInt(v.intVal)
   of tkFloat:
-    $v.floatVal
-  of ComplexTypes, tkError:
+    newSFloat(v.floatVal)
+  of ComplexTypes, tkError, tkVoid:
     unreachable()
 
-proc valueToString(env: var VmEnv, a: VirtualAddr, typ: SemType): string =
-  ## Reads a value of the given `typ` from memory location at `a` and renders
-  ## it to a string. The address is validated first.
+proc valueToSexp(env: var VmEnv, a: VirtualAddr, typ: SemType): SexpNode =
+  ## Reads a value of the given `typ` from memory location at `a` returns its
+  ## S-expression representation. The address is validated first.
   var p: HostPointer
   if checkmem(env.allocator, a, uint64 size(typ), p):
-    return "<inaccessible: " & $cast[uint](a) & ">"
+    return newCons("Error", newSString("inaccessible: " & $cast[uint](a) & ">"))
 
   case typ.kind
   of tkUnit:
-    result = "()"
+    result = newCons("TupleCons")
   of tkBool:
-    result = primToString(Value(readInt(p, 1)), typ)
+    result = primToSexp(Value(readInt(p, 1)), typ)
   of tkChar:
-    result = primToString(Value(readInt(p, 1)), typ)
+    result = primToSexp(Value(readInt(p, 1)), typ)
   of tkInt:
-    result = $readInt(p, 8)
+    result = primToSexp(Value(readInt(p, 8)), typ)
   of tkFloat:
-    result = $readFloat64(p)
+    result = primToSexp(cast[Value](readFloat64(p)), typ)
   of tkTuple:
-    result = "("
+    result = newCons("TupleCons")
     var offset = 0
     for i, it in typ.elems.pairs:
-      if i > 0:
-        result.add ", "
-      result.add valueToString(env, VirtualAddr(a.uint64 + offset.uint64), it)
+      result.add valueToSexp(env, VirtualAddr(a.uint64 + offset.uint64), it)
       offset += size(it)
-
-    if typ.elems.len == 1:
-      result.add ","
-    result.add ")"
   of tkUnion:
     let tag = readInt(p, 8)
     if tag in 0..typ.elems.high:
-      result = valueToString(env, VirtualAddr(a.uint64 + 8), typ.elems[tag])
+      result = valueToSexp(env, VirtualAddr(a.uint64 + 8), typ.elems[tag])
     else:
-      result = "<invalid tag: " & $tag & ">"
+      result = newCons("Error", newSString("<invalid tag: " & $tag & ">"))
   of tkProc:
     # render as an ellipsis for now. Proper rendering requires access to
     # the procedure names, which we don't have at the moment
-    result.add "..."
+    result = newCons("proc", newSSymbol("..."))
   of tkSeq:
-    result = "["
+    result = newCons("array")
     let
       len = readInt(p, 8)
       data = readInt(cast[HostPointer](addr p[8]), 8) + 8
     for i in 0..<len:
-      if i > 0:
-        result.add ", "
-      result.add valueToString(env, VirtualAddr(data + size(typ.elems[0]) * i),
-                               typ.elems[0])
-    result.add "]"
+      result.add valueToSexp(env, VirtualAddr(data + size(typ.elems[0]) * i),
+                             typ.elems[0])
   of tkVoid, tkError:
     unreachable()
 
@@ -148,9 +134,9 @@ proc readMemConfig*(m: VmModule): Option[MemoryConfig] =
                       stackSize: uint(stackSize))
 
 proc run*(env: var VmEnv, stack: HOslice[uint], prc: ProcIndex,
-          typ: SemType, cl: RootRef): string =
+          typ: SemType, cl: RootRef): SexpNode =
   ## Runs the nullary procedure with index `prc`, and returns the result
-  ## rendered as a string. `typ` is the type of the resulting value.
+  ## rendered as an S-expression. `typ` is the type of the resulting value.
   var thread: VmThread
   if typ.kind in AggregateTypes:
     # reserve enough stack space for the result:
@@ -166,19 +152,16 @@ proc run*(env: var VmEnv, stack: HOslice[uint], prc: ProcIndex,
   case res.kind
   of yrkDone:
     # render the value:
-    result =
-      case typ.kind
-      of ComplexTypes: valueToString(env, toVirt(0), typ)
-      else:            primToString(res.result, typ)
-
-    # add the type:
-    if result.len > 0:
-      result.add ": "
-    result.add typeToString(typ)
+    case typ.kind
+    of ComplexTypes: valueToSexp(env, toVirt(0), typ)
+    else:            primToSexp(res.result, typ)
   of yrkError:
-    result = "runtime error: " & $res.error
+    if res.error == ecUnreachable:
+      newCons("Unreachable")
+    else:
+      newCons("Error", newSString($res.error))
   of yrkUnhandledException:
-    result = "unhandled exception: " & $res.exc.intVal
+    newCons("Exception", newSInt(res.exc.intVal))
   of yrkStubCalled, yrkUser:
     unreachable() # shouldn't happen
 
