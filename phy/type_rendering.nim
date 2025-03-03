@@ -1,6 +1,9 @@
 ## Implements pretty-printing for source-language types.
 
 import
+  experimental/[
+    sexp
+  ],
   phy/[
     types
   ],
@@ -55,3 +58,33 @@ proc typeToString*(typ: SemType): string =
 proc `$`*(typ: SemType): string =
   ## A shortcut for `typeToString <#typeToString,SemType>`_.
   typeToString(typ)
+
+proc typeToSexp*(typ: SemType): SexpNode =
+  ## Returns the S-expression of the AST representing the type construction
+  ## for `typ`.
+  case typ.kind
+  of tkVoid:  newSList(newSSymbol("VoidTy"))
+  of tkUnit:  newSList(newSSymbol("UnitTy"))
+  of tkBool:  newSList(newSSymbol("BoolTy"))
+  of tkChar:  newSList(newSSymbol("CharTy"))
+  of tkInt:   newSList(newSSymbol("IntTy"))
+  of tkFloat: newSList(newSSymbol("FloatTy"))
+  of tkTuple:
+    var res = newSList(newSSymbol("TupleTy"))
+    for it in typ.elems.items:
+      res.add typeToSexp(it)
+    res
+  of tkUnion:
+    var res = newSList(newSSymbol("UnionTy"))
+    for it in typ.elems.items:
+      res.add typeToSexp(it)
+    res
+  of tkProc:
+    var res = newSList(newSSymbol("ProcTy"))
+    for it in typ.elems.items:
+      res.add typeToSexp(it)
+    res
+  of tkSeq:
+    newSList(newSSymbol("SeqTy"), typeToSexp(typ.elems[0]))
+  of tkError:
+    unreachable()
