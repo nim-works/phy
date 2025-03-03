@@ -1,153 +1,134 @@
-## Provides the main data representation for language definitions, plus basic
-## operations for operating on the data.
+## Provides the main data representation for meta-language constructs, plus
+## basic operations for operating on the data.
+
+import std/tables
 
 type
   NodeKind* = enum
     # leaf nodes:
-    nkSymbol
+    nkFail
+    nkFalse, nkTrue
     nkNumber
-    nkNonTerminal
-    nkHole
-    nkAny
-    nkAnyInt
-    nkAnyRational
-    nkAnySymbol
+    nkSymbol
+    nkString
+    nkType
+    nkFunc
+    nkRelation
+    nkContext
     nkVar
+    nkHole
 
     # non-leaf nodes:
-    nkList, nkTree
-    nkMap, nkMapEntry, nkSet
-    nkNot, nkBind, nkGroup, nkOneOrMore, nkZeroOrMore, nkPlug, nkChoice
+    nkConstr, nkTuple
+    nkImplies, nkMatches, nkMatch, nkOf
+    nkProject, nkCall, nkIf
+    nkRecord, nkMap, nkAssoc, nkSet
+    nkBind, nkGroup, nkOneOrMore, nkZeroOrMore, nkPlug
     nkUnpack
 
-  TreeNode* = object
-    ## Node in an AST representing a meta-language term or pattern. Patterns
-    ## and terms have a large amount of overlap (most terms are also valid
-    ## patterns), so they share the same node type for convenience.
+const
+  withChildren* = {
+    nkZeroOrMore, nkOneOrMore, nkPlug, nkGroup, nkConstr, nkTuple, nkUnpack,
+    nkMap, nkAssoc, nkSet, nkBind, nkRecord, nkCall, nkIf, nkProject,
+    nkMatches, nkImplies, nkMatch, nkOf
+  }
+    ## nodes the have child nodes
+
+type
+  Node*[T] = object
+    ## Node in an AST representing a meta-language term. Generic so that the
+    ## type representation is swappable.
+    typ*: T
     case kind*: NodeKind
-    of nkSymbol, nkNumber:
-      sym*: string
-    of nkNonTerminal, nkVar:
-      id*: int
-    of nkZeroOrMore, nkOneOrMore, nkPlug, nkGroup, nkList, nkTree, nkChoice,
-       nkUnpack, nkNot, nkMap, nkMapEntry, nkSet, nkBind:
-      children*: seq[TreeNode]
-    of nkHole, nkAny, nkAnyInt, nkAnyRational, nkAnySymbol:
+    of nkType, nkHole, nkTrue, nkFalse, nkFail:
       discard
-
-  ExprNodeKind* = enum
-    ekIdent
-    ekVar
-    ekFunc
-    ekLookup
-    ekTerm
-    ekApp
-    ekGroup
-    ekUnpack
-
-  ExprNode* = object
-    ## Node in an AST representing an expression.
-    case kind*: ExprNodeKind
-    of ekIdent:
-      ident*: string
-    of ekVar, ekFunc:
+    of nkNumber, nkSymbol, nkString:
+      sym*: string
+    of nkFunc, nkRelation, nkVar, nkContext:
       id*: int
-    of ekLookup, ekApp, ekGroup, ekUnpack:
-      children*: seq[ExprNode]
-    of ekTerm:
-      term*: TreeNode
+    of withChildren:
+      children*: seq[Node[T]]
 
-  NonTerminal* = object
-    ## A named pattern.
-    name*: string
-    empty*: bool
-    pattern*: TreeNode
+  TypeKind* = enum
+    tkAll  ## top type
+    tkVoid ## bottom type
+    tkBool
+    tkInt
+    tkRat  ## rational number
+    tkList
+    tkFunc
+    tkTuple
+    tkRecord ## record type
+    tkData   ## inductively defined data type
+    tkSum    ## sum type
 
-  Premise* = object
-    ## Represents a premise of a function invocation or induction rule.
-    repeat*: bool
-      ## whether the premise is repeated
-    rel*: int
-      ## ID of the applied relation/judgment
-    inputs*: seq[TreeNode]
-    outputs*: seq[TreeNode]
+  TypeId* = int
 
-  PredicateKind* = enum
-    pkPremise       # a relation must exist
-    pkWhere         # a term must match a pattern (variables are bound)
-    pkSideCondition # an expression must evaluate to true
+  Type* = object
+    case kind*: TypeKind
+    of tkAll, tkVoid, tkBool, tkInt, tkRat:
+      discard
+    of tkData:
+      constr*: seq[Node[TypeId]]
+        ## the patterns describing the shapes of valid constructions
+    of tkFunc, tkTuple, tkList, tkSum:
+      children*: seq[TypeId]
+    of tkRecord:
+      fields*: seq[tuple[name: string, typ: TypeId]]
 
-  Predicate* = object
-    ## Describes a rule or function predicate.
-    case kind*: PredicateKind
-    of pkPremise:
-      premise*: Premise
-    of pkWhere:
-      pat*: TreeNode
-      term*: ExprNode
-    of pkSideCondition:
-      expr*: ExprNode
-
-  Rule* = object
+  Rule*[T] = object
     ## A rule of an inductively-defined relation.
     name*: string
       ## name of the rule
-    predicates*: seq[Predicate]
-    conclusion*: seq[TreeNode]
+    body*: Node[T]
 
-  Relation* = object
+  Relation*[T] = object
     ## Describes an inductively-defined boolean relation. It establishes
-    ## whether there exists a relation between terms.
+    ## whether there exists a relation between values.
     name*: string
-    params*: seq[bool]
-      ## for each parameter whether it's an input or not
-    format*: string
-      ## a formatting pattern specifying how the relation is rendered
-    rules*: seq[Rule]
+    params*: seq[tuple[input: bool, typ: T]]
+      ## for each parameter whether it's an input or not, plus its type
+    rules*: seq[Rule[T]]
 
-  FunctionImpl* = object
-    ## An association of parameters with a result.
-    params*: seq[TreeNode]
-    predicates*: seq[Predicate]
-    output*: ExprNode
-
-  Function* = object
+  Function*[T] = object
     ## Describes a meta-language function. A function maps one or more input
-    ## terms to an output term. It is not required to be *total* (i.e., not all
-    ## terms matching the parameter pattern need to map to an output).
+    ## to an output. It is not required to be *total* (i.e., not all values
+    ## part of the domain must have a mapping).
     name*: string
       ## name of the function
-    params*: seq[TreeNode]
-    impls*: seq[FunctionImpl]
+    body*: Node[T]
 
-  Language* = object
+  Pattern*[T] = object
+    ## A parameteric and recursive pattern matcher. Usually used for modeling
+    ## contextual semantics.
+    name*: string
+    patterns*: seq[Node[T]]
+
+  LangDef* = object
     ## The full and self-contained description of a language.
-    nterminals*: seq[NonTerminal]
-    functions*: seq[Function]
-    relations*: seq[Relation]
+    types*: seq[Type]
+      ## all meta-language types reference from nodes
+    names*: Table[TypeId, string]
+      ## names given to types
+    functions*: seq[Function[TypeId]]
+    relations*: seq[Relation[TypeId]]
+    matchers*: seq[Pattern[TypeId]]
 
-const
-  PatternNodes* = {nkAny, nkBind, nkChoice, nkGroup, nkAnyInt, nkAnyRational,
-                   nkAnySymbol, nkNonTerminal, nkHole}
-    ## nodes that may only appear in patterns
-
-  TermNodes* = {nkNumber, nkSymbol, nkTree, nkList}
-    ## nodes that may only appear in terms
-
-  MetaNodes* = {nkUnpack}
-    ## nodes that are processed before anything else
-
-template `[]`*(n: TreeNode, i: int): lent TreeNode =
+template `[]`*(n: Node, i: int|BackwardsIndex): untyped =
   n.children[i]
 
-template node*(k: NodeKind, sub: TreeNode): TreeNode =
-  TreeNode(kind: k, children: @[sub])
+func len*(n: Node): int =
+  n.children.len
 
-template exprNode*(k: ExprNodeKind, sub: ExprNode): ExprNode =
-  ExprNode(kind: k, children: @[sub])
-
-func add*(n: var TreeNode, elem: sink TreeNode) =
+func add*[T](n: var Node[T], elem: sink Node[T]) =
   n.children.add elem
 
-func add*(n: var ExprNode, elem: sink ExprNode) =
-  n.children.add elem
+template tree*[T](k: NodeKind, c: varargs[Node[T]]): Node[T] =
+  Node[T](kind: k, children: @c)
+
+proc tree*[T](k: range[nkConstr..nkUnpack], c: sink seq[Node[T]]): Node[T] =
+  Node[T](kind: k, children: c)
+
+proc `[]`*(lang: LangDef, typ: TypeId): lent Type =
+  ## Looks up the given `typ`.
+  lang.types[typ.ord - 1]

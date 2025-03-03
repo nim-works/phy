@@ -1,37 +1,33 @@
-## Provides the formal definition for the source language, written using
-## Phy's meta-language.
+## Provides a reference implementation of the source language, written using
+## Phy's meta-language. The formal definition is derived from the reference
+## implementation.
 ##
 ## This is the one and only authoritative definition of the source language.
 ##
-## As with most language-related things, the language definition is a
-## **work in progress**.
+## As with most language-related things, the reference implementation /
+## definition is a **work in progress**.
 ##
 ## **Important:** as is, the language definition **does not** match
-## the originally intended semantics, and thus does not model the behaviour
-## of the implementation. This'll be fixed eventually.
+## the originally intended semantics. This'll be fixed eventually.
 
 import
-  spec/[langdefs, types]
+  spec/[langdefs]
 
 const lang* = language:
-  nterminal x, symbol
-  nterminal n, z
+  alias n, z
   # TODO: remove `n` and use `z` directly. `n` usually refers to *natural*
   #       numbers, not *integer* numbers
-
-  nterminal ident:  Ident(symbol)
-  nterminal intVal: IntVal(n)
-  nterminal floatVal: FloatVal(r)
-  nterminal strVal: StringVal(symbol)
-  nterminal expr:
-    ident
-    intVal
-    floatVal
+  typ ident: Ident(string)
+  alias x, ident
+  typ expr:
+    Ident(string)
+    IntVal(z)
+    FloatVal(r)
     TupleCons(*expr)
     Seq(texpr, *expr)
-    Seq(strVal)
+    Seq(StringVal(string))
     Call(+expr)
-    FieldAccess(expr, intVal)
+    FieldAccess(expr, IntVal(z))
     At(expr, expr)
     And(expr, expr)
     Or(expr, expr)
@@ -45,8 +41,24 @@ const lang* = language:
     Asgn(expr, expr)
     Decl(ident, expr)
 
-  nterminal texpr:
-    ident
+    Let(ident, expr, expr)
+
+    # syntax not available at the source level:
+    True
+    False
+    char(z) # UTF-8 byte
+    loc(z) # first-class location
+    `array`(*val)
+    `tuple`(+val)
+    `proc`(typ, *[x, typ], e)
+
+    With(e, n, e) # return a tuple/array value with the n-th element replaced
+    Frame(typ, e) # a special expression for assisting with evaluation
+
+  alias e, expr
+
+  typ texpr:
+    Ident(string)
     VoidTy()
     UnitTy()
     BoolTy()
@@ -58,63 +70,45 @@ const lang* = language:
     ProcTy(+texpr)
     SeqTy(texpr)
 
-  nterminal paramDecl:
+    # type expressions not available at the source level
+    mut(texpr)
+    `type`(texpr)
+
+  alias typ, texpr
+
+  typ paramDecl:
     ParamDecl(ident, texpr)
-  nterminal decl:
+  typ decl:
     ProcDecl(ident, texpr, Params(*paramDecl), expr)
     TypeDecl(ident, texpr)
-  nterminal module:
+  typ module:
     Module(*decl)
 
-  nterminal ch: char(z) # UTF-8 byte
-  nterminal c:
-    n
-    r
-    ch
-    StringVal(x)
-    "true"
-    "false"
-    TupleCons()       # unit value
-    Unreachable()     # an irrecoverable error
-  nterminal l: loc(z) # first-class location
-  nterminal val:
-    c
-    l
-    `array`(+val)
+  subtype val, e:
+    # A value is an irreducible expression.
+    IntVal(n)
+    FloatVal(z)
+    True
+    False
+    char(z)
+    loc(z)
+    `array`(*val)
     `tuple`(+val)
     `proc`(typ, *[x, typ], e)
-  nterminal typ:
-    VoidTy()
-    UnitTy()
-    BoolTy()
-    CharTy()
-    IntTy()
-    FloatTy()
-    mut(typ)
-    `type`(typ)
-    TupleTy(+typ)
-    UnionTy(+typ)
-    ProcTy(+typ)
-    SeqTy(typ)
-  nterminal le:
-    # subset of expressions where all non-lvalue operand were already evaluated
-    l
-    FieldAccess(le, n)
-    At(le, n)
-  nterminal e:
-    x
-    val
-    typ
-    With(e, n, e) # return a tuple/array value with the n-th element replaced
-    Frame(typ, e) # a special expression for assisting with evaluation
+
+  subtype le, e:
+    # Lvalue expression with all non-lvalue operands already evaluated.
+    loc(z)
+    FieldAccess(le, IntVal(n))
+    At(le, IntVal(n))
 
   function desugar, expr -> e:
     # FIXME: the sub-expressions need to be desugared too!
     case _
     of And(expr_1, expr_2):
-      If(expr_1, expr_2, "false")
+      If(expr_1, expr_2, Ident("false"))
     of Or(expr_1, expr_2):
-      If(expr_1, "true", expr_2)
+      If(expr_1, Ident("true"), expr_2)
     of Decl(x_1, expr_1):
       Let(x_1, expr_1, TupleCons())
     of Exprs(*expr_1, Decl(x_1, expr_2), +expr_3):
@@ -127,34 +121,46 @@ const lang* = language:
   ## Type Relations
   ## --------------
 
-  inductive `<:`(inp, inp), "$1 <: $2":
+  inductive `<:`(inp typ, inp typ):
     ## :math:`<:` is the subtype relationship operator. :math:`a <: b` means
     ## ":math:`a` is a subtype of :math:`b`"
     rule "void":
       ## :math:`\text{void}` is the subtype of all other types, except for
       ## itself.
-      where !VoidTy(), typ_1
+      condition typ_1 != VoidTy()
       conclusion VoidTy(), typ_1
     rule "union-subtyping":
       ## A type is a subtype of a union if it's a part of the union (in
       ## any position).
-      conclusion typ_1, UnionTy(*typ, typ_1, *typ)
+      condition typ_1 in typ_2
+      conclusion typ_1, UnionTy(+typ_2)
 
-  inductive eq(inp, inp), "$1 = $2":
+  function `==`, (typ, typ) -> bool:
     ## Except for union types, all type equality uses *structural equality*.
-    axiom "", typ, typ # same structure, equal type
-    rule "union":
-      # order of types is not significant
-      condition { ...typ_1 } == { ...typ_2 }
-      conclusion UnionTy(+typ_1), UnionTy(+typ_2)
+    case _
+    of UnionTy(+typ_1), UnionTy(+typ_2):
+      if (for typ_3 in typ_1: contains(typ_2, typ_3)):
+        if (for typ_3 in typ_2: contains(typ_1, typ_3)):
+          true
+        else:
+          false
+      else:
+        false
+    of typ_1, typ_2:
+      same(typ_1, typ_2) # same structure, equal type
 
-  inductive `<:=`(inp, inp), "$1 <:= $2":
+  function `!=`, (typ, typ) -> bool:
+    case _
+    of typ_1, typ_2:
+      not(typ_1 == typ_2)
+
+  inductive `<:=`(inp typ, inp typ):
     ## :math:`<:=` is the "sub or equal type" operator.
     rule "equal":
-      premise eq(typ_1, typ_2)
+      condition typ_1 == typ_2
       conclusion typ_1, typ_2
     rule "subtype":
-      premise typ_1 <:= typ_2
+      condition typ_1 <:= typ_2
       conclusion typ_1, typ_2
 
   ## Typing Judgment
@@ -163,39 +169,22 @@ const lang* = language:
   ## The language's static semantics consist of typing judgements, relating a
   ## symbol context and abstract syntax expression to a type.
 
-  nterminal C, { "symbols": {l : typ}, "ret": typ }
+  record C, (symbols: (string -> typ), ret: typ)
   ## :math:`C` is the symbol environment.
-
-  nterminal All:
-    # Convenience non-terminal that is used where both mutable and non
-    # mutable types are allowed.
-    hole
-    mut(hole)
 
   function common, (typ, typ) -> typ:
     ## Computes the closest common ancestor type for a type pair. The function
     ## is not total, as not all two types have a common ancestor type.
     case _
-    of typ_1, typ_1: typ_1
     of typ_1, typ_2:
-      premise typ_1 <: typ_2
-      typ_2
-    of typ_1, typ_2:
-      premise typ_2 <: typ_1
-      typ_1
+      if typ_1 == typ_2:     typ_1
+      else:
+        if typ_1 <: typ_2:   typ_2
+        else:
+          if typ_2 <: typ_1: typ_1
+          else:              fail # no common type
 
-  function uniqueTypes, (+typ) -> z:
-    ## Returns true (1) if all types are unique (in the sense of type
-    ## equality), false (0) otherwise.
-    case _
-    of typ: 1
-    of typ_1, *typ, typ_2, *typ:
-      premise eq(typ_1, typ_2)
-      0
-    of typ_1, +typ_2:
-      uniqueTypes(...typ_2)
-
-  inductive ttypes(inp, inp, out), "$1 \\vdash_{\\tau} $2 : $3":
+  inductive ttypes(inp C, inp texpr, out typ):
     axiom "S-void-type",        C, VoidTy(),  VoidTy()
     axiom "S-unit-type",        C, UnitTy(),  UnitTy()
     axiom "S-bool-type",        C, BoolTy(),  BoolTy()
@@ -205,269 +194,285 @@ const lang* = language:
     axiom "S-empty-tuple-type", C, TupleTy(), UnitTy()
 
     rule "S-type-ident":
-      condition x_1 in C_1.symbols
-      where type(typ_1), C_1.symbols(x_1)
-      conclusion C_1, x_1, typ_1
+      condition string_1 in C_1.symbols
+      where type(typ_1), C_1.symbols(string_1)
+      conclusion C_1, Ident(string_1), typ_1
 
     rule "S-tuple-type":
-      premise ...ttypes(C_1, e_1, typ_1)
-      where *(!VoidTy()), ...typ_1
-      conclusion C_1, TupleTy(+e_1), TupleTy(...typ_1)
+      premise ...ttypes(C_1, texpr_1, typ_1)
+      condition ...(typ_1 != VoidTy())
+      conclusion C_1, TupleTy(+texpr_1), TupleTy(...typ_1)
 
     rule "S-union-type":
-      premise ...ttypes(C_1, e_1, typ_1)
-      where *(!VoidTy()), ...typ_1
-      condition uniqueTypes(...typ_1)
-      conclusion C_1, UnionTy(+e_1), TupleTy(...typ_1)
+      premise ...ttypes(C_1, texpr_1, typ_1)
+      condition ...(typ_1 != VoidTy())
+      condition uniqueTypes(typ_1) # there must be no duplicate types
+      conclusion C_1, UnionTy(+texpr_1), UnionTy(...typ_1)
 
     rule "S-proc-type":
-      premise ttypes(C_1, e_1, typ_1)
-      premise ...ttypes(C_1, e_2, typ_2)
-      where *(!VoidTy()), ...typ_2
-      conclusion C_1, ProcTy(e_1, *e_2), ProcTy(typ_1, ...typ_2)
+      premise ttypes(C_1, texpr_1, typ_1)
+      premise ...ttypes(C_1, texpr_2, typ_2)
+      condition ...(typ_2 != VoidTy())
+      conclusion C_1, ProcTy(texpr_1, *texpr_2), ProcTy(typ_1, ...typ_2)
 
     rule "S-seq-type":
-      premise ttypes(C_1, e_1, typ_1)
-      where !VoidTy(), typ_1
-      conclusion C_1, SeqTy(e_1), SeqTy(typ_1)
+      premise ttypes(C_1, texpr_1, typ_1)
+      condition typ_1 != VoidTy()
+      conclusion C_1, SeqTy(texpr_1), SeqTy(typ_1)
 
-  alias built_in,
+  def builtIn,
     {"==", "<=", "<", "+", "-", "*", "div", "mod", "true", "false", "write",
      "writeErr", "readFile"}
 
-  function unique, (+x) -> z:
-    ## Returns true (1) when all symbols are unique, false (0) otherwise.
-    # there are no "real" booleans in the meta-language, hence 1 and 0 being
-    # used
+  function stripMut, typ -> typ:
     case _
-    of x: 1
-    of x_1, *x, x_1, *x: 0
-    of x_1, x_2, *x_3: unique(x_2, ...x_3)
+    of mut(typ_1): typ_1
+    of typ_1:      typ_1
 
-  inductive types(inp, inp, out), "$1 \\vdash $2 : $3":
-    axiom "S-int",   C, n, IntTy()
-    axiom "S-float", C, r, FloatTy()
-    axiom "S-false", C, "false", BoolTy()
-    axiom "S-true",  C, "true", BoolTy()
+  inductive mtypes(inp C, inp e, out typ):
+    # relates an expression to its non-mut-qualified type
+    rule "":
+      premise types(C_1, e_1, typ_1)
+      conclusion C_1, e_1, stripMut(typ_1)
+
+  function isType, typ -> bool:
+    case _
+    of type(typ): true
+    of typ:       false
+
+  inductive types(inp C, inp e, out typ):
+    axiom "S-int",   C, IntVal(n), IntTy()
+    axiom "S-float", C, FloatVal(r), FloatTy()
+    axiom "S-false", C, Ident("false"), BoolTy()
+    axiom "S-true",  C, Ident("true"), BoolTy()
     axiom "S-unit",  C, TupleCons(), UnitTy()
     axiom "S-unreachable", C, Unreachable(), VoidTy()
 
     rule "S-identifier":
-      condition x_1 in C_1.symbols
-      where typ_1, C_1.symbols(x_1)
-      where !type(any), typ_1 # normal identifiers don't bind types
-      conclusion C_1, x_1, typ_1
+      condition string_1 in C_1.symbols
+      let typ_1 = C_1.symbols(string_1)
+      # TODO: split symbols into two maps, one for value and one for type
+      #       identifiers, which would allow getting rid of the `type` modifier
+      condition not isType(typ_1) # normal identifiers don't bind types
+      conclusion C_1, Ident(string_1), typ_1
 
     rule "S-tuple":
-      premise ...types(C_1, e_1, All[typ_1])
-      where *(!VoidTy()), ...typ_1
+      premise ...mtypes(C_1, e_1, typ_1)
+      condition ...(typ_1 != VoidTy())
       conclusion C_1, TupleCons(+e_1), TupleTy(...typ_1)
 
     rule "S-seq-cons":
-      premise ttypes(C_1, e_1, typ_1)
+      premise ttypes(C_1, texpr_1, typ_1)
       premise ...types(C_1, e_2, typ_2)
-      premise ...(typ_2 <:= typ_1)
-      conclusion C_1, Seq(e_1, *e_2), SeqTy(typ_1)
+      condition ...(typ_2 <:= typ_1)
+      conclusion C_1, Seq(texpr_1, *e_2), SeqTy(typ_1)
 
-    axiom "S-string-cons", C, Seq(StringVal(x)), SeqTy(CharTy())
+    axiom "S-string-cons", C, Seq(StringVal(string)), SeqTy(CharTy())
 
     rule "S-return":
-      premise types(C_1, e_1, All[typ_1])
-      where typ_2, C_1.ret
-      premise typ_1 <:= typ_2
+      premise mtypes(C_1, e_1, typ_1)
+      condition typ_1 <:= C_1.ret
       conclusion C_1, Return(e_1), VoidTy()
 
     rule "S-return-unit":
-      where typ_1, C_1.ret
-      premise eq(typ_1, UnitTy())
+      condition C_1.ret == UnitTy()
       conclusion C_1, Return(), VoidTy()
 
     rule "S-field":
       premise types(C_1, e_1, typ_1)
-      where TupleTy(+any), typ_1
-      where typ_2, typ_1(n_1)
-      conclusion C_1, FieldAccess(e_1, n_1), typ_2
+      where TupleTy(+typ_3), typ_1
+      where typ_2, typ_3[n_1]
+      conclusion C_1, FieldAccess(e_1, IntVal(n_1)), typ_2
 
     rule "S-mut-field":
       premise types(C_1, e_1, mut(typ_1))
-      where TupleTy(+any), typ_1
-      where typ_2, typ_1(n_1)
-      conclusion C_1, FieldAccess(e_1, n_1), mut(typ_2)
+      where TupleTy(+typ_3), typ_1
+      where typ_2, typ_3[n_1]
+      conclusion C_1, FieldAccess(e_1, IntVal(n_1)), mut(typ_2)
 
     rule "S-at":
       premise types(C_1, e_1, typ_1)
-      premise types(C_1, e_2, All[IntTy()])
+      premise mtypes(C_1, e_2, IntTy())
       where SeqTy(typ_2), typ_1
       conclusion C_1, At(e_1, e_2), typ_2
 
     rule "S-mut-at":
       premise types(C_1, e_1, mut(typ_1))
-      premise types(C_1, e_2, All[IntTy()])
+      premise mtypes(C_1, e_2, IntTy())
       where SeqTy(typ_2), typ_1
       conclusion C_1, At(e_1, e_2), mut(typ_2)
 
     rule "S-asgn":
       premise types(C_1, e_1, mut(typ_1))
-      premise types(C_1, e_2, All[typ_2])
-      premise typ_2 <:= typ_1
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_2 <:= typ_1
       conclusion C_1, Asgn(e_1, e_2), UnitTy()
 
     rule "S-let":
-      condition x_1 notin C_1.symbols
-      condition x_1 notin built_in
-      premise types(C_1, e_1, All[typ_1])
-      where C_2, C_1 + {"symbols": {x_1: mut(typ_1)}}
-      premise types(C_2, e_2, All[typ_2])
-      conclusion C_1, Let(x_1, e_1, e_2), typ_2
+      condition string_1 notin C_1.symbols
+      condition string_1 notin builtIn
+      premise mtypes(C_1, e_1, typ_1)
+      let C_2 = C_1 + C(symbols: {string_1: mut(typ_1)})
+      premise mtypes(C_2, e_2, typ_2)
+      conclusion C_1, Let(Ident(string_1), e_1, e_2), typ_2
 
     rule "S-exprs":
-      premise ...types(C_1, e_1, All[UnitTy()])
+      premise ...mtypes(C_1, e_1, UnitTy())
       premise types(C_1, e_2, typ_2)
       conclusion C_1, Exprs(*e_1, e_2), typ_2
 
     rule "S-void-short-circuit":
       # if any expression in the list is of type void, so is the list itself
-      premise ...types(C_1, e_1, All[UnitTy()])
-      premise types(C_1, e_2, All[VoidTy()])
-      premise ...types(C_1, e_3, All[UnitTy()])
-      premise types(C_1, e_4, typ)
-      conclusion C_1, Exprs(*e_1, e_2, *e_3, e_4), VoidTy()
+      premise ...mtypes(C_1, e_1, typ_3)
+      condition ...(typ_3 in {VoidTy(), UnitTy()})
+      condition VoidTy() in typ_3
+      premise types(C_1, e_2, typ)
+      conclusion C_1, Exprs(*e_1, e_2), VoidTy()
 
     rule "S-if":
-      premise types(C_1, e_1, All[BoolTy()])
-      premise types(C_1, e_2, All[typ_1])
-      premise types(C_1, e_3, All[typ_2])
-      where typ_3, common(typ_1, typ_2)
+      premise mtypes(C_1, e_1, BoolTy())
+      premise mtypes(C_1, e_2, typ_1)
+      premise mtypes(C_1, e_3, typ_2)
+      let typ_3 = common(typ_1, typ_2)
       conclusion C_1, If(e_1, e_2, e_3), typ_3
 
     rule "S-while":
-      premise types(C_1, e_1, All[BoolTy()])
-      premise types(C_1, e_2, All[typ_1])
+      premise mtypes(C_1, e_1, BoolTy())
+      premise mtypes(C_1, e_2, typ_1)
       condition typ_1 in {VoidTy(), UnitTy()}
       conclusion C_1, While(e_1, e_2), UnitTy()
 
     rule "S-while":
-      premise types(C_1, e_1, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
       condition typ_1 in {VoidTy(), UnitTy()}
-      conclusion C_1, While("true", e_1), VoidTy()
+      conclusion C_1, While(True, e_1), VoidTy()
 
     rule "S-builtin-plus":
-      premise types(C_1, e_1, All[typ_1])
-      premise types(C_1, e_2, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
       condition typ_1 in {IntTy(), FloatTy()}
-      conclusion C_1, Call("+", e_1, e_2), typ_1
+      conclusion C_1, Call(Ident("+"), e_1, e_2), typ_1
 
     rule "S-builtin-minus":
-      premise types(C_1, e_1, All[typ_1])
-      premise types(C_1, e_2, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
       condition typ_1 in {IntTy(), FloatTy()}
-      conclusion C_1, Call("-", e_1, e_2), typ_1
+      conclusion C_1, Call(Ident("-"), e_1, e_2), typ_1
 
     rule "S-builtin-mul":
-      premise types(C_1, e_1, All[typ_1])
-      premise types(C_1, e_2, All[typ_1])
-      premise eq(typ_1, IntTy())
-      conclusion C_1, Call("*", e_1, e_2), typ_1
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
+      condition typ_1 == IntTy()
+      conclusion C_1, Call(Ident("*"), e_1, e_2), typ_1
 
     rule "S-builtin-div":
-      premise types(C_1, e_1, All[typ_1])
-      premise types(C_1, e_2, All[typ_1])
-      premise eq(typ_1, IntTy())
-      conclusion C_1, Call("div", e_1, e_2), typ_1
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
+      condition typ_1 == IntTy()
+      conclusion C_1, Call(Ident("div"), e_1, e_2), typ_1
 
     rule "S-builtin-eq":
-      premise types(C_1, e_1, All[typ_1])
-      premise types(C_1, e_2, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
       condition typ_1 in {BoolTy(), IntTy(), FloatTy()}
-      conclusion C_1, Call("==", e_1, e_2), BoolTy()
+      conclusion C_1, Call(Ident("=="), e_1, e_2), BoolTy()
 
     rule "S-builtin-lt":
-      premise types(C_1, e_1, All[typ_1])
-      premise types(C_1, e_2, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
       condition typ_1 in {IntTy(), FloatTy()}
-      conclusion C_1, Call("<", e_1, e_2), BoolTy()
+      conclusion C_1, Call(Ident("<"), e_1, e_2), BoolTy()
 
     rule "S-builtin-le":
-      premise types(C_1, e_1, All[typ_1])
-      premise types(C_1, e_2, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
       condition typ_1 in {IntTy(), FloatTy()}
-      conclusion C_1, Call("<=", e_1, e_2), BoolTy()
+      conclusion C_1, Call(Ident("<="), e_1, e_2), BoolTy()
 
     rule "S-builtin-mod":
-      premise types(C_1, e_1, All[typ_1])
-      premise types(C_1, e_2, All[typ_1])
-      premise eq(typ_1, IntTy())
-      conclusion C_1, Call("mod", e_1, e_2), typ_1
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
+      condition typ_1 == IntTy()
+      conclusion C_1, Call(Ident("mod"), e_1, e_2), typ_1
 
     rule "S-builtin-len":
-      premise types(C_1, e_1, All[SeqTy(typ)])
-      conclusion C_1, Call("len", e_1), IntTy()
+      premise mtypes(C_1, e_1, SeqTy(typ))
+      conclusion C_1, Call(Ident("len"), e_1), IntTy()
 
     rule "S-builtin-concat":
-      premise types(C_1, e_1, All[SeqTy(typ_1)])
-      premise types(C_1, e_2, All[typ_2])
-      premise typ_2 <:= typ_1
-      conclusion C_1, Call("concat", e_1, e_2), UnitTy()
+      premise mtypes(C_1, e_1, SeqTy(typ_1))
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_2 <:= typ_1
+      conclusion C_1, Call(Ident("concat"), e_1, e_2), UnitTy()
 
     rule "S-builtin-write":
-      premise types(C_1, e_1, All[SeqTy(CharTy())])
-      conclusion C_1, Call("write", e_1), UnitTy()
+      premise mtypes(C_1, e_1, SeqTy(CharTy()))
+      conclusion C_1, Call(Ident("write"), e_1), UnitTy()
 
     rule "S-builtin-writeErr":
-      premise types(C_1, e_1, All[SeqTy(CharTy())])
-      conclusion C_1, Call("writeErr", e_1), UnitTy()
+      premise mtypes(C_1, e_1, SeqTy(CharTy()))
+      conclusion C_1, Call(Ident("writeErr"), e_1), UnitTy()
 
     rule "S-builtin-readFile":
-      premise types(C_1, e_1, All[SeqTy(CharTy())])
-      conclusion C_1, Call("readFile", e_1), SeqTy(CharTy())
+      premise mtypes(C_1, e_1, SeqTy(CharTy()))
+      conclusion C_1, Call(Ident("readFile"), e_1), SeqTy(CharTy())
 
     rule "S-call":
-      premise types(C_1, e_1, All[typ_1])
+      premise mtypes(C_1, e_1, typ_1)
       where ProcTy(typ_r, *typ_p), typ_1
-      premise ...types(C_1, e_2, All[typ_a])
-      premise ...(typ_a <:= typ_p)
+      premise ...mtypes(C_1, e_2, typ_a)
+      condition ...(typ_a <:= typ_p)
       conclusion C_1, Call(e_1, *e_2), typ_r
 
     rule "S-Frame":
       premise types(C_1, e_1, typ_2)
-      premise typ_2 <:= typ_1
+      condition typ_2 <:= typ_1
       conclusion C_1, Frame(typ_1, e_1), typ_1
 
     rule "S-proc-val":
       conclusion C_1, `proc`(typ_r, *[x, typ_p], e), ProcTy(typ_r, ...typ_p)
 
     rule "S-seq-with":
-      premise ttypes(C_1, e_1, All[typ_1])
-      premise ttypes(C_1, e_2, All[typ_3])
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_3)
       where SeqTy(typ_2), typ_1
-      premise typ_3 <:= typ_2
+      condition typ_3 <:= typ_2
       conclusion C_1, With(e_1, n_1, e_2), typ_1
 
     rule "S-tuple-with":
-      premise ttypes(C_1, e_1, All[typ_1])
-      premise ttypes(C_1, e_2, All[typ_2])
-      where TupleTy(+typ), typ_1
-      where typ_3, typ_1(n_1)
-      premise typ_2 <:= typ_3
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      where TupleTy(+typ_4), typ_1
+      where typ_3, typ_4[n_1]
+      condition typ_2 <:= typ_3
       conclusion C_1, With(e_1, n_1, e_2), typ_3
 
-  inductive toplevel(inp, inp, out), "$1 \\vdash $2 \\Rightarrow $3":
+  inductive toplevel(inp C, inp (decl + module), out C):
     rule "S-type-decl":
-      premise ttypes(C_1, e_1, typ_1)
-      where C_2, C_1 + {"symbols": {x_1: type(typ_1)}}
-      conclusion C_1, TypeDecl(x_1, e_1), C_2
+      premise ttypes(C_1, texpr_1, typ_1)
+      where C_2, C_1 + C(symbols: {string_1: type(typ_1)})
+      conclusion C_1, TypeDecl(Ident(string_1), texpr_1), C_2
 
     rule "S-proc-decl":
-      condition x_1 notin C_1.symbols
-      condition uniqueNames(x_1, ...x_2)
-      premise ttypes(C_1, e_1, typ_1)
-      premise ...ttypes(C_1, e_2, typ_2)
+      condition string_1 notin C_1.symbols
+      condition unique(string_2) # all symbols must be unique
+      condition string_1 notin string_2
+      premise ttypes(C_1, texpr_1, typ_1)
+      premise ...ttypes(C_1, texpr_2, typ_2)
       condition ...(typ_2 != VoidTy())
-      where typ_3, ProcTy(typ_1, ...typ_2)
-      where C_2, C_1 + {"symbols": {x_1: typ_3}}
-      where C_3, C_2 + {"return": typ_1, "symbols": { ...x_2: ...typ_2 }}
-      premise types(C_3, e_3, VoidTy())
-      conclusion C_1, ProcDecl(x_1, e_1, Params(*ParamDecl(x_2, e_2)), e_3), C_2
+      let typ_3 = ProcTy(typ_1, ...typ_2)
+      let C_2 = C_1 + C(symbols: {string_1: typ_3})
+      let C_3 = C_2 + C(ret: typ_1, symbols: map(zip(string_2, typ_2)))
+      premise types(C_3, e_1, VoidTy())
+      conclusion C_1, ProcDecl(Ident(string_1), texpr_1, Params(*ParamDecl(Ident(string_2), texpr_2)), e_1), C_2
 
     axiom "S-empty-module", C_1, Module(), C_1
 
@@ -494,16 +499,39 @@ const lang* = language:
   ## Auxiliary Functions
   ## ~~~~~~~~~~~~~~~~~~~
 
-  function substitute, (e, +[x, e]) -> (e, +[x, e]):
+  function substitute, (e, (string -> e)) -> e:
     ## The substitution function, which handles binding values/expressions to
     ## identifiers. Identifiers cannot be shadowed.
     case _
-    of any_1(*e_1), *any_2:
-      where *e_2, ...substitute(e_1, ...any_2)
-      term any_1(...e_2)
-    of x_1, *[!x_1, _], [x_1, e_1], *[!x_1, _]:
-      e_1 # the actual substitution
-    of e_1, +any:
+    of Exprs(+e_1), any_1:
+      Exprs(...(substitute(e_1, any_1)))
+    of Let(ident_1, e_1, e_2), any_1:
+      Let(ident_1, substitute(e_1, any_1), substitute(e_2, any_1))
+    of If(e_1, e_2, e_3), any_1:
+      If(substitute(e_1, any_1), substitute(e_2, any_1), substitute(e_3, any_1))
+    of Call(+e_1), any_1:
+      Call(...substitute(e_1, any_1))
+    of Asgn(e_1, e_2), any_1:
+      Asgn(substitute(e_1, any_1), substitute(e_2, any_1))
+    of TupleCons(*e_1), any_1:
+      TupleCons(...substitute(e_1, any_1))
+    of Seq(texpr, *e_1), any_1:
+      Seq(texpr, ...substitute(e_1, any_1))
+    of FieldAccess(e_1, IntVal(z_1)), any_1:
+      FieldAccess(substitute(e_1, any_1), IntVal(z_1))
+    of At(e_1, e_2), any_1:
+      At(substitute(e_1, any_1), substitute(e_2, any_1))
+    of While(e_1, e_2), any_1:
+      While(substitute(e_1, any_1), substitute(e_2, any_1))
+    of Return(e_1), any_1:
+      Return(substitute(e_1, any_1))
+    of Ident(string_1), any_1:
+      # the actual substitution
+      if string_1 in any_1:
+        any_1(string_1)
+      else:
+        Ident(string_1)
+    of e_1, _:
       e_1 # nothing to replace
 
   function trunc, r -> n:
@@ -512,115 +540,126 @@ const lang* = language:
   function intAdd, (n, n) -> n:
     case _
     of n_1, n_2:
-      where n_3, n_1 + n_2
-      condition -(2 ^ 63) <= n_3
-      condition n_3 < (2 ^ 63)
-      n_3
-    else: {}
+      let n_3 = n_1 + n_2
+      if n_3 <= (2 ^ 63):
+        if n_3 < (2 ^ 63):
+          n_3
+        else:
+          fail
+      else:
+        fail
 
   function intSub, (n, n) -> n:
     case _
     of n_1, n_2:
-      where n_3, n_1 - n_2
-      condition -(2 ^ 63) <= n_3
-      condition n_3 < (2 ^ 63)
-      n_3
-    else: {}
+      let n_3 = n_1 - n_2
+      if n_3 <= (2 ^ 63):
+        if n_3 < (2 ^ 63):
+          n_3
+        else:
+          fail
+      else:
+        fail
 
   function intMul, (n, n) -> n:
     case _
     of n_1, n_2:
-      where n_3, n_1 * n_2
-      condition -(2 ^ 63) <= n_3
-      condition n_3 < (2 ^ 63)
-      n_3
-    else: {}
+      let n_3 = n_1 * n_2
+      if n_3 <= (2 ^ 63):
+        if n_3 < (2 ^ 63):
+          n_3
+        else:
+          fail
+      else:
+        fail
 
   function intDiv, (n, n) -> n:
     case _
-    of n_1, 0: {}
+    of n_1, 0: fail
     of n_1, n_2:
-      condition n_1 == (-2 ^ 63)
-      condition n_2 == -1
-      {}
-    of n_1, n_2: trunc(n_1 / n_2)
+      if same(n_1, (-2 ^ 63)):
+        if same(n_2, -1):
+          fail
+        else:
+          trunc(n_1 / n_2)
+      else:
+        trunc(n_1 / n_2)
 
   function intMod, (n, n) -> n:
     case _
-    of n_1, 0:   {}
+    of n_1, 0: fail
     of n_1, n_2: n_1 - (n_2 * trunc(n_1 / n_2))
 
-  function float_add, (r, r) -> r:
+  function floatAdd, (r, r) -> r:
     ## XXX: not defined
-  function float_sub, (r, r) -> r:
+  function floatSub, (r, r) -> r:
     ## XXX: not defined
 
   function valEq, (val, val) -> val:
     case _
-    of val_1, val_1: "true"
-    else:            "false"
+    of val_1, val_2:
+      if same(val_1, val_2):
+        True
+      else:
+        False
 
   function lt, (val, val) -> val:
     case _
-    of n_1, n_2:
-      condition n_1 < n_2
-      "true"
-    of r_1, r_2:
-      condition r_1 < r_2
-      "true"
-    else: "false"
+    of IntVal(n_1), IntVal(n_2):
+      if n_1 < n_2: True
+      else:         False
+    of FloatVal(r_1), FloatVal(r_2):
+      if r_1 < r_2: True
+      else:         False
 
   function lessEqual, (val, val) -> val:
     case _
     of val_1, val_2:
-      where "true", valEq(val_1, val_2)
-      "true"
-    of val_1, val_2:
-      where "true", lt(val_1, val_2)
-      "true"
-    else: "false"
+      if same(valEq(val_1, val_2), True):
+        True
+      else:
+        lt(val_1, val_2)
 
   # TODO: the floating-point operations need to be defined according to the
   #       IEEE 754.2008 standard
 
-  function copy, (C, val) -> val:
+  record DC, {locs: (z -> val),
+              nloc: z,
+              time: z,
+              output: val,
+              errOutput: val,
+              files: ((string, z) -> val)} # name + time -> content
+  ## `DC` is the dynamic context
+
+  function copy, (DC, val) -> val:
     ## The `copy` function takes a context and value and maps them to a value
     ## that is neither a location nor contains any.
     case _
-    of C, c_1:                               c_1
-    of C_1, l_1:                             copy(C_1, C_1.locs(l_1))
-    of C, `proc`(typ_r, *[x_1, typ_1], e_1): `proc`(typ_r, ...[x_1, typ_1], e_1)
-    of C, `array`(*val_1):                   `array`(...val_1)
-    of C, `tuple`(*val_1):                   `tuple`(...val_1)
+    of DC_1, loc(z_1): copy(DC_1, DC_1.locs(z_1))
+    of DC, val_1:      val_1
 
-  function utf8_bytes, x -> (+ch,):
+  function utf8Bytes, string -> *z:
     # TODO: the function is mostly self-explanatory, but it should be defined in
     #       a bit more detail nonetheless
     ##
 
-  function len, (val) -> z:
-    ## Computes the number of elements in an array value.
-    case _
-    of `array`(): 0
-    of `array`(val_1, *val_2): 1 + len(...val_2)
-
   ## Evaluation Contexts
   ## ~~~~~~~~~~~~~~~~~~~
 
-  nterminal Etick:
-    FieldAccess(Etick, n)
+  context Etick:
+    FieldAccess(Etick, IntVal(n))
     At(Etick, e)
     At(le, E)
 
-  nterminal L:
+  context L:
     # evaluation context for lvalues
     hole
-    FieldAccess(L, n)
-    At(L, n)
-  nterminal E:
+    FieldAccess(L, IntVal(n))
+    At(L, IntVal(n))
+  context E:
     hole
     Exprs(E, *e)
-    FieldAccess(E, n)
+    FieldAccess(E, IntVal(n))
     At(E, e)
     At(le, E)
     Asgn(Etick, e)
@@ -634,133 +673,134 @@ const lang* = language:
     Let(x, E, e)
     Return(E)
 
-  nterminal B:
-    hole
-    E[B]
+  context B:
+    E
+    #E[B]
+    # FIXME: not allowed according to the new rules. Needs a workaround...
     Frame(typ, B)
 
   ## Reductions and Steps
   ## ~~~~~~~~~~~~~~~~~~~~
 
-  inductive pReducesTo(inp, out), "$1 ~~> $2":
+  inductive pReducesTo(inp e, out e):
     # pure reductions, that is, reductions not dependent on the execution
     # context
     axiom "E-exprs-fold", Exprs(val_1), val_1
     axiom "E-exprs", Exprs(TupleCons(), +e_1), Exprs(...e_1)
-    axiom "E-if-true", If("true", e_1, e_2), e_1
-    axiom "E-if-false", If("false", e_1, e_2), e_2
+    axiom "E-if-true", If(True, e_1, e_2), e_1
+    axiom "E-if-false", If(False, e_1, e_2), e_2
 
     axiom "E-while", While(e_1, e_2), If(e_1, Exprs(e_2, While(e_1, e_2)), TupleCons())
 
     rule "E-tuple-access":
-      where `tuple`(+val), val_1
-      where val_2, val_1(n_1)
-      conclusion FieldAccess(val_1, n_1), val_2
+      where `tuple`(+val_3), val_1
+      where val_2, val_3[n_1]
+      conclusion FieldAccess(val_1, IntVal(n_1)), val_2
 
-    axiom "E-field-asgn", Asgn(FieldAccess(le_1, n_1), val_1), Asgn(le_1, With(le_1, n_1, val_1))
-    axiom "E-elem-asgn", Asgn(At(le_1, n_1), val_1), Asgn(le_1, With(le_1, n_1, val_1))
+    axiom "E-field-asgn", Asgn(FieldAccess(le_1, IntVal(n_1)), val_1), Asgn(le_1, With(le_1, n_1, val_1))
+    axiom "E-elem-asgn", Asgn(At(le_1, IntVal(n_1)), val_1), Asgn(le_1, With(le_1, n_1, val_1))
 
     rule "E-at":
-      condition n_1 >= 0
+      condition 0 <= n_1
       condition n_1 < len(val_1)
-      where val_2, val_1(n_1)
-      conclusion At(val_1, n_1), val_2
+      let val_2 = val_1[n_1]
+      conclusion At(array(*val_1), IntVal(n_1)), val_2
 
     rule "E-at-out-of-bounds":
-      condition n_1 < 0 or n_1 > len(val_1)
-      conclusion At(val_1, n_1), Unreachable()
+      condition n_1 < 0 or len(val_1) <= n_1
+      conclusion At(array(*val_1), IntVal(n_1)), Unreachable()
 
     rule "E-with-out-of-bounds":
-      condition n_1 < 0 or n_1 >= len(val_1)
-      conclusion With(val_1, n_1, val_2), Unreachable()
+      condition n_1 < 0 or len(val_1) <= n_1
+      conclusion With(array(*val_1), n_1, val_2), Unreachable()
 
     rule "E-add-int":
-      where n_3, addInt(n_1, n_2)
-      conclusion Call("+", IntVal(n_1), IntVal(n_2)), IntVal(n_3)
+      let n_3 = intAdd(n_1, n_2)
+      conclusion Call(Ident("+"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-add-int-overflow":
-      condition addInt(n_1, n_2) == {}
-      conclusion Call("+", IntVal(n_1), IntVal(n_2)), Unreachable()
+      condition (n_1, n_2) notin intAdd(n_1, n_2)
+      conclusion Call(Ident("+"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-sub-int":
-      where n_3, subInt(n_1, n_2)
-      conclusion Call("-", IntVal(n_1), IntVal(n_2)), IntVal(n_3)
+      let n_3 = intSub(n_1, n_2)
+      conclusion Call(Ident("-"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-sub-int-overflow":
-      condition subInt(n_1, n_2) == {}
-      conclusion Call("-", IntVal(n_1), IntVal(n_2)), Unreachable()
+      condition (n_1, n_2) notin intSub(n_1, n_2)
+      conclusion Call(Ident("-"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-mul-int":
-      where n_3, mulInt(n_1, n_2)
-      conclusion Call("*", IntVal(n_1), IntVal(n_2)), IntVal(n_3)
+      let n_3 = intMul(n_1, n_2)
+      conclusion Call(Ident("*"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-mul-int-overflow":
-      condition mulInt(n_1, n_2) == {}
-      conclusion Call("*", IntVal(n_1), IntVal(n_2)), Unreachable()
+      condition (n_1, n_2) notin intMul
+      conclusion Call(Ident("*"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-div-int":
-      where n_3, divInt(n_1, n_2)
-      conclusion Call("div", IntVal(n_1), IntVal(n_2)), IntVal(n_3)
+      let n_3 = intDiv(n_1, n_2)
+      conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-div-int-overflow":
-      condition divInt(n_1, n_2) == {}
-      conclusion Call("div", IntVal(n_1), IntVal(n_2)), Unreachable()
+      condition (n_1, n_2) notin intDiv
+      conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-mod-int":
-      where n_3, divInt(n_1, n_2)
-      conclusion Call("div", IntVal(n_1), IntVal(n_2)), IntVal(n_3)
+      let n_3 = intDiv(n_1, n_2)
+      conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-mod-int-overflow":
-      condition divInt(n_1, n_2) == {}
-      conclusion Call("div", IntVal(n_1), IntVal(n_2)), Unreachable()
+      condition (n_1, n_2) notin intDiv
+      conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-add-float":
-      where r_3, floatAdd(r_1, r_2)
-      conclusion Call("+", FloatVal(r_1), FloatVal(r_2)), FloatVal(r_3)
+      let r_3 = floatAdd(r_1, r_2)
+      conclusion Call(Ident("+"), FloatVal(r_1), FloatVal(r_2)), FloatVal(r_3)
     rule "E-sub-float":
-      where r_3, floatSub(r_1, r_2)
-      conclusion Call("-", FloatVal(r_1), FloatVal(r_2)), Unreachable()
+      let r_3 = floatSub(r_1, r_2)
+      conclusion Call(Ident("-"), FloatVal(r_1), FloatVal(r_2)), FloatVal(r_3)
 
     rule "E-builtin-eq":
-      where val_3, valEq(val_1, val_2)
-      conclusion Call("==", val_1, val_2), val_3
+      let val_3 = valEq(val_1, val_2)
+      conclusion Call(Ident("=="), val_1, val_2), val_3
     rule "E-builtin-le":
-      where val_3, lessEqual(val_1, val_2)
-      conclusion Call("<=", val_1, val_2), val_3
+      let val_3 = lessEqual(val_1, val_2)
+      conclusion Call(Ident("<="), val_1, val_2), val_3
     rule "E-builtin-lt":
-      where val_3, lt(val_1, val_2)
-      conclusion Call("<", val_1, val_2), val_3
+      let val_3 = lt(val_1, val_2)
+      conclusion Call(Ident("<"), val_1, val_2), val_3
 
     rule "E-builtin-len":
-      where n_1, len(val_1)
-      conclusion Call("len", val_1), n_1
+      let n_1 = len(val_1)
+      conclusion Call(Ident("len"), array(*val_1)), IntVal(n_1)
 
     rule "E-builtin-concat":
-      conclusion Call("concat", `array`(*val_1), val_2), `array`(...val_1, val_2)
+      conclusion Call(Ident("concat"), `array`(*val_1), val_2), `array`(...val_1, val_2)
 
     rule "E-call-reduce":
       # the call is replaced with the procedure's body (in which all
       # occurrences of the parameters were substituted with a copy of the
       # respective argument), which is wrapped in a `Frame` tree
-      where `proc`(typ_r, *[x_1, typ_p], e_1), val_1
-      where e_2, substitute(e_1, ...[x_1, val_2])
+      where `proc`(typ_r, *[Ident(string_1), typ_p], e_1), val_1
+      where e_2, substitute(e_1, map(zip(string_1, val_2)))
       conclusion Call(val_1, *val_2), Frame(typ_r, e_2)
 
-  inductive reducesTo(inp, inp, out, out), "$1; $2 ~~> $3; $4":
+  inductive reducesTo(inp DC, inp e, out DC, out e):
     rule "E-tuple-cons":
-      where +val_2, ...copy(C_1, val_1)
-      conclusion C_1, TupleCons(+val_1), C_1, `tuple`(...val_2)
+      where +val_2, ...copy(DC_1, val_1)
+      conclusion DC_1, TupleCons(+val_1), DC_1, `tuple`(...val_2)
 
     rule "E-seq-cons":
-      where +val_2, ...copy(C_1, val_1)
-      conclusion C_1, Seq(typ, val_1), C_1, `array`(...val_2)
+      where +val_2, ...copy(DC_1, val_1)
+      conclusion DC_1, Seq(typ, *val_1), DC_1, `array`(...val_2)
 
     rule "E-string-cons":
-      where (*ch_1,), utf8_bytes(x_1)
       # FIXME: doesn't need to be an impure reduction
-      conclusion C_1, Seq(StringVal(x_1)), C_1, `array`(...ch_1)
+      where *z_1, utf8Bytes(string_1)
+      conclusion DC_1, Seq(StringVal(string_1)), DC_1, array(...IntVal(z_1))
 
     rule "E-let-introduce":
-      where l_1, fresh(C_1.locs)
-      where val_2, copy(C_1, val_1)
-      where C_2, C_1 + {"locs" : {l_1 : val_2}}
-      where e_2, substitute(e_1, x_1, l_1)
-      conclusion C_1, Let(x_1, val_1, e_1), C_2, e_2
+      let z_1 = DC_1.nloc
+      let val_2 = copy(DC_1, val_1)
+      let DC_2 = DC_1 + DC(locs: {z_1 : val_2}, nloc: z_1 + 1)
+      let e_2 = substitute(e_1, {string_1: loc(z_1)})
+      conclusion DC_1, Let(Ident(string_1), val_1, e_1), DC_2, e_2
     # TODO: the location needs to be removed from the execution context once
     #       `e_2` is reduced to a value, otherwise it remains accessible. This
     #       is not a problem at the moment, but it will be once there are
@@ -768,61 +808,64 @@ const lang* = language:
     #       Removing the location from the store could be achieved via a new
     #       `(Pop x)` construct, where `(Let x val e)` reduces to `(Pop x e)`
 
-    rule "E-with":
-      condition n_1 >= 0
-      condition n_1 < len(val_1)
-      where val_3, val_1(n_1)
-      conclusion C_1, With(val_1, n_1, val_2), C_1, val_3
+    rule "E-with-array":
+      let val_3 = val_1[n_1]
+      # FIXME: this is wrong. The n-th element of the array must be replaced
+      #        with val_2
+      conclusion DC_1, With(array(*val_1), n_1, val_2), DC_1, val_3
+    rule "E-with-tuple":
+      let val_3 = val_1[n_1]
+      # FIXME: same here
+      conclusion DC_1, With(`tuple`(+val_1), n_1, val_2), DC_1, val_3
 
     rule "E-asgn":
-      where C_2, C_1 + {"locs" : {l_1 : val_1}}
-      conclusion C_1, Asgn(l_1, val_1), C_2, TupleCons()
+      let DC_2 = DC_1 + DC(locs: {z_1 : val_1})
+      conclusion DC_1, Asgn(loc(z_1), val_1), DC_2, TupleCons()
 
     rule "E-builtin-write":
-      where `array`(*val_2), C_1.output
-      where C_2, C_1 + {"output": `array`(...val_2, ...val_1)}
-      conclusion C_1, Call("write", `array`(*val_1)), C_2, TupleCons()
+      where `array`(*val_2), DC_1.output
+      let DC_2 = DC_1 + DC(output: array(...val_2, ...val_1))
+      conclusion DC_1, Call(Ident("write"), array(*val_1)), DC_2, TupleCons()
 
     rule "E-builtin-writeErr":
-      where `array`(*val_2), C_1.errOutput
-      where C_2, C_1 + {"errOutput": `array`(...val_2, ...val_1)}
-      conclusion C_1, Call("writeErr", val_1), C_2, TupleCons()
+      where `array`(*val_2), DC_1.errOutput
+      where DC_2, DC_1 + DC(errOutput: array(...val_2, ...val_1))
+      conclusion DC_1, Call(Ident("writeErr"), array(*val_1)), DC_2, TupleCons()
 
     rule "E-builtin-readFile":
       # the extra time parameter is used to model the fact that the file
       # access doesn't always yield the same result, even when the program
       # does nothing
-      where val_2, C_1.files(val_1, C_1.time)
-      where `array`(*ch), val_2
-      where n_1, C_1.time + 1
-      where C_2, C_1 + {"time": n_1}
-      conclusion C_1, Call("readFile", val_1), C_2, val_2
+      where val_2, DC_1.files(z_1, DC_1.time)
+      where `array`(*char(z)), val_2
+      where n_1, DC_1.time + 1
+      where DC_2, DC_1 + DC(time: n_1)
+      conclusion DC_1, Call(Ident("readFile"), array(*char(z_1))), DC_2, val_2
 
-  inductive step(inp, inp, out, out), "$1; $2 \\rightarrow $3; $4":
+  inductive step(inp DC, inp e, out DC, out e):
     rule "E-reduce-pure":
       premise pReducesTo(e_1, e_2)
-      conclusion C_1, E_1[e_1], C_1, E_1[e_2]
+      conclusion DC_1, E_1[e_1], DC_1, E_1[e_2]
 
     rule "E-reduce-impure":
-      premise reducesTo(C_1, e_1, C_2, e_2)
-      conclusion C_1, E_1[e_1], C_2, E_1[e_2]
+      premise reducesTo(DC_1, e_1, DC_2, e_2)
+      conclusion DC_1, E_1[e_1], DC_2, E_1[e_2]
 
     rule "E-tuple-loc-access":
-      where val_1, C_1.locs(l_1)
-      conclusion C_1, E_1[L_1[FieldAccess(l_1, n_1)]], C_1, E_1[L_1[FieldAccess(val_1, n_1)]]
+      let val_1 = DC_1.locs(z_1)
+      conclusion DC_1, E_1[L_1[FieldAccess(loc(z_1), IntVal(n_1))]], DC_1, E_1[L_1[FieldAccess(val_1, IntVal(n_1))]]
     rule "E-at-loc":
-      where val_1, C_1.locs(l_1)
-      conclusion C_1, E_1[L_1[At(l_1, n_1)]], C_1, E_1[L_1[At(val_1, n_1)]]
+      let val_1 = DC_1.locs(z_1)
+      conclusion DC_1, E_1[L_1[At(loc(z_1), IntVal(n_1))]], DC_1, E_1[L_1[At(val_1, IntVal(n_1))]]
 
     rule "E-return":
-      where val_2, copy(C_1, val_1)
-      conclusion C_1, B_1[Frame(typ, E_1[Return(val_1)])], C_1, B_1[val_2]
+      let val_2 = copy(DC_1, val_1)
+      conclusion DC_1, B_1[Frame(typ, E_1[Return(val_1)])], DC_1, B_1[val_2]
     rule "E-return-unit":
-      conclusion C_1, B_1[Frame(typ, E_1[Return()])], C_1, B_1[TupleCons()]
+      conclusion DC_1, B_1[Frame(typ, E_1[Return()])], DC_1, B_1[TupleCons()]
 
     rule "E-unreachable":
-      where !hole, B_1
-      conclusion C_1, B_1[Unreachable()], C_1, Unreachable()
+      conclusion DC_1, B_1[Unreachable()], DC_1, Unreachable()
 
     # XXX: theorem support is not implemented...
     #[
@@ -834,3 +877,45 @@ const lang* = language:
     # ^^ progress. That is, a valid expression is either an irreducible value,
     # or it must be reducible
     ]#
+
+  # ------------
+  # boilerplate functions that should rather not exist
+
+  function `not`, bool -> bool:
+    case _
+    of true: false
+    of false: true
+
+  # XXX: the built-in `in` function should consider the custom equality
+  #      operator, which would render `contains` obsolete
+  function contains, (*typ, typ) -> bool:
+    case _
+    of [typ_1, *typ_2], typ_3:
+      if typ_1 == typ_3:
+        true
+      else:
+        contains(typ_2, typ_3)
+    of _:
+      false
+
+  function uniqueTypes, *typ -> bool:
+    ## Computes whether all types in the list are unique.
+    case _
+    of [typ_1, +typ_2]:
+      if not contains(typ_2, typ_1):
+        uniqueTypes(typ_2)
+      else:
+        false
+    of _:
+      true
+
+  function unique, *string -> bool:
+    ## Computes whether all strings in the list are unique.
+    case _
+    of [string_1, +string_2]:
+      if string_1 notin string_2:
+        unique(string_2)
+      else:
+        false
+    of _:
+      true

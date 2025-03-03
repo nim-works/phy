@@ -21,6 +21,9 @@ Commands:
   Programs: seq[(string, string, bool, bool)] = @[
     ("tester", "tools/tester.nim", true, true),
     ("passtool", "tools/passtool/passtool.nim", true, true),
+    ("interpreter", "spec/interpreter.nim", true, true),
+    # XXX: ^^ temporarily registered as a program because it would otherwise
+    #      be unused
     ("repl", "phy/repl.nim", false, true),
     ("phy", "phy/phy.nim", false, true),
     ("skully", "skully/skully.nim", true, false)
