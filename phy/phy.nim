@@ -403,10 +403,23 @@ proc main(args: openArray[string]) =
       let stack = hoSlice(mem.stackStart, mem.stackStart + mem.stackSize)
 
       if source == langSource:
-        let cl = HostEnv(outStream: newFileStream(stdout),
-                         errStream: newFileStream(stderr))
         # we have type high-level type information
-        stdout.write $run(env, stack, entry.unsafeGet, typ, cl)
+        var res: SexpNode
+        if gRunner:
+          # use an intermediate buffer for the output and error stream
+          let stream = newStringStream()
+          let cl = HostEnv(outStream: stream, errStream: stream)
+          res = run(env, stack, entry.unsafeGet, typ, cl)
+          if stream.data.len > 0:
+            stdout.write stream.data
+            stdout.write "!BREAK!"
+        else:
+          # write directly to the output and error streams
+          let cl = HostEnv(outStream: newFileStream(stdout),
+                           errStream: newFileStream(stderr))
+          res = run(env, stack, entry.unsafeGet, typ, cl)
+
+        stdout.write $res
         stdout.write " : "
         stdout.write $typeToSexp(typ)
       else:
