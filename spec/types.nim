@@ -104,7 +104,7 @@ type
     name*: string
     patterns*: seq[Node[T]]
 
-  Language* = object
+  LangDef* = object
     ## The full and self-contained description of a language.
     types*: seq[Type]
       ## all meta-language types reference from nodes
@@ -129,6 +129,6 @@ template tree*[T](k: NodeKind, c: varargs[Node[T]]): Node[T] =
 proc tree*[T](k: range[nkConstr..nkUnpack], c: sink seq[Node[T]]): Node[T] =
   Node[T](kind: k, children: c)
 
-proc `[]`*(lang: Language, typ: TypeId): lent Type =
+proc `[]`*(lang: LangDef, typ: TypeId): lent Type =
   ## Looks up the given `typ`.
   lang.types[typ.ord - 1]

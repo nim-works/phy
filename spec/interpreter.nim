@@ -44,12 +44,12 @@ type
     of false:
       discard
 
-  Next = proc(c: var Context, lang: Language, n: Node): Node
+  Next = proc(c: var Context, lang: LangDef, n: Node): Node
     ## type of a continuation
 
 using
   c: var Context
-  lang: Language
+  lang: LangDef
 
 const
   ParamId = -1 ## ID for a function's/relation's parameter binding
@@ -118,7 +118,7 @@ proc matchList(lang; pat: Node, term: Node): Match =
   # using continuation-passing-style. The match procedure takes a pattern, a
   # cursor (term + index), the previous match state (for tracking the
   # bindings), and a continuation as input
-  type Cont = proc(lang: Language, term: Node, i: int, b: sink Match): Match
+  type Cont = proc(lang: LangDef, term: Node, i: int, b: sink Match): Match
   template cont(body: untyped): untyped {.dirty.} =
     # cannot use the `=>` macro because of the sink parameter
     proc tmp(lang; term: Node, i: int, sub: sink Match): Match {.gensym.} =
@@ -423,7 +423,7 @@ proc interpretRelation(c; lang; id: int, args: Node): Node =
     c.traces.add trace
 
 proc matchRPattern(c; lang; id: int, n: Node, ctx: seq[int],
-                   then: proc(c: var Context, lang: Language, n: Node, ctx: seq[int]): Node): Node =
+                   then: proc(c: var Context, lang: LangDef, n: Node, ctx: seq[int]): Node): Node =
   ## Implements R-pattern matching. Tries to decompose `n` into a term-with-
   ## hole and a term. On finding a candidate, `then` is invoked. If a `then`
   ## invocation succeeds, returns with the result of the invocation, otherwise

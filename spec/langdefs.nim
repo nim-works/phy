@@ -7,7 +7,7 @@ import
 
 # a lot of the types from ``types`` are redefined here, so everything is
 # imported explicitly
-from types import NodeKind, Rule, Relation, Function, Language, Pattern,
+from types import NodeKind, Rule, Relation, Function, LangDef, Pattern,
                   `[]`, add, withChildren, len, tree
 
 type
@@ -1600,9 +1600,9 @@ proc newLit[K, V](t: Table[K, V]): NimNode =
       result.add newTree(nnkExprColonExpr, newLit(k), newLit(v))
     result = newCall(bindSym"toTable", result)
 
-macro language*(body: untyped): Language =
+macro language*(body: untyped): LangDef =
   ## Parses and type-checks the meta-language module `body` and returns it as
-  ## a ``Language`` object.
+  ## a ``LangDef`` object.
   body.expectKind nnkStmtList
 
   var
@@ -1752,7 +1752,7 @@ macro language*(body: untyped): Language =
 
   # convert the internal representation to the external one and return it
   var
-    lang = Language()
+    lang = LangDef()
     map = initTable[Type, types.TypeId]()
   lang.functions.convertFrom(c.functions, map, lang.types)
   lang.relations.convertFrom(c.relations, map, lang.types)
