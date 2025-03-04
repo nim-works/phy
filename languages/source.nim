@@ -878,6 +878,16 @@ const lang* = language:
     # or it must be reducible
     ]#
 
+  inductive cstep(inp DC, inp e, out DC, out e):
+    ## Transitive closure of `step`. Relates an expression to the irreducible
+    ## expression it reduces to (if any).
+    axiom "value", DC_1, val_1, DC_1, val_1
+    axiom "unreachable", DC_1, Unreachable(), DC_1, Unreachable()
+    rule "reducible":
+      premise step(DC_1, e_1, DC_2, e_2)
+      premise cstep(DC_2, e_2, DC_3, e_3)
+      conclusion DC_1, e_1, DC_3, e_3
+
   # ------------
   # boilerplate functions that should rather not exist
 
