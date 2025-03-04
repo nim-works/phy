@@ -117,6 +117,8 @@ const lang* = language:
       If(expr_1, expr_2, TupleCons())
     of If(Exprs(*expr_1, expr_2), expr_3, expr_4):
       Exprs(...expr_1, If(expr_2, expr_3, expr_4))
+    of expr_1:
+      expr_1
 
   ## Type Relations
   ## --------------
