@@ -1,8 +1,8 @@
 ## Provides the implementation for the built-in meta-language functions, to
 ## be used by the interpreter.
 
-import std/tables
-import int128
+import std/[strutils, tables]
+import rationals
 import types except Node
 
 type Node = types.Node[TypeId]
@@ -23,11 +23,10 @@ proc `==`*(a, b: Node): bool =
   else:
     false
 
-proc num(n: Node): Int128 =
-  # TODO: all numbers should be treated as rational numbers by default
-  parseInt128(n.sym)
+proc num(n: Node): Rational =
+  parseRational(n.sym)
 
-proc makeNum(i: Int128): Node =
+proc makeNum(i: Rational): Node =
   Node(kind: nkNumber, sym: $i)
 
 proc merge(a: var Node, b: Node) =
@@ -89,20 +88,17 @@ const arr = [
   ),
   ("-", proc(n: Node): Node = makeNum(n[0].num - n[1].num)),
   ("*", proc(n: Node): Node = makeNum(n[0].num * n[1].num)),
-  ("/", proc(n: Node): Node =
-    # TODO: this needs to produce a rational number, not an integer
-    makeNum(n[0].num / n[1].num)
-  ),
+  ("/", proc(n: Node): Node = makeNum(n[0].num / n[1].num)),
   ("neg", proc(n: Node): Node = makeNum(-n.num)),
   ("^", proc(n: Node): Node =
-    assert not n[1].num.isNeg, "negative exponents not supported"
     let base = n[0].num
-    let exponent = n[1].num
-    if exponent == Zero:
+    let exponent = parseInt(n[1].sym)
+    assert exponent < 0, "negative exponents not supported"
+    if exponent == 0:
       Node(kind: nkNumber, sym: "1")
     else:
       var val = base
-      for _ in 1..<exponent.toInt:
+      for _ in 1..<exponent:
         val = val * base
       makeNum(val)
   ),
