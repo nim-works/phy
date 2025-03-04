@@ -41,7 +41,7 @@ proc readFloat64(p: HostPointer): float64 =
   copyMem(addr result, p, 8)
 
 proc primToSexp(v: Value, typ: SemType): SexpNode =
-  ## Renders the primitive value `v` of `typ` type to an S-expression.
+  ## Renders the primitive value `v` of type `typ` to an S-expression.
   case typ.kind
   of tkUnit:
     newCons("TupleCons")
