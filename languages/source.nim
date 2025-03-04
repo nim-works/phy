@@ -162,7 +162,7 @@ const lang* = language:
       condition typ_1 == typ_2
       conclusion typ_1, typ_2
     rule "subtype":
-      condition typ_1 <:= typ_2
+      condition typ_1 <: typ_2
       conclusion typ_1, typ_2
 
   ## Typing Judgment
