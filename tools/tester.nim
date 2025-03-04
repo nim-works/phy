@@ -441,7 +441,11 @@ proc runTest(desc: RunnerDesc, file: string): bool =
               echo "cannot mix positional and non-positional 'output'"
               return false
 
-            let at = parseInt(evt.key[(i + 1)..^1])
+            let at =
+              try: parseInt(evt.key[(i + 1)..^1])
+              except ValueError:
+                echo "illformed 'output' key: not a number"
+                return false
             if at >= spec.expected.len:
               spec.expected.grow(at + 1, OutputSpec())
             spec.expected[at] = output
