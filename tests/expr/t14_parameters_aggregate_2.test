@@ -3,7 +3,7 @@ discard """
     Make sure a procedure with an aggregate return value and aggregate
     parameter works
   "
-  output: "(30,): (int,)"
+  output: "(TupleCons 30) : (TupleTy (IntTy))"
 """
 (Module
   (ProcDecl (Ident "p") (TupleTy (IntTy))

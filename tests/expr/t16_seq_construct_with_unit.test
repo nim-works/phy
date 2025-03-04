@@ -1,4 +1,4 @@
 discard """
-  output: "[()]: seq(unit)"
+  output: "(array (TupleCons)) : (SeqTy (UnitTy))"
 """
 (Seq (UnitTy) (TupleCons))

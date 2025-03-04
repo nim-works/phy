@@ -1,6 +1,6 @@
 discard """
   description: "Make sure a procedure with a single aggregate parameter runs"
-  output: "(): unit"
+  output: "(TupleCons) : (UnitTy)"
 """
 (Module
   (ProcDecl (Ident "p") (UnitTy)

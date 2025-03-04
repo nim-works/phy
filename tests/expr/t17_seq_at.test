@@ -1,5 +1,5 @@
 discard """
-  output: "26: int"
+  output: "26 : (IntTy)"
 """
 (Exprs
   (Decl x (Seq (IntTy) 1 5 20))

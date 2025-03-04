@@ -1,6 +1,6 @@
 discard """
   description: "The name of a local is an l-value expression"
-  output: "(): unit"
+  output: "(TupleCons) : (UnitTy)"
 """
 (Exprs
   (Decl (Ident "x") (IntVal 1))

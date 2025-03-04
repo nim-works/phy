@@ -1,6 +1,6 @@
 discard """
   description: "Sequences part of tuples are fully copied when the tuple is"
-  output: "([1, 2, 3],): (seq(int),)"
+  output: "(TupleCons (array 1 2 3)) : (TupleTy (SeqTy (IntTy)))"
 """
 (Exprs
   (Decl x (TupleCons (Seq (IntTy) 1 2 3)))

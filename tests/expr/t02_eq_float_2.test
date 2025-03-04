@@ -1,4 +1,4 @@
 discard """
-  output: "false: bool"
+  output: "(False) : (BoolTy)"
 """
 (Call (Ident "==") (FloatVal 10.0) (FloatVal 10.5))

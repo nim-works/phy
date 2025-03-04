@@ -1,5 +1,5 @@
 discard """
-  output: "(1,): (int,)"
+  output: "(TupleCons 1) : (TupleTy (IntTy))"
 """
 (Exprs
   (Decl (Ident "x") (TupleCons (IntVal 0)))

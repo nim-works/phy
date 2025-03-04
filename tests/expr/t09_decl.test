@@ -1,5 +1,5 @@
 discard """
-  output: "1: int"
+  output: "1 : (IntTy)"
 """
 (Exprs
   (Decl (Ident "x") (IntVal 1))

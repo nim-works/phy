@@ -1,5 +1,5 @@
 discard """
-  output: "[1]: seq(int)"
+  output: "(array 1) : (SeqTy (IntTy))"
 """
 (Exprs
   (Decl x (Seq (IntTy)))

@@ -1,4 +1,5 @@
 discard """
-  output: "test\n(): unit"
+  output.0: "test\n"
+  output.1: "(TupleCons) : (UnitTy)"
 """
 (Call writeErr (Seq "test\n"))

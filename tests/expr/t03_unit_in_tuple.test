@@ -1,4 +1,4 @@
 discard """
-  output: "((),): (unit,)"
+  output: "(TupleCons (TupleCons)) : (TupleTy (UnitTy))"
 """
 (TupleCons (TupleCons))

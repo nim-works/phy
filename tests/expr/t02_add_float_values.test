@@ -1,4 +1,4 @@
 discard """
-  output: "4.0: float"
+  output: "4.0 : (FloatTy)"
 """
 (Call (Ident "+") (FloatVal 1.5) (FloatVal 2.5))

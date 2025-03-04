@@ -1,6 +1,6 @@
 discard """
   description: "Sequences part of unions are fully copied when the union is"
-  output: "[1, 2, 3]: union(int, seq(int))"
+  output: "(array 1 2 3) : (UnionTy (IntTy) (SeqTy (IntTy)))"
 """
 (Module
   (ProcDecl union (UnionTy (IntTy) (SeqTy (IntTy))) (Params)

@@ -1,5 +1,5 @@
 discard """
-  output: "([1, 2, 3],): (seq(int),)"
+  output: "(TupleCons (array 1 2 3)) : (TupleTy (SeqTy (IntTy)))"
 """
 (Exprs
   (Decl x (Seq (IntTy) 1 2 3))

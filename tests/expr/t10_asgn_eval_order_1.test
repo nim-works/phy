@@ -3,7 +3,7 @@ discard """
     The actual assignment happens after both expressions had their effects
     computed.
   "
-  output: "6: int"
+  output: "6 : (IntTy)"
 """
 (Exprs
   (Decl (Ident "x") (IntVal 0))

@@ -145,4 +145,4 @@ jobs:
           fi
         env:
           TEST_FILE: tests/expr/t06_call_proc_with_tuple_return_type.test
-          TEST_OUTPUT: "(100, 200): (int, int)(Done 0)"
+          TEST_OUTPUT: "(TupleCons 100 200) : (TupleTy (IntTy) (IntTy))(Done 0)"

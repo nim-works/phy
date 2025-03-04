@@ -1,4 +1,4 @@
 discard """
-  output: "[1, 2, 3]: seq(int)"
+  output: "(array 1 2 3) : (SeqTy (IntTy))"
 """
 (Seq (IntTy) 1 2 3)

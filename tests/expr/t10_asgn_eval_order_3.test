@@ -2,7 +2,7 @@ discard """
   description: "
     The lhs expression has its effects computed before the rhs is evaluated
   "
-  output: "6: int"
+  output: "6 : (IntTy)"
 """
 (Exprs
   (Decl (Ident "x") (IntVal 0))

@@ -3,7 +3,7 @@ discard """
     The second `Or` operand expression is not evaluated when the first one
     evaluates to true.
   "
-  output: "100: int"
+  output: "100 : (IntTy)"
 """
 (Exprs
   (Decl (Ident "a") (IntVal 100))

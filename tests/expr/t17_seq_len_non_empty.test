@@ -1,4 +1,4 @@
 discard """
-  output: "3: int"
+  output: "3 : (IntTy)"
 """
 (Call len (Seq (IntTy) 1 2 3))

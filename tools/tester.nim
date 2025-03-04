@@ -403,6 +403,8 @@ proc runTest(desc: RunnerDesc, file: string): bool =
         break
     s.close()
 
+    var usesPositional = false
+      ## whether a positional output specification is used
     var parser: CfgParser
     open(parser, newStringStream(lines), file, 1)
     while true:
@@ -414,14 +416,40 @@ proc runTest(desc: RunnerDesc, file: string): bool =
           discard "ignored; only exists for informative purposes"
         of "knownIssue":
           spec.knownIssue = some evt.value
-        of "output":
-          spec.expected.add:
-            OutputSpec(fromFile: false,
-                       output: strip(evt.value, leading=true, trailing=false))
         of "arguments":
           spec.arguments = split(evt.value, ' ')
         of "reject":
           spec.reject = parseBool(evt.value)
+        elif evt.key.startsWith("output"):
+          let output =
+            OutputSpec(fromFile: false,
+                       output: strip(evt.value, leading=true, trailing=false))
+          if evt.key == "output":
+            if usesPositional:
+              echo "cannot mix positional and non-positional 'output'"
+              return false
+            spec.expected.add output
+          else:
+            let i = find(evt.key, '.')
+            if i == -1:
+              echo "illformed 'output' key"
+              return false
+            elif i == evt.key.high:
+              echo "illformed 'output' key: dot must be followed by number"
+              return false
+            elif not usesPositional and spec.expected.len > 0:
+              echo "cannot mix positional and non-positional 'output'"
+              return false
+
+            let at =
+              try: parseInt(evt.key[(i + 1)..^1])
+              except ValueError:
+                echo "illformed 'output' key: not a number"
+                return false
+            if at >= spec.expected.len:
+              spec.expected.grow(at + 1, OutputSpec())
+            spec.expected[at] = output
+            usesPositional = true
         else:
           echo "unknown key: ", evt.key
           return false

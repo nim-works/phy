@@ -1,6 +1,6 @@
 discard """
   description: "Make sure a local can be used as the `If` condition"
-  output: "(): unit"
+  output: "(TupleCons) : (UnitTy)"
 """
 (Exprs
   (Decl (Ident "a") (Ident "false"))
