@@ -434,6 +434,9 @@ proc runTest(desc: RunnerDesc, file: string): bool =
             if i == -1:
               echo "illformed 'output' key"
               return false
+            elif i == evt.key.high:
+              echo "illformed 'output' key: dot must be followed by number"
+              return false
             elif not usesPositional and spec.expected.len > 0:
               echo "cannot mix positional and non-positional 'output'"
               return false
