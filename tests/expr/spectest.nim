@@ -302,7 +302,8 @@ proc eval(n: Node): Option[Node] =
 # gather the indices of the relations we need later:
 for i, it in lang.relations.pairs:
   case it.name
-  of "types":
+  of "mtypes":
+    # use mtypes instead of types to strip the mutability qualifier from types
     typesRel = i
   of "cstep":
     cstepRel = i
@@ -313,7 +314,7 @@ for i, it in lang.functions.pairs:
     desugarFnc = i
 
 if typesRel == -1:
-  quit "missing 'types' relation"
+  quit "missing 'mtypes' relation"
 if cstepRel == -1:
   quit "missing 'cstep' relation"
 if desugarFnc == -1:
