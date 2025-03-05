@@ -75,6 +75,9 @@ jobs:
       - name: "Run tests"
         run: bin/tester
 
+      - name: "Run specification tests"
+        run: nim c --opt:speed -d:nimStrictMode -r tests/expr/spectest.nim
+
   languages:
     name: "Check and generate languages"
     runs-on: ubuntu-22.04

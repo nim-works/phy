@@ -117,6 +117,8 @@ const lang* = language:
       If(expr_1, expr_2, TupleCons())
     of If(Exprs(*expr_1, expr_2), expr_3, expr_4):
       Exprs(...expr_1, If(expr_2, expr_3, expr_4))
+    of expr_1:
+      expr_1
 
   ## Type Relations
   ## --------------
@@ -160,7 +162,7 @@ const lang* = language:
       condition typ_1 == typ_2
       conclusion typ_1, typ_2
     rule "subtype":
-      condition typ_1 <:= typ_2
+      condition typ_1 <: typ_2
       conclusion typ_1, typ_2
 
   ## Typing Judgment
@@ -877,6 +879,16 @@ const lang* = language:
     # ^^ progress. That is, a valid expression is either an irreducible value,
     # or it must be reducible
     ]#
+
+  inductive cstep(inp DC, inp e, out DC, out e):
+    ## Transitive closure of `step`. Relates an expression to the irreducible
+    ## expression it reduces to (if any).
+    axiom "value", DC_1, val_1, DC_1, val_1
+    axiom "unreachable", DC_1, Unreachable(), DC_1, Unreachable()
+    rule "reducible":
+      premise step(DC_1, e_1, DC_2, e_2)
+      premise cstep(DC_2, e_2, DC_3, e_3)
+      conclusion DC_1, e_1, DC_3, e_3
 
   # ------------
   # boilerplate functions that should rather not exist

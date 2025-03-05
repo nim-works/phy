@@ -6,7 +6,8 @@ import builtin
 import types except Node
 
 type
-  Failure = object of CatchableError
+  Failure* = object of CatchableError
+    ## Error raised by the interpreter when something cannot be evaluated.
 
   Node = types.Node[TypeId]
   Bindings = Table[int, Node]
