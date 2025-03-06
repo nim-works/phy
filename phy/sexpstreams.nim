@@ -41,6 +41,8 @@ iterator parse*(stream: Stream): tuple[n: SexpNode, depth: int] {.closure.} =
       stack[^1].add sexp(parseFloat(p.currString))
     of tkSymbol:
       stack[^1].add newSSymbol(p.currString)
+    of tkKeyword:
+      stack[^1].add newSSymbol(p.currString)
     of tkParensLe:
       stack.add newSList()
     of tkParensRi:
@@ -56,7 +58,7 @@ iterator parse*(stream: Stream): tuple[n: SexpNode, depth: int] {.closure.} =
 
     of TTokKind.tkError:
       raiseParseErr(p, $p.error)
-    of tkSpace, tkNil, tkKeyword:
+    of tkSpace, tkNil:
       raiseParseErr(p, "unexpected token: " & $p.currToken)
     of tkDot:
       # the dot is used to indicate that a user interaction is required
