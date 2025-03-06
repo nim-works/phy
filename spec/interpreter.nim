@@ -232,7 +232,7 @@ proc matches(lang; pat, term: Node): Match =
     of tkAll:
       Match(has: true)
     of tkInt:
-      test term.kind == nkNumber # TODO: wrong, must be an int
+      test term.kind == nkNumber and term.num.isInt
     of tkRat:
       test term.kind == nkNumber
     of tkList:
