@@ -1635,10 +1635,10 @@ proc sem(body: NimNode): LangDef =
   c.builtin("neg", forall(1, fntype(tvar(0), tvar(0))))
   c.builtin("+", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
   c.builtin("-", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
-  c.builtin("<=", forall(1, fntype(tup(tvar(0), tvar(0)), boolType)))
-  c.builtin("<", forall(1, fntype(tup(tvar(0), tvar(0)), boolType)))
-  c.builtin("/", forall(1, fntype(tup(tvar(0), tvar(0)), ratType)))
-  c.builtin("^", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
+  c.builtin("<=", forall(1, fntype(tup(ratType, ratType), boolType)))
+  c.builtin("<", forall(1, fntype(tup(ratType, ratType), boolType)))
+  c.builtin("/", forall(1, fntype(tup(ratType, ratType), ratType)))
+  c.builtin("^", forall(1, fntype(tup(tvar(0), intType), tvar(0))))
   c.builtin("*", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
 
   # first pass: make sure the broad shape of `body` is correct and collect the
