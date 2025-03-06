@@ -29,6 +29,7 @@ const lang* = language:
     Call(+expr)
     FieldAccess(expr, IntVal(z))
     At(expr, expr)
+    As(expr, texpr)
     And(expr, expr)
     Or(expr, expr)
     If(expr, expr, expr)
@@ -301,6 +302,13 @@ const lang* = language:
       premise mtypes(C_1, e_2, IntTy())
       where SeqTy(typ_2), typ_1
       conclusion C_1, At(e_1, e_2), mut(typ_2)
+
+    rule "S-as":
+      premise mtypes(C_1, e_1, typ_1)
+      premise ttypes(C_1, texpr_1, typ_2)
+      condition typ_2 != VoidTy()
+      condition typ_1 <:= typ_2
+      conclusion C_1, As(e_1, texpr_1), typ_2
 
     rule "S-asgn":
       premise types(C_1, e_1, mut(typ_1))
@@ -689,6 +697,7 @@ const lang* = language:
     axiom "E-exprs", Exprs(TupleCons(), +e_1), Exprs(...e_1)
     axiom "E-if-true", If(True, e_1, e_2), e_1
     axiom "E-if-false", If(False, e_1, e_2), e_2
+    axiom "E-as", As(e_1, texpr), e_1 # a no-op
 
     axiom "E-while", While(e_1, e_2), If(e_1, Exprs(e_2, While(e_1, e_2)), TupleCons())
 
