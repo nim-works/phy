@@ -1,7 +1,7 @@
 ## Provides the implementation for the built-in meta-language functions, to
 ## be used by the interpreter.
 
-import std/[strutils, tables]
+import std/tables
 import rationals
 import types except Node
 
@@ -14,7 +14,9 @@ proc `==`*(a, b: Node): bool =
       a.children == b.children
     of nkHole, nkFail, nkFalse, nkTrue:
       true
-    of nkSymbol, nkString, nkNumber:
+    of nkNumber:
+      a.num == b.num
+    of nkSymbol, nkString:
       a.sym == b.sym
     of nkFunc, nkRelation, nkContext, nkVar:
       a.id == b.id
@@ -23,11 +25,8 @@ proc `==`*(a, b: Node): bool =
   else:
     false
 
-proc num(n: Node): Rational =
-  parseRational(n.sym)
-
-proc makeNum(i: Rational): Node =
-  Node(kind: nkNumber, sym: $i)
+proc makeNum(r: Rational): Node =
+  Node(kind: nkNumber, num: r)
 
 proc merge(a: var Node, b: Node) =
   ## Merges the record/set/map `b` into `a`.
@@ -92,10 +91,10 @@ const arr = [
   ("neg", proc(n: Node): Node = makeNum(-n.num)),
   ("^", proc(n: Node): Node =
     let base = n[0].num
-    let exponent = parseInt(n[1].sym)
+    let exponent = n[1].num.toInt
     assert exponent < 0, "negative exponents not supported"
     if exponent == 0:
-      Node(kind: nkNumber, sym: "1")
+      Node(kind: nkNumber, num: rational(1))
     else:
       var val = base
       for _ in 1..<exponent:
@@ -104,7 +103,7 @@ const arr = [
   ),
   ("<", proc(n: Node): Node = toNode n[0].num < n[1].num),
   ("<=", proc(n: Node): Node = toNode n[0].num <= n[1].num),
-  ("len", proc(n: Node): Node = Node(kind: nkNumber, sym: $n.len)),
+  ("len", proc(n: Node): Node = Node(kind: nkNumber, num: rational(n.len))),
   ("map", proc(n: Node): Node =
     # create a map from the list of key/value pairs
     result = Node(kind: nkMap)

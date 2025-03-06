@@ -58,6 +58,19 @@ proc split*(r: Rational): tuple[i: Int128, frac: Rational] =
   result.i = r.num / r.den
   result.frac = reduced(Rational(num: r.num - (result.i * r.den), den: r.den))
 
+proc isInt*(r: Rational): bool =
+  ## Whether `r` is an integer number.
+  r.den == One
+
+proc rational*(i: int): Rational =
+  ## Lossless conversion from ``int`` to ``Rational``.
+  Rational(num: toInt128(i), den: One)
+
+proc toInt*(r: Rational): int =
+  ## Converts `r`, which must be a valid integer number, to an int.
+  assert r.den == One
+  r.num.toInt
+
 proc parseRational*(s: string): Rational =
   ## Parses a rational number from `s`. `s` must be a well-formed rational
   ## number representation.

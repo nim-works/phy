@@ -3,7 +3,8 @@
 ## implementing a type checker and (basic) transformer for it.
 
 import
-  std/[macros, tables, sets, strutils, strformat, hashes]
+  std/[macros, tables, sets, strutils, strformat, hashes],
+  rationals
 
 # a lot of the types from ``types`` are redefined here, so everything is
 # imported explicitly
@@ -623,7 +624,9 @@ proc matchesPattern(c; pat, term: Node): bool =
     true # matches everything
   of nkTrue, nkFalse:
     term.kind == pat.kind
-  of nkSymbol, nkNumber, nkString:
+  of nkNumber:
+    term.kind == nkNumber and term.num == pat.num
+  of nkSymbol, nkString:
     term.kind == pat.kind and term.sym == pat.sym
   of nkType:
     matchesType(c, pat.typ, term)
@@ -761,9 +764,11 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
     elif result.typ.kind == tkForall:
       result.typ = c.instantiate(result.typ)
   of nnkIntLit:
-    result = Node(kind: nkNumber, sym: $n.intVal, typ: c.lookup["z"].typ)
+    result = Node(kind: nkNumber, num: rational(n.intVal.int),
+                  typ: c.lookup["z"].typ)
   of nnkFloatLit:
-    result = Node(kind: nkNumber, sym: $n.floatVal, typ: c.lookup["r"].typ)
+    result = Node(kind: nkNumber, num: parseRational($n.floatVal),
+                  typ: c.lookup["r"].typ)
   of nnkStrLit:
     result = Node(kind: nkString, sym: n.strVal, typ: c.lookup["string"].typ)
   of nnkPar:
@@ -1002,7 +1007,7 @@ proc semPattern(c; n: NimNode; accept: set[NodeKind], check = true): Node =
       typeConstr(c, result, n, isPattern=true)
   of nnkIntLit:
     require(nkNumber, "number not allowed in this context")
-    result = Node(kind: nkNumber, sym: $n.intVal,
+    result = Node(kind: nkNumber, num: rational(n.intVal.int),
                   typ: c.lookup["z"].typ)
   of nnkStrLit:
     require(nkString, "string not allowed in this context")
@@ -1791,8 +1796,10 @@ macro term*(x: untyped): TNode =
   #       ``parse``
   proc parse(n: NimNode): TNode =
     case n.kind
-    of nnkIntLit, nnkFloatLit:
-      TNode(kind: nkNumber, sym: $n.intVal)
+    of nnkIntLit:
+      TNode(kind: nkNumber, num: rational(n.intVal.int))
+    of nnkFloatLit:
+      TNode(kind: nkNumber, num: parseRational($n.floatVal))
     of nnkStrLit:
       TNode(kind: nkString, sym: n.strVal)
     of nnkIdent, nnkSym:
