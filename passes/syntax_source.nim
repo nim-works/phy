@@ -20,6 +20,7 @@ type
     TupleCons
     Seq
     FieldAccess, At
+    As
     Exprs
     Asgn
     Return
@@ -34,7 +35,8 @@ type
 
 const
   ExprNodes* = {IntVal, FloatVal, Ident, And, Or, If, While, Call, TupleCons,
-                Seq, FieldAccess, At, Asgn, Return, Unreachable, Exprs, Decl}
+                Seq, FieldAccess, At, As, Asgn, Return, Unreachable, Exprs,
+                Decl}
   DeclNodes* = {ProcDecl, TypeDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 
