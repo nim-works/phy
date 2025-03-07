@@ -42,7 +42,7 @@ proc `-`*(x: Int128): Int128 =
   result.hi = not(x.hi)
   result = result + Int128(lo: 1)
 
-proc `shl`*(x: Int128, by: uint8): Int128 =
+proc `shl`*(x: Int128, by: int): Int128 =
   ## Logical left shift.
   let by = by and 127
   if by == 0:
@@ -56,6 +56,7 @@ proc `shl`*(x: Int128, by: uint8): Int128 =
 
 proc `shr`*(x: Int128, by: int): Int128 =
   ## Logical right shift.
+  let by = by and 127
   if by == 0:
     result = x
   elif by < 64:
