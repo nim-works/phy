@@ -10,9 +10,9 @@ type Int128* = object
 const
   Zero* = Int128()
 
-proc toInt128*(x: int): Int128 =
+proc toInt128*(x: SomeInteger): Int128 =
   result.lo = cast[uint64](x)
-  if x < 0:
+  if x is SomeSignedInt and x < 0:
     result.hi = high(uint64) # sign extend the lower bits
 
 proc toInt*(x: Int128): int =
