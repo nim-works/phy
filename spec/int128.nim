@@ -149,7 +149,7 @@ proc divMod*(dividend, divisor: Int128): (Int128, Int128) =
   else:
     result = udivMod(dividend, divisor)
 
-proc `/`*(a, b: Int128): Int128 =
+proc `div`*(a, b: Int128): Int128 =
   ## Signed 128-bit truncating integer division.
   divMod(a, b)[0]
 
