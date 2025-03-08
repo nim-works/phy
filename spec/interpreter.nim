@@ -21,6 +21,7 @@ type
     ## Stores an established relation together with the sub-relations
     ## established to prove that it holds.
     id*: int         ## ID of the relation
+    rule*: int       ## ID of the used rule
     input*: Node     ## values in input positions
     output*: Node    ## values in output positions
     sub*: seq[Trace]
@@ -396,13 +397,15 @@ proc interpretRelation(c; lang; id: int, args: Node): Node =
 
   c.frames.add(Frame(scopes: @[{ParamId: args}.toTable]))
   let original = move c.traces
+  var rule = -1
 
   # look for a rule that succeeds for the given input
-  for it in c.relCache[id].items:
+  for i, it in c.relCache[id].mpairs: # mpairs in order to not copy
     c.catch:
       c.push()
       result = interpret(c, lang, it, (c: var Context, lang, val) => val)
       c.rollback() # discard all bindings; they're no longer needed
+      rule = i
       break
     do:
       discard "try the next rule"
@@ -418,7 +421,8 @@ proc interpretRelation(c; lang; id: int, args: Node): Node =
     result = Node(kind: nkFalse)
   else:
     # success!
-    let trace = Trace(id: id, input: args, output: result, sub: move c.traces)
+    let trace = Trace(id: id, rule: rule, input: args, output: result,
+                      sub: move c.traces)
     # restore the previous list and remember the successful relation
     c.traces = original
     c.traces.add trace
