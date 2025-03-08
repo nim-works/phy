@@ -687,6 +687,8 @@ const lang* = language:
   inductive pReducesTo(inp e, out e):
     # pure reductions, that is, reductions not dependent on the execution
     # context
+    axiom "E-false", Ident("false"), False
+    axiom "E-true",  Ident("true"),  True
     axiom "E-exprs-fold", Exprs(val_1), val_1
     axiom "E-exprs", Exprs(TupleCons(), +e_1), Exprs(...e_1)
     axiom "E-if-true", If(True, e_1, e_2), e_1
