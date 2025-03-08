@@ -2,7 +2,7 @@
 ## be used by the interpreter.
 
 import std/tables
-import int128
+import rationals
 import types except Node
 
 type Node = types.Node[TypeId]
@@ -14,7 +14,9 @@ proc `==`*(a, b: Node): bool =
       a.children == b.children
     of nkHole, nkFail, nkFalse, nkTrue:
       true
-    of nkSymbol, nkString, nkNumber:
+    of nkNumber:
+      a.num == b.num
+    of nkSymbol, nkString:
       a.sym == b.sym
     of nkFunc, nkRelation, nkContext, nkVar:
       a.id == b.id
@@ -23,12 +25,8 @@ proc `==`*(a, b: Node): bool =
   else:
     false
 
-proc num(n: Node): Int128 =
-  # TODO: all numbers should be treated as rational numbers by default
-  parseInt128(n.sym)
-
-proc makeNum(i: Int128): Node =
-  Node(kind: nkNumber, sym: $i)
+proc makeNum(r: Rational): Node =
+  Node(kind: nkNumber, num: r)
 
 proc merge(a: var Node, b: Node) =
   ## Merges the record/set/map `b` into `a`.
@@ -89,26 +87,23 @@ const arr = [
   ),
   ("-", proc(n: Node): Node = makeNum(n[0].num - n[1].num)),
   ("*", proc(n: Node): Node = makeNum(n[0].num * n[1].num)),
-  ("/", proc(n: Node): Node =
-    # TODO: this needs to produce a rational number, not an integer
-    makeNum(n[0].num / n[1].num)
-  ),
+  ("/", proc(n: Node): Node = makeNum(n[0].num / n[1].num)),
   ("neg", proc(n: Node): Node = makeNum(-n.num)),
   ("^", proc(n: Node): Node =
-    assert not n[1].num.isNeg, "negative exponents not supported"
     let base = n[0].num
-    let exponent = n[1].num
-    if exponent == Zero:
-      Node(kind: nkNumber, sym: "1")
+    let exponent = n[1].num.toInt
+    assert exponent < 0, "negative exponents not supported"
+    if exponent == 0:
+      Node(kind: nkNumber, num: rational(1))
     else:
       var val = base
-      for _ in 1..<exponent.toInt:
+      for _ in 1..<exponent:
         val = val * base
       makeNum(val)
   ),
   ("<", proc(n: Node): Node = toNode n[0].num < n[1].num),
   ("<=", proc(n: Node): Node = toNode n[0].num <= n[1].num),
-  ("len", proc(n: Node): Node = Node(kind: nkNumber, sym: $n.len)),
+  ("len", proc(n: Node): Node = Node(kind: nkNumber, num: rational(n.len))),
   ("map", proc(n: Node): Node =
     # create a map from the list of key/value pairs
     result = Node(kind: nkMap)
