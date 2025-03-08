@@ -6,7 +6,8 @@ import builtin
 import types except Node
 
 type
-  Failure = object of CatchableError
+  Failure* = object of CatchableError
+    ## Error raised by the interpreter when something cannot be evaluated.
 
   Node = types.Node[TypeId]
   Bindings = Table[int, Node]
@@ -398,11 +399,13 @@ proc interpretRelation(c; lang; id: int, args: Node): Node =
   let original = move c.traces
   var rule = -1
 
-  # look for a rule that succeeds for the given input
-  for i, it in c.relCache[id].mpairs: # mpairs in order to not copy
+  # the cache's storage may change during the loop, so don't use an `items`
+  # iterator
+  for i in 0..<c.relCache[id].len:
     c.catch:
       c.push()
-      result = interpret(c, lang, it, (c: var Context, lang, val) => val)
+      result = interpret(c, lang, c.relCache[id][i],
+        (c: var Context, lang, val) => val)
       c.rollback() # discard all bindings; they're no longer needed
       rule = i
       break
