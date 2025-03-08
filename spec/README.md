@@ -1,15 +1,16 @@
 This directory provides tools for writing formal programming language
 definitions.
 
-At the core is a declarative meta-language that describes programming languages
-as a set of named patterns (non-terminals), meta functions (i.e., functions
-operating on meta-terms), and inductively-defined boolean relations (between
-meta-terms).
+The center piece is a meta language with features tailored to describing/
+modeling programming language semantics (both static, dynamic, and everything
+in-between). An overview of the meta language can be found in the
+[manual](manual.md).
 
-[[langdefs.nim]] provides a macro DSL for conveniently constructing such
-language definitions at compile time.
+The core modules are:
+* [langdefs](langdefs.nim):
+  implements the semantic analysis for the meta language. A macro DSL provides
+  the frontend and syntax
+* [interpreter](interpreter.nim):
+  a simple interpreter for evaluating meta-language terms
 
-At the moment, the meta-language has no formal definition itself. The macro
-DSL is currently the most accurate reference for what's valid and what's not.
-Not everything that's disallowed in the meta-language is rejected by the
-macro, so watch out.
+At the moment, the meta-language has no formal definition itself.
