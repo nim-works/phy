@@ -41,8 +41,6 @@ const
     "t02_mod_integer_values_3.test",
     "t02_mod_integer_values_4.test",
     "t02_mod_integer_values_div_by_zero.test",
-    "t02_not_false.test",
-    "t02_not_true.test",
     "t02_sub_float_values.test",
     "t02_sub_integer_values.test",
     "t02_sub_integer_values_overflow.test",

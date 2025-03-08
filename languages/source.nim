@@ -349,6 +349,11 @@ const lang* = language:
       condition typ_1 in {VoidTy(), UnitTy()}
       conclusion C_1, While(True, e_1), VoidTy()
 
+    rule "S-builtin-not":
+      premise mtypes(C_1, e_1, typ_1)
+      condition typ_1 == BoolTy()
+      conclusion C_1, Call(Ident("not"), e_1), BoolTy()
+
     rule "S-builtin-plus":
       premise mtypes(C_1, e_1, typ_1)
       premise mtypes(C_1, e_2, typ_2)
@@ -717,6 +722,9 @@ const lang* = language:
     rule "E-with-out-of-bounds":
       condition n_1 < 0 or len(val_1) <= n_1
       conclusion With(array(*val_1), n_1, val_2), Unreachable()
+
+    axiom "E-not-false", Call(Ident("not"), False), True
+    axiom "E-not-true",  Call(Ident("not"), True),  False
 
     rule "E-add-int":
       let n_3 = intAdd(n_1, n_2)
