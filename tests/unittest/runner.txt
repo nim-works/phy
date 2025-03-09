@@ -1,0 +1,1 @@
+nim --outdir:build/tests --path:. ${args=c} -r ${file}

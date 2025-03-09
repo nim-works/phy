@@ -360,7 +360,8 @@ if file.len == 0:
   # XXX: parallel execution of tests is still missing
   for (dir, runner) in dirs.items:
     for it in walkDir(dir, relative=false):
-      if it.path.endsWith(".test"):
+      if it.path.endsWith(".test") or
+         (it.path.endsWith(".nim") and it.path.extractFilename.startsWith("t")):
         inc total
         if runTest(runner, it.path.relativePath(currDir)):
           inc success
