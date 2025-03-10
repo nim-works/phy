@@ -3,7 +3,8 @@
 ## implementing a type checker and (basic) transformer for it.
 
 import
-  std/[macros, tables, sets, strutils, strformat, hashes]
+  std/[macros, tables, sets, strutils, strformat, hashes],
+  rationals
 
 # a lot of the types from ``types`` are redefined here, so everything is
 # imported explicitly
@@ -623,7 +624,9 @@ proc matchesPattern(c; pat, term: Node): bool =
     true # matches everything
   of nkTrue, nkFalse:
     term.kind == pat.kind
-  of nkSymbol, nkNumber, nkString:
+  of nkNumber:
+    term.kind == nkNumber and term.num == pat.num
+  of nkSymbol, nkString:
     term.kind == pat.kind and term.sym == pat.sym
   of nkType:
     matchesType(c, pat.typ, term)
@@ -761,9 +764,11 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
     elif result.typ.kind == tkForall:
       result.typ = c.instantiate(result.typ)
   of nnkIntLit:
-    result = Node(kind: nkNumber, sym: $n.intVal, typ: c.lookup["z"].typ)
+    result = Node(kind: nkNumber, num: rational(n.intVal.int),
+                  typ: c.lookup["z"].typ)
   of nnkFloatLit:
-    result = Node(kind: nkNumber, sym: $n.floatVal, typ: c.lookup["r"].typ)
+    result = Node(kind: nkNumber, num: parseRational($n.floatVal),
+                  typ: c.lookup["r"].typ)
   of nnkStrLit:
     result = Node(kind: nkString, sym: n.strVal, typ: c.lookup["string"].typ)
   of nnkPar:
@@ -1002,7 +1007,7 @@ proc semPattern(c; n: NimNode; accept: set[NodeKind], check = true): Node =
       typeConstr(c, result, n, isPattern=true)
   of nnkIntLit:
     require(nkNumber, "number not allowed in this context")
-    result = Node(kind: nkNumber, sym: $n.intVal,
+    result = Node(kind: nkNumber, num: rational(n.intVal.int),
                   typ: c.lookup["z"].typ)
   of nnkStrLit:
     require(nkString, "string not allowed in this context")
@@ -1590,19 +1595,8 @@ proc convertFrom(to: var types.TypeId, x: sink Type,
       types[id] = c
     to = id + 1
 
-proc newLit[K, V](t: Table[K, V]): NimNode =
-  ## Creates the construction expression for `t`.
-  if t.len == 0:
-    result = newCall(ident"default", t.typeof.getTypeInst)
-  else:
-    result = newNimNode(nnkTableConstr)
-    for k, v in t.pairs:
-      result.add newTree(nnkExprColonExpr, newLit(k), newLit(v))
-    result = newCall(bindSym"toTable", result)
-
-macro language*(body: untyped): LangDef =
-  ## Parses and type-checks the meta-language module `body` and returns it as
-  ## a ``LangDef`` object.
+proc sem(body: NimNode): LangDef =
+  ## The entry point into the semantic checker.
   body.expectKind nnkStmtList
 
   var
@@ -1641,10 +1635,10 @@ macro language*(body: untyped): LangDef =
   c.builtin("neg", forall(1, fntype(tvar(0), tvar(0))))
   c.builtin("+", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
   c.builtin("-", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
-  c.builtin("<=", forall(1, fntype(tup(tvar(0), tvar(0)), boolType)))
-  c.builtin("<", forall(1, fntype(tup(tvar(0), tvar(0)), boolType)))
-  c.builtin("/", forall(1, fntype(tup(tvar(0), tvar(0)), ratType)))
-  c.builtin("^", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
+  c.builtin("<=", forall(1, fntype(tup(ratType, ratType), boolType)))
+  c.builtin("<", forall(1, fntype(tup(ratType, ratType), boolType)))
+  c.builtin("/", forall(1, fntype(tup(ratType, ratType), ratType)))
+  c.builtin("^", forall(1, fntype(tup(tvar(0), intType), tvar(0))))
   c.builtin("*", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
 
   # first pass: make sure the broad shape of `body` is correct and collect the
@@ -1765,7 +1759,29 @@ macro language*(body: untyped): LangDef =
       convertFrom(id, sym.typ, map, lang.types)
       lang.names[id] = name
 
-  result = newLit(lang)
+  result = lang
+
+macro language*(body: untyped): LangDef =
+  ## Parses and type-checks the meta-language module `body` and returns it as
+  ## a ``LangDef`` object.
+
+  proc filter(n: NimNode): NimNode =
+    if n.kind == nnkAccQuoted and n.len == 1:
+      result = n[0] # remove the quote
+    else:
+      result = n
+      for i in 0..<n.len:
+        result[i] = filter(n[i])
+
+  # instead of performing anaylsis of the body directly in the macro and
+  # turning the data into a construction expression (via ``newLit``), the
+  # code block is turned into a NimNode-literal (via quote) which is then
+  # passed to `sem`. This has the major upside of not requiring using
+  # `newLit` and getting rid the subsequent analysis/evaluation of the
+  # construction.
+  # The accent-quotes in the body need to be filtered out, otherwise `quote`
+  # would use them for interpolation
+  newCall(bindSym"sem", newCall(bindSym"quote", filter(body)))
 
 macro term*(x: untyped): TNode =
   ## Turns the meta-language term `x` into its data representation.
@@ -1780,8 +1796,10 @@ macro term*(x: untyped): TNode =
   #       ``parse``
   proc parse(n: NimNode): TNode =
     case n.kind
-    of nnkIntLit, nnkFloatLit:
-      TNode(kind: nkNumber, sym: $n.intVal)
+    of nnkIntLit:
+      TNode(kind: nkNumber, num: rational(n.intVal.int))
+    of nnkFloatLit:
+      TNode(kind: nkNumber, num: parseRational($n.floatVal))
     of nnkStrLit:
       TNode(kind: nkString, sym: n.strVal)
     of nnkIdent, nnkSym:
