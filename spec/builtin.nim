@@ -92,7 +92,7 @@ const arr = [
   ("^", proc(n: Node): Node =
     let base = n[0].num
     let exponent = n[1].num.toInt
-    assert exponent < 0, "negative exponents not supported"
+    assert exponent > 0, "negative exponents not supported"
     if exponent == 0:
       Node(kind: nkNumber, num: rational(1))
     else:
