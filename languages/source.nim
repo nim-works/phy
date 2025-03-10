@@ -520,8 +520,8 @@ const lang* = language:
       Asgn(substitute(e_1, any_1), substitute(e_2, any_1))
     of TupleCons(*e_1), any_1:
       TupleCons(...substitute(e_1, any_1))
-    of Seq(texpr, *e_1), any_1:
-      Seq(texpr, ...substitute(e_1, any_1))
+    of Seq(texpr_1, *e_1), any_1:
+      Seq(texpr_1, ...substitute(e_1, any_1))
     of FieldAccess(e_1, IntVal(z_1)), any_1:
       FieldAccess(substitute(e_1, any_1), IntVal(z_1))
     of At(e_1, e_2), any_1:
