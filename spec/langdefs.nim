@@ -1761,17 +1761,18 @@ proc sem(body: NimNode): LangDef =
 
   result = lang
 
+proc removeQuoted(n: NimNode): NimNode =
+  ## Replaces all accent-quoted identifiers with raw identifiers.
+  if n.kind == nnkAccQuoted and n.len == 1:
+    result = n[0] # remove the quote
+  else:
+    result = n
+    for i in 0..<n.len:
+      result[i] = removeQuoted(n[i])
+
 macro language*(body: untyped): LangDef =
   ## Parses and type-checks the meta-language module `body` and returns it as
   ## a ``LangDef`` object.
-
-  proc filter(n: NimNode): NimNode =
-    if n.kind == nnkAccQuoted and n.len == 1:
-      result = n[0] # remove the quote
-    else:
-      result = n
-      for i in 0..<n.len:
-        result[i] = filter(n[i])
 
   # instead of performing anaylsis of the body directly in the macro and
   # turning the data into a construction expression (via ``newLit``), the
@@ -1781,10 +1782,9 @@ macro language*(body: untyped): LangDef =
   # construction.
   # The accent-quotes in the body need to be filtered out, otherwise `quote`
   # would use them for interpolation
-  newCall(bindSym"sem", newCall(bindSym"quote", filter(body)))
+  newCall(bindSym"sem", newCall(bindSym"quote", removeQuoted(body)))
 
-macro term*(x: untyped): TNode =
-  ## Turns the meta-language term `x` into its data representation.
+proc parse(n: NimNode): TNode =
   template wrap(nk: NodeKind, start: int, body: untyped): untyped =
     var r = TNode(kind: nk)
     for i in start..<n.len:
@@ -1792,35 +1792,44 @@ macro term*(x: untyped): TNode =
       r.add body
     r
 
+  case n.kind
+  of nnkIntLit:
+    TNode(kind: nkNumber, num: rational(n.intVal.int))
+  of nnkFloatLit:
+    TNode(kind: nkNumber, num: parseRational($n.floatVal))
+  of nnkStrLit:
+    TNode(kind: nkString, sym: n.strVal)
+  of nnkIdent, nnkSym:
+    TNode(kind: nkSymbol, sym: n.strVal)
+  of nnkAccQuoted:
+    TNode(kind: nkSymbol, sym: n[0].strVal)
+  of nnkCurly:
+    wrap(nkSet, 0, parse(it))
+  of nnkCall:
+    wrap(nkConstr, 0, parse(it))
+  of nnkTupleConstr:
+    wrap(nkTuple, 0, parse(it))
+  of nnkObjConstr:
+    wrap(nkRecord, 1,
+      TNode(kind: nkAssoc, children: @[parse(it[0]), parse(it[1])]))
+  of nnkTableConstr:
+    wrap(nkMap, 0,
+      TNode(kind: nkAssoc, children: @[parse(it[0]), parse(it[1])]))
+  of nnkStmtList, nnkStmtListExpr:
+    n.expectLen 1
+    parse(n[0])
+  else:
+    error("invalid expression", n)
+    TNode()
+
+macro term*(x: untyped): TNode =
+  ## Returns the AST for the meta-language term `x`.
+  # the NimSkull grammar requires the ``quote`` argument being a statement
+  # list...
+  let x =
+    case x.kind
+    of nnkStmtList: x
+    else:           newTree(nnkStmtList, x)
   # TODO: take the language as a parameter and use ``semExpr`` instead of
   #       ``parse``
-  proc parse(n: NimNode): TNode =
-    case n.kind
-    of nnkIntLit:
-      TNode(kind: nkNumber, num: rational(n.intVal.int))
-    of nnkFloatLit:
-      TNode(kind: nkNumber, num: parseRational($n.floatVal))
-    of nnkStrLit:
-      TNode(kind: nkString, sym: n.strVal)
-    of nnkIdent, nnkSym:
-      TNode(kind: nkSymbol, sym: n.strVal)
-    of nnkAccQuoted:
-      TNode(kind: nkSymbol, sym: n[0].strVal)
-    of nnkCurly:
-      wrap(nkSet, 0, parse(it))
-    of nnkCall:
-      wrap(nkConstr, 0, parse(it))
-    of nnkTupleConstr:
-      wrap(nkTuple, 0, parse(it))
-    of nnkObjConstr:
-      wrap(nkRecord, 1,
-        TNode(kind: nkAssoc, children: @[parse(it[0]), parse(it[1])]))
-    of nnkTableConstr:
-      wrap(nkMap, 0,
-        TNode(kind: nkAssoc, children: @[parse(it[0]), parse(it[1])]))
-    else:
-      error("invalid expression", n)
-      TNode()
-
-  let ast = parse(x)
-  result = newLit(ast)
+  newCall(bindSym"parse", newCall(bindSym"quote", removeQuoted(x)))
