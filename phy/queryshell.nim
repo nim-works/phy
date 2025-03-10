@@ -24,7 +24,11 @@ import
   ],
   phy/sexpstreams,
   languages/source,
-  spec/interpreter
+  spec/[
+    int128,
+    interpreter,
+    rationals
+  ]
 
 import spec/types except Node
 
@@ -82,9 +86,9 @@ proc fromSexp(s: SexpNode): Node =
     else:
       Node(kind: nkSymbol, sym: s.symbol)
   of SInt:
-    Node(kind: nkNumber, sym: $s.num)
+    Node(kind: nkNumber, num: frac(toInt128(s.num), toInt128(1)))
   of SFloat:
-    Node(kind: nkNumber, sym: $s.fnum)
+    Node(kind: nkNumber, num: parseRational($s.fnum))
   of SString:
     Node(kind: nkString, sym: s.str)
   of SNil, SCons, SKeyword:
@@ -134,7 +138,7 @@ proc getDefault(lang: LangDef, typ: TypeId): types.Node[TypeId] =
   ## Returns the default value for `typ`.
   case lang[typ].kind
   of tkInt, tkRat, tkAll:
-    Node(kind: nkNumber, sym: "0", typ: typ)
+    Node(kind: nkNumber, num: frac(toInt128(0), toInt128(1)), typ: typ)
   of tkBool:
     Node(kind: nkFalse, typ: typ)
   of tkVoid:
