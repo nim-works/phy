@@ -755,7 +755,9 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
   case n.kind
   of nnkIdent, nnkAccQuoted:
     result = toExpr(c, resolveIdent(c, n))
-    if result.typ.kind == tkPat and not isHead:
+    if result.kind == nkType:
+      error("cannot use type here", n)
+    elif result.typ.kind == tkPat and not isHead:
       result = tree(nkConstr, result)
       typeConstr(c, result, n, isPattern=false)
     elif result.typ.kind == tkForall:
