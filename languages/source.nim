@@ -49,7 +49,6 @@ const lang* = language:
     char(z) # UTF-8 byte
     loc(z) # first-class location
     `array`(*val)
-    `tuple`(+val)
     `proc`(typ, *[x, typ], e)
 
     With(e, n, e) # return a tuple/array value with the n-th element replaced
@@ -92,7 +91,7 @@ const lang* = language:
     False
     char(z)
     `array`(*val)
-    `tuple`(+val)
+    TupleCons(*val) # an empty tuple is also a valid value (i.e., unit)
     `proc`(typ, *[x, typ], e)
 
   subtype le, e:
@@ -708,7 +707,7 @@ const lang* = language:
     axiom "E-while", While(e_1, e_2), If(e_1, Exprs(e_2, While(e_1, e_2)), TupleCons())
 
     rule "E-tuple-access":
-      where `tuple`(+val_3), val_1
+      where TupleCons(+val_3), val_1
       where val_2, val_3[n_1]
       conclusion FieldAccess(val_1, IntVal(n_1)), val_2
 
@@ -827,7 +826,7 @@ const lang* = language:
     rule "E-with-tuple":
       let val_3 = val_1[n_1]
       # FIXME: same here
-      conclusion DC_1, With(`tuple`(+val_1), n_1, val_2), DC_1, val_3
+      conclusion DC_1, With(TupleCons(+val_1), n_1, val_2), DC_1, val_3
 
     rule "E-asgn":
       let DC_2 = DC_1 + DC(locs: {z_1 : val_1})
