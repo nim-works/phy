@@ -12,21 +12,23 @@ const
   Ten = toInt128(10)
 
 proc reduced(r: Rational): Rational =
-  ## Returns the smallest possible representation of `r`.
+  ## Returns the normal form for `r`. The normal form uses the smallest
+  ## possible positive denominator.
   if r.num == Zero:
     Rational(num: Zero, den: One)
+  elif r.den.isNeg:
+    reduced(Rational(num: -r.num, den: -r.den))
   else:
-    # compute the greatest common denominator between `r.num` and `r.denom`:
+    # compute the greatest denominator common between `r.num` and `r.denom`:
     var
       num = r.num
       denom = r.den
     while num != Zero:
-      let rem = divMod(denom, num)[1]
+      let (_, rem) = divMod(denom, num)
       denom = num
       num = rem
 
-    if denom.isNeg:
-      denom = -denom
+    if denom.isNeg: denom = -denom
     Rational(num: r.num div denom, den: r.den div denom)
 
 proc frac*(num, denom: Int128): Rational =
