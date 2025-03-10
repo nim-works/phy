@@ -27,7 +27,7 @@ proc reduced(r: Rational): Rational =
 
     if denom.isNeg:
       denom = -denom
-    Rational(num: r.num / denom, den: r.den / denom)
+    Rational(num: r.num div denom, den: r.den div denom)
 
 proc `+`*(a, b: Rational): Rational =
   if a.den == b.den:
@@ -55,7 +55,7 @@ proc `<=`*(a, b: Rational): bool =
 proc split*(r: Rational): tuple[i: Int128, frac: Rational] =
   ## Splits `r` into the integer and fractional parts, such that
   ## ``int + frac = r``.
-  result.i = r.num / r.den
+  result.i = r.num div r.den
   result.frac = reduced(Rational(num: r.num - (result.i * r.den), den: r.den))
 
 proc isInt*(r: Rational): bool =
