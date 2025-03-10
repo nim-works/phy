@@ -112,7 +112,9 @@ proc add(res: var string, n: Node) =
         res.add ' '
       res.add it
     res.add ")"
-  of nkSymbol, nkNumber:
+  of nkNumber:
+    res.addRat n.num
+  of nkSymbol:
     res.add n.sym
   of nkString:
     res.add escape(n.sym)
