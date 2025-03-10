@@ -1,7 +1,7 @@
 ## Implements an interpreter for the full meta-language. The expressions are
 ## evaluated directly, without an intermediate IR or a VM.
 
-import std/[tables, strutils, sugar]
+import std/[tables, sugar]
 import builtin, rationals
 import types except Node
 
@@ -652,7 +652,7 @@ proc interpret(c; lang; n: Node, then: Next): Node =
           then(c, lang, interpretRelation(c, lang, val.id, makeTuple(args)))
         of nkGroup:
           # it's a list lookup
-          if parseInt(args[0].sym) in 0..(val.len-1):
+          if args[0].num.toInt in 0..(val.len-1):
             then(c, lang, val[args[0].num.toInt])
           else:
             raise Failure.newException("")
