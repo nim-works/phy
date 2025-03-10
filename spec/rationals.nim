@@ -29,6 +29,11 @@ proc reduced(r: Rational): Rational =
       denom = -denom
     Rational(num: r.num div denom, den: r.den div denom)
 
+proc frac*(num, denom: Int128): Rational =
+  ## Creates a fraction from `num` and `denom`.
+  assert denom != Zero
+  reduced(Rational(num: num, den: denom))
+
 proc `+`*(a, b: Rational): Rational =
   if a.den == b.den:
     reduced(Rational(num: a.num + b.num, den: a.den))
