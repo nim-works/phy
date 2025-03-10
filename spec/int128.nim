@@ -10,9 +10,9 @@ type Int128* = object
 const
   Zero* = Int128()
 
-proc toInt128*(x: int): Int128 =
+proc toInt128*(x: SomeInteger): Int128 =
   result.lo = cast[uint64](x)
-  if x < 0:
+  if x is SomeSignedInt and x < 0:
     result.hi = high(uint64) # sign extend the lower bits
 
 proc toInt*(x: Int128): int =
@@ -42,7 +42,7 @@ proc `-`*(x: Int128): Int128 =
   result.hi = not(x.hi)
   result = result + Int128(lo: 1)
 
-proc `shl`*(x: Int128, by: uint8): Int128 =
+proc `shl`*(x: Int128, by: int): Int128 =
   ## Logical left shift.
   let by = by and 127
   if by == 0:
@@ -56,6 +56,7 @@ proc `shl`*(x: Int128, by: uint8): Int128 =
 
 proc `shr`*(x: Int128, by: int): Int128 =
   ## Logical right shift.
+  let by = by and 127
   if by == 0:
     result = x
   elif by < 64:
@@ -65,25 +66,25 @@ proc `shr`*(x: Int128, by: int): Int128 =
     result.lo = (x.hi shr (by - 64))
     result.hi = 0
 
-proc `<`*(a, b: Int128): bool =
+proc `<%`*(a, b: Int128): bool =
   ## Unsigned less-than comparison.
   if a.hi < b.hi: true
   elif a.hi == b.hi: a.lo < b.lo
   else: false
 
-proc `<=`*(a, b: Int128): bool =
+proc `<=%`*(a, b: Int128): bool =
   ## Unsigned less-than-or-equal comparison.
   if a.hi < b.hi: true
   elif a.hi == b.hi: a.lo <= b.lo
   else: false
 
-proc below*(a, b: Int128): bool =
+proc `<`*(a, b: Int128): bool =
   ## Signed less-than comparison.
   if cast[int64](a.hi) < cast[int64](b.hi): true
   elif a.hi == b.hi: a.lo < b.lo
   else: false
 
-proc bequal*(a, b: Int128): bool =
+proc `<=`*(a, b: Int128): bool =
   ## Signed less-than-or-equal comparison.
   if cast[int64](a.hi) < cast[int64](b.hi): true
   elif a.hi == b.hi: a.lo <= b.lo
@@ -111,7 +112,7 @@ proc `*`*(a, b: Int128): Int128 =
 proc udivMod*(dividend, divisor: Int128): (Int128, Int128) =
   ## Unsigned 128-integer division. Returns the quotient and
   ## remainder.
-  if divisor > dividend:
+  if divisor >% dividend:
     return (Zero, dividend)
 
   # shift-subtract algorithm (refer to
@@ -121,11 +122,11 @@ proc udivMod*(dividend, divisor: Int128): (Int128, Int128) =
     remainder = dividend
 
   let digits = fastLog2(dividend) - fastLog2(divisor)
-  var divisor = divisor shl digits.uint8
+  var divisor = divisor shl digits
 
   for _ in 0..digits:
     quotient = quotient shl 1
-    if remainder >= divisor:
+    if remainder >=% divisor:
       remainder = remainder - divisor
       quotient.lo = quotient.lo or 1 # left-shift 1 into the quotient
 
@@ -148,7 +149,7 @@ proc divMod*(dividend, divisor: Int128): (Int128, Int128) =
   else:
     result = udivMod(dividend, divisor)
 
-proc `/`*(a, b: Int128): Int128 =
+proc `div`*(a, b: Int128): Int128 =
   ## Signed 128-bit truncating integer division.
   divMod(a, b)[0]
 

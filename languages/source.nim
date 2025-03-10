@@ -117,6 +117,8 @@ const lang* = language:
       If(expr_1, expr_2, TupleCons())
     of If(Exprs(*expr_1, expr_2), expr_3, expr_4):
       Exprs(...expr_1, If(expr_2, expr_3, expr_4))
+    of expr_1:
+      expr_1
 
   ## Type Relations
   ## --------------
@@ -160,7 +162,7 @@ const lang* = language:
       condition typ_1 == typ_2
       conclusion typ_1, typ_2
     rule "subtype":
-      condition typ_1 <:= typ_2
+      condition typ_1 <: typ_2
       conclusion typ_1, typ_2
 
   ## Typing Judgment
@@ -346,6 +348,11 @@ const lang* = language:
       premise mtypes(C_1, e_1, typ_1)
       condition typ_1 in {VoidTy(), UnitTy()}
       conclusion C_1, While(True, e_1), VoidTy()
+
+    rule "S-builtin-not":
+      premise mtypes(C_1, e_1, typ_1)
+      condition typ_1 == BoolTy()
+      conclusion C_1, Call(Ident("not"), e_1), BoolTy()
 
     rule "S-builtin-plus":
       premise mtypes(C_1, e_1, typ_1)
@@ -685,6 +692,8 @@ const lang* = language:
   inductive pReducesTo(inp e, out e):
     # pure reductions, that is, reductions not dependent on the execution
     # context
+    axiom "E-false", Ident("false"), False
+    axiom "E-true",  Ident("true"),  True
     axiom "E-exprs-fold", Exprs(val_1), val_1
     axiom "E-exprs", Exprs(TupleCons(), +e_1), Exprs(...e_1)
     axiom "E-if-true", If(True, e_1, e_2), e_1
@@ -713,6 +722,9 @@ const lang* = language:
     rule "E-with-out-of-bounds":
       condition n_1 < 0 or len(val_1) <= n_1
       conclusion With(array(*val_1), n_1, val_2), Unreachable()
+
+    axiom "E-not-false", Call(Ident("not"), False), True
+    axiom "E-not-true",  Call(Ident("not"), True),  False
 
     rule "E-add-int":
       let n_3 = intAdd(n_1, n_2)
@@ -877,6 +889,16 @@ const lang* = language:
     # ^^ progress. That is, a valid expression is either an irreducible value,
     # or it must be reducible
     ]#
+
+  inductive cstep(inp DC, inp e, out DC, out e):
+    ## Transitive closure of `step`. Relates an expression to the irreducible
+    ## expression it reduces to (if any).
+    axiom "value", DC_1, val_1, DC_1, val_1
+    axiom "unreachable", DC_1, Unreachable(), DC_1, Unreachable()
+    rule "reducible":
+      premise step(DC_1, e_1, DC_2, e_2)
+      premise cstep(DC_2, e_2, DC_3, e_3)
+      conclusion DC_1, e_1, DC_3, e_3
 
   # ------------
   # boilerplate functions that should rather not exist

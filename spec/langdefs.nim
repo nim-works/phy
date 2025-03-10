@@ -1813,9 +1813,11 @@ macro term*(x: untyped): TNode =
     of nnkTupleConstr:
       wrap(nkTuple, 0, parse(it))
     of nnkObjConstr:
-      wrap(nkConstr, 1, parse(it))
+      wrap(nkRecord, 1,
+        TNode(kind: nkAssoc, children: @[parse(it[0]), parse(it[1])]))
     of nnkTableConstr:
-      wrap(nkMap, 0, TNode(kind: nkAssoc, children: @[parse(it[0]), parse(it[1])]))
+      wrap(nkMap, 0,
+        TNode(kind: nkAssoc, children: @[parse(it[0]), parse(it[1])]))
     else:
       error("invalid expression", n)
       TNode()
