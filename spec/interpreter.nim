@@ -273,16 +273,6 @@ proc matches(lang; pat, term: Node): Match =
   else:
     unreachable()
 
-proc matches(c; lang; pat, term: Node): bool =
-  ## Convenience wrapper for ``matches`` that merges the captures into the
-  ## current scope on success.
-  let tmp = matches(lang, pat, term)
-  if tmp.has:
-    c.merge(tmp.bindings)
-    true
-  else:
-    false
-
 template catch(c: var Context, body, els: untyped) =
   ## Runs `body`, with `els` being executed if the former raises a ``Failure``.
   let frames = c.frames.len
@@ -506,6 +496,47 @@ proc interpretAll(c; lang; s: openArray[Node]): seq[Node] =
   for i, it in result.mpairs:
     it = interpret(c, lang, s[i], (c: var Context, lang, val) => val)
 
+proc interpretMatch(c; lang; pat, term: Node, then: Next): Node =
+  ## Tries matching `term` with `pat`, and on success, adds the captures to
+  ## the context and invokes `then` with `nkTrue`; `nkFalse` otherwise.
+  var m = matches(lang, pat, term);
+  if m.has:
+    var plugs: Node
+    # did plug patterns participate in the match?
+    if m.bindings.pop(HoleId, plugs):
+      # yes, resolve them
+      c.merge(m.bindings)
+      proc inner(c; lang; j: int): Node =
+        if j < plugs.len:
+          let (pat, term) = (plugs[j][0], plugs[j][1])
+          assert pat.kind == nkPlug
+          let rpat =
+            if pat[0].kind == nkBind: pat[0][1].id
+            else:                     pat[0].id
+          matchRPattern(c, lang, rpat, term, @[],
+            (c: var Context, lang, res, ctx) => (
+              # try the plugged-with pattern:
+              interpretMatch(c, lang, pat[1], res,
+                (c: var Context, lang, val) => (
+                  if val.kind == nkTrue:
+                    if pat[0].kind == nkBind:
+                      # bind the context to the given name
+                      c.addBinding(pat[0][0].id, withHole(term, ctx))
+                    inner(c, lang, j + 1) # continue with the next plug
+                  else:
+                    raise Failure.newException("")))))
+        else:
+          # all plugs could be resolved successfully
+          then(c, lang, Node(kind: nkTrue))
+      inner(c, lang, 0)
+    else:
+      # no plug patterns; the match was successful
+      c.merge(m.bindings)
+      then(c, lang, Node(kind: nkTrue))
+  else:
+    # no match
+    then(c, lang, Node(kind: nkFalse))
+
 proc interpret(c; lang; n: Node, then: Next): Node =
   ## Evaluates expression `n`. Evaluation uses continuation-passing-style
   ## (=CPS): instead of returning the value, the `then` procedure is
@@ -559,41 +590,8 @@ proc interpret(c; lang; n: Node, then: Next): Node =
             (c: var Context, lang, val) => then(c, lang, val))))
   of nkMatches:
     interpret(c, lang, n[1],
-      (c: var Context, lang, val) => (
-        var m = matches(lang, n[0], val);
-        if m.has:
-          var plugs: Node
-          # did plug patterns participate in the match?
-          if m.bindings.pop(HoleId, plugs):
-            # yes, resolve them
-            c.merge(m.bindings)
-            proc inner(c; lang; j: int): Node =
-              if j < plugs.len:
-                let (pat, term) = (plugs[j][0], plugs[j][1])
-                assert pat.kind == nkPlug
-                let rpat =
-                  if pat[0].kind == nkBind: pat[0][1].id
-                  else:                     pat[0].id
-                matchRPattern(c, lang, rpat, term, @[],
-                  (c: var Context, lang, res, ctx) => (
-                    if matches(c, lang, pat[1], res):
-                      if pat[0].kind == nkBind:
-                        # bind the context to the given name
-                        c.addBinding(pat[0][0].id, withHole(term, ctx))
-                      inner(c, lang, j + 1) # continue with the next plug
-                    else:
-                      raise Failure.newException("")))
-              else:
-                # all plugs could be resolved successfully
-                then(c, lang, Node(kind: nkTrue))
-            inner(c, lang, 0)
-          else:
-            # no plug patterns; the match was successful
-            c.merge(m.bindings)
-            then(c, lang, Node(kind: nkTrue))
-        else:
-          # no match
-          then(c, lang, Node(kind: nkFalse))))
+      (c: var Context, lang, val) =>
+        interpretMatch(c, lang, n[0], val, then))
   of nkMap:
     var elems = newSeq[Node](n.len)
     for i, it in n.children.pairs:

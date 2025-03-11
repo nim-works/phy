@@ -2,18 +2,12 @@
 ## functions/relations from language definitions. Meant as a tool to aid with
 ## language development.
 
-# TODO: don't compile the `LangDef` to use into the shell, load it dynamically
-#       at run-time, using the following design:
-#       1. there's an extractor program (written in NimSkull), whose source
-#          code is dynamically patched with the actual `LangDef`-providing
-#          module
-#       2. there's an 'import' command accepting a .nim module file path
-#       3. the patched extractor is compiled and run, outputting the `LangDef`
-#          in an easy to parse format through the output stream which the shell
-#          then reads and turns back into a `LangDef`
-
 import
   std/[
+    dynlib,
+    options,
+    os,
+    osproc,
     strutils,
     sequtils,
     tables
@@ -23,7 +17,6 @@ import
     colortext
   ],
   phy/sexpstreams,
-  languages/source,
   spec/[
     int128,
     interpreter,
@@ -35,10 +28,40 @@ import spec/types except Node
 type
   Node = types.Node[TypeId] # shorthand that's easier to write
 
+const
+  LoaderCode = """
+import $1
+proc load*(): auto {.cdecl, dynlib, exportc.} = addr lang
+"""
+    ## the program for loading the langdef. A pointer is returned in
+    ## order to prevent a copy, which would be dangerous due to it
+    ## using the library's own allocator instance (which the main
+    ## program is not aware of)
+  CompileCmd = "nim c --fromcmd --app:lib --path:. --verbosity:0 --o:$1 $2"
+    ## the command to compile the loader with. Be as quiet as possible
+
+# global state:
 var
   vars: Table[string, Node]
   depth: int ## current cursor's depth
   prev: Node ## previous execution result
+  langOpt: Option[LangDef] ## the currently loaded language definition
+
+template lang: untyped = langOpt.unsafeGet
+
+proc prepareMutation[T: not string](x: var T) =
+  ## Copies the payload of all strings in `x` into heap memory. Used to
+  ## "detach" the strings from the dynamic library into whose static memory
+  ## the payload pointers point.
+  when T is (object or tuple):
+    for it in fields(x):
+      when it isnot (enum or SomeInteger):
+        prepareMutation(it)
+  elif T is seq:
+    for it in x.mitems:
+      prepareMutation(it)
+  else:
+    discard
 
 proc fromSexp(s: SexpNode): Node =
   ## Parses a meta-language expression from `s`.
@@ -244,6 +267,11 @@ proc handleCmd(cmd: SexpNode) =
       error "expected command of the form '$1'" % [shape]
       return
 
+  template requireLang() =
+    if langOpt.isNone:
+      error "no language definition is loaded"
+      return
+
   check cmd.kind == SList and cmd.len > 0 and cmd[0].kind == SSymbol,
         "(<cmd> ...)"
 
@@ -262,6 +290,7 @@ proc handleCmd(cmd: SexpNode) =
       error e.msg
   of "default":
     check cmd.len == 2 and cmd[1].kind == SSymbol, "(default <type-name>)"
+    requireLang()
     # compute the default value for the given type
     for typ, name in lang.names.pairs:
       if name == cmd[1].symbol:
@@ -272,6 +301,7 @@ proc handleCmd(cmd: SexpNode) =
     error "no type with given name found"
   of "apply":
     check cmd.len >= 2 and cmd[1].kind == SSymbol, "(run <name> <arg>*)"
+    requireLang()
     let callee = pick(lang, cmd[1].symbol)
     if callee.kind == nkFail:
       error "no function or relation found with the given name"
@@ -291,8 +321,37 @@ proc handleCmd(cmd: SexpNode) =
       if args.len == 1:
         args = args[0] # unpack single-element tuples
       eval(callee, args)
+  of "import":
+    check cmd.len == 2 and cmd[1].kind == SString, "(import <relative-path>)"
+    let path =
+      when defined(windows): getTempDir() / "queryshell_load.dll"
+      else:                  getTempDir() / "queryshell_load.so"
+    echo "compiling the loader..."
+    # instead of via a temporary file, the loader code is passed directly on
+    # the command line. This is faster and produces less artifacts
+    let res = execCmd(CompileCmd % [quoteShell(path),
+                                    quoteShell(LoaderCode % [cmd[1].str])])
+    if res == 0:
+      let lib = loadLib(path)
+      if lib != nil:
+        let prc = cast[proc(): ptr LangDef {.cdecl.}](lib.symAddr("load"))
+        if prc != nil:
+          var inst = prc()[]
+          # detach the string payloads in inst (this must happen before the
+          # library is unloaded, otherwise the payload pointers start to
+          # dangle)
+          prepareMutation(inst)
+          langOpt = some(inst)
+          echo "success!"
+        else:
+          error "library seems to be corrupt"
+        unloadLib(lib)
+      else:
+        error "failed to load library"
+    else:
+      error "compiling the loader failed"
   else:
-    error "expected 'quit', 'set', 'term', 'default', or 'apply'"
+    error "expected 'quit', 'set', 'term', 'default', 'apply', or 'import'"
 
 # the main loop:
 let stream = newLineBufferedStream()
