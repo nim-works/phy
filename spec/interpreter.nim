@@ -1,8 +1,8 @@
 ## Implements an interpreter for the full meta-language. The expressions are
 ## evaluated directly, without an intermediate IR or a VM.
 
-import std/[tables, strutils, sugar]
-import builtin
+import std/[tables, sugar]
+import builtin, rationals
 import types except Node
 
 type
@@ -195,10 +195,10 @@ proc matches(lang; pat, term: Node): Match =
   case pat.kind
   of nkTrue, nkFalse:
     test term.kind == pat.kind
-  of nkNumber, nkString:
+  of nkNumber:
+    test term.kind == nkNumber and term.num == pat.num
+  of nkSymbol, nkString:
     test term.kind == pat.kind and term.sym == pat.sym
-  of nkSymbol:
-    test (term.kind == nkSymbol and term.sym == pat.sym)
   of nkConstr:
     if term.kind == nkConstr:
       matchList(lang, pat, term)
@@ -234,7 +234,7 @@ proc matches(lang; pat, term: Node): Match =
     of tkAll:
       Match(has: true)
     of tkInt:
-      test term.kind == nkNumber # TODO: wrong, must be an int
+      test term.kind == nkNumber and term.num.isInt
     of tkRat:
       test term.kind == nkNumber
     of tkList:
@@ -650,8 +650,8 @@ proc interpret(c; lang; n: Node, then: Next): Node =
           then(c, lang, interpretRelation(c, lang, val.id, makeTuple(args)))
         of nkGroup:
           # it's a list lookup
-          if parseInt(args[0].sym) in 0..(val.len-1):
-            then(c, lang, val[args[0].sym.parseInt])
+          if args[0].num.toInt in 0..(val.len-1):
+            then(c, lang, val[args[0].num.toInt])
           else:
             raise Failure.newException("")
         of nkMap:
