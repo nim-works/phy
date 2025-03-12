@@ -19,6 +19,14 @@ proc toInt*(x: Int128): int =
   ## Cuts off the most-significant 64 bits.
   cast[int](x.lo)
 
+template high*(_: typedesc[Int128]): Int128 =
+  ## The largest possible signed 128-bit integer.
+  Int128(lo: high(uint64), hi: high(int64).uint64)
+
+template low*(_: typedesc[Int128]): Int128 =
+  ## The signed 128-bit integer closest to negative infinity.
+  Int128(lo: 0, hi: 1'u64 shl 63)
+
 proc fastLog2*(a: Int128): int =
   if a.hi != 0:
     64 + fastLog2(a.hi)
@@ -41,6 +49,11 @@ proc `-`*(x: Int128): Int128 =
   result.lo = not(x.lo)
   result.hi = not(x.hi)
   result = result + Int128(lo: 1)
+
+proc abs*(x: Int128): Int128 =
+  ## Yields the absolute value of `x`.
+  if isNeg(x): -x
+  else:        x
 
 proc `shl`*(x: Int128, by: int): Int128 =
   ## Logical left shift.
