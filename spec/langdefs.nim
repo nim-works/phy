@@ -746,6 +746,29 @@ proc finishUnpack(body: Node, vars: HashSet[int], info: NimNode): Node =
   result.add body
   result.typ = listT(body.typ)
 
+proc semBindingName(c; n: NimNode, typ: Type): Node =
+  ## Makes sure `n` is a valid identifier for a binding and - if so -
+  ## register a new binding with the given name and `typ` with `c`.
+  let name = name(n)
+  if name == "_":
+    # don't add a binding
+    result = Node(kind: nkType, typ: typ)
+  elif name in c.vars or name in c.lookup:
+    error(fmt"redeclaration of {name}", n)
+  else:
+    let i = find(name, '_')
+    if i != -1 and find(name, '_', i + 1) != -1:
+      error("identifiers must only contain a single underscore", n)
+
+    result = Node(kind: nkVar, id: c.vars.len)
+    c.vars[name] = (typ, result.id)
+
+proc toPattern(n: sink Node): Node =
+  case n.kind
+  of nkType: n
+  of nkVar:  tree(nkBind, n)
+  else:      unreachable()
+
 proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
   ## Analyzes and type-checks expression `n`. `inConstr` tells whether within
   ## a construction, `isHead` whether the `n` is the head of a construction.
@@ -905,18 +928,16 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
     result = recurse(n[0])
   of nnkForStmt:
     n.expectLen 3
-    let v = name(n[0])
     let frm = recurse(n[1])
-    if v in c.vars:
-      error(fmt"redeclaration of {v}", n[0])
     if frm.typ.kind != tkList:
       error(fmt"expected list type, but got {frm.typ}", n[1])
-    let id = c.vars.len
-    c.vars[v] = (frm.typ[0], id)
+    let to = c.semBindingName(n[0], frm.typ[0])
+    if to.kind == nkType:
+      error("discard underscore not allowed in this context", n[0])
     let body = recurse(n[2])
-    result = tree(nkUnpack, tree(nkBind, Node(kind: nkVar, id: id), frm), body)
+    result = tree(nkUnpack, tree(nkBind, to, frm), body)
     result.typ = listT(body.typ)
-    c.vars.del(v)
+    c.vars.del(name(n[0]))
   else:
     error("invalid expression", n)
 
@@ -1160,12 +1181,35 @@ proc semPredicate(c; n: NimNode): Node =
     unreachable()
 
 proc semLet(c; n: NimNode): Node =
+  ## Analyses and a ``let`` statement, transforming it into a ``nkMatches``
+  ## expression.
   n.expectLen 1
-  n[0].expectKind nnkIdentDefs
-  n[0].expectLen 3
-  n[0][1].expectKind nnkEmpty
-  let pat = semPatternIdent(c, n[0][0], {nkType, nkVar})
-  tree(nkMatches, pat, receive(c, n[0][2], pat.typ))
+  let def = n[0]
+  def.expectKind {nnkIdentDefs, nnkVarTuple}
+  let e = semExpr(c, def[^1])
+
+  var pat: Node
+  case def.kind
+  of nnkIdentDefs:
+    # a single identifier binding is introduced
+    def.expectLen 3
+    def[1].expectKind nnkEmpty
+    pat = toPattern c.semBindingName(def[0], e.typ)
+  of nnkVarTuple:
+    # tuple unpacking + identifier binding
+    pat = Node(kind: nkTuple)
+    if e.typ.kind != tkTuple:
+      error("expression must be of tuple type", def[^1])
+    elif (let L = e.typ.children.len; L != def.len - 2):
+      error(fmt"expected tuple with {def.len-2} elements, but got {L}",
+            def[^1])
+
+    for i in 0..<def.len-2:
+      pat.add toPattern(c.semBindingName(def[i], e.typ[i]))
+  else:
+    unreachable()
+
+  tree(nkMatches, pat, e)
 
 proc semRelation(c; n: NimNode, rel: var Relation[Type], id: int) =
   ## Parses and verifies the body of a relation.
