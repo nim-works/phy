@@ -151,16 +151,18 @@ proc udivMod*(dividend, divisor: Int128): (Int128, Int128) =
 proc divMod*(dividend, divisor: Int128): (Int128, Int128) =
   ## Signed 128-bit truncating integer division (sign of the remainder matches
   ## that of the dividend).
-  if isNeg(divisor):
-    result = divMod(dividend, -divisor)
-    # the quotient must be negative
+  let
+    ndivisor = isNeg(divisor)
+    ndividend = isNeg(dividend)
+    a = if ndividend: -dividend else: dividend
+    b = if ndivisor:  -divisor  else: divisor
+  result = udivMod(a, b)
+  if ndivisor xor ndividend:
+    # if either the divisor or dividend is negative (but not both), the
+    # quotient is too
     result[0] = -result[0]
-  elif isNeg(dividend):
-    result = divMod(-dividend, divisor)
-    result[0] = -result[0]
+  if ndividend:
     result[1] = -result[1]
-  else:
-    result = udivMod(dividend, divisor)
 
 proc `div`*(a, b: Int128): Int128 =
   ## Signed 128-bit truncating integer division.
