@@ -1453,6 +1453,21 @@ proc semType(c; body: NimNode, self: Type; base = Type(nil)) =
 
 proc semBody(c; n: NimNode, typ, input: Type): Node
 
+proc restore(c; start: int) =
+  # collect the names of the vars to remove:
+  var names: seq[string]
+  for k, v in c.vars.pairs:
+    if v.id >= start:
+      names.add k
+  # then remove the vars:
+  for it in names.items:
+    c.vars.del(it)
+
+proc semScopedBody(c; n: NimNode, typ: Type): Node =
+  var start = c.vars.len
+  result = semBody(c, n, typ, nil)
+  c.restore(start)
+
 proc semCase(c; n: NimNode, typ: Type, input: Type): Node =
   ## Analyzes and type-checks a ``case`` expression.
   var input = input
@@ -1467,6 +1482,7 @@ proc semCase(c; n: NimNode, typ: Type, input: Type): Node =
   for i in 1..<n.len:
     let b = n[i]
     var o: Node
+    var start = c.vars.len
     case b.kind
     of nnkOfBranch:
       let len = b.len - 1
@@ -1502,9 +1518,8 @@ proc semCase(c; n: NimNode, typ: Type, input: Type): Node =
 
     o.add semBody(c, b[^1], typ, nil)
     result.add o
-    # branches introduce a new scope
-    # FIXME: only remove the variables introduced in the current branch
-    c.flushVars()
+    # branches introduce a new scope:
+    c.restore(start)
 
 proc semBody(c; n: NimNode, typ, input: Type): Node =
   ## Analyzes a tree appearing somwhere nested in a function body. `typ` is
@@ -1538,8 +1553,8 @@ proc semBody(c; n: NimNode, typ, input: Type): Node =
       error(fmt"expected bool type, got {cond.typ}", n[0][0])
     let els =
       if n.len == 1: c.lookup["fail"].e
-      else:          semBody(c, n[1][0], typ, nil)
-    result = tree(nkIf, cond, semBody(c, n[0][1], typ, nil), els)
+      else:          semScopedBody(c, n[1][0], typ)
+    result = tree(nkIf, cond, semScopedBody(c, n[0][1], typ), els)
     result.typ = typ
   else:
     # must be a normal term
