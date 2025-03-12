@@ -18,6 +18,16 @@ block equality:
   doAssert frac(-10, 4) == frac(10, -4) # not directly dividable
   doAssert frac(-1, 4) != frac(1, 4)
 
+block edge_cases:
+  # make sure that values at the numeric upper and lower borders are handled
+  # correctly
+  discard frac(low(Int128), toInt128(1)) # must succeed and not get stuck
+  doAssert frac(toInt128(2), low(Int128)) ==
+           frac(toInt128(1), low(Int128) div toInt128(2))
+  doAssertRaises AssertionDefect:
+    # overflows the allowed range
+    discard frac(toInt128(1), low(Int128))
+
 block addition:
   # make sure addition works
   doAssert frac(2, 1) + frac(0, 1) == frac(2, 1) # with identity value

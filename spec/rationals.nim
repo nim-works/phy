@@ -16,20 +16,24 @@ proc reduced(r: Rational): Rational =
   ## possible positive denominator.
   if r.num == Zero:
     Rational(num: Zero, den: One)
-  elif r.den.isNeg:
-    reduced(Rational(num: -r.num, den: -r.den))
   else:
-    # compute the greatest denominator common between `r.num` and `r.denom`:
+    # compute the greatest denominator common between `r.num` and `r.denom`.
+    # Use unsigned values because it doesn't affect the result and unsigned
+    # division is faster
     var
-      num = r.num
-      denom = r.den
+      num = abs(r.num)
+      denom = abs(r.den)
     while num != Zero:
-      let (_, rem) = divMod(denom, num)
+      let (_, rem) = udivMod(denom, num)
       denom = num
       num = rem
 
-    if denom.isNeg: denom = -denom
-    Rational(num: r.num div denom, den: r.den div denom)
+    if r.den.isNeg:
+      # invert the result, so that the denominator is positive
+      assert r.den != low(Int128) or denom != One, "overflow"
+      Rational(num: -(r.num div denom), den: -(r.den div denom))
+    else:
+      Rational(num: r.num div denom, den: r.den div denom)
 
 proc frac*(num, denom: Int128): Rational =
   ## Creates a fraction from `num` and `denom`.
