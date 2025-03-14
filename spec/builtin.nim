@@ -2,7 +2,7 @@
 ## be used by the interpreter.
 
 import std/tables
-import int128
+import bignums
 import types except Node
 
 type Node = types.Node[TypeId]
@@ -23,11 +23,11 @@ proc `==`*(a, b: Node): bool =
   else:
     false
 
-proc num(n: Node): Int128 =
+proc num(n: Node): Bignum =
   # TODO: all numbers should be treated as rational numbers by default
-  parseInt128(n.sym)
+  parseBignum(n.sym)
 
-proc makeNum(i: Int128): Node =
+proc makeNum(i: Bignum): Node =
   Node(kind: nkNumber, sym: $i)
 
 proc merge(a: var Node, b: Node) =
@@ -102,7 +102,7 @@ const arr = [
       Node(kind: nkNumber, sym: "1")
     else:
       var val = base
-      for _ in 1..<exponent.toInt:
+      for _ in 1'n..<exponent:
         val = val * base
       makeNum(val)
   ),
