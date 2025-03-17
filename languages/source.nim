@@ -17,6 +17,12 @@ const lang* = language:
   alias n, z
   # TODO: remove `n` and use `z` directly. `n` usually refers to *natural*
   #       numbers, not *integer* numbers
+
+  typ equality:
+    Gt
+    Lt
+    Eq
+
   typ ident: Ident(string)
   alias x, ident
   typ expr:
@@ -586,22 +592,29 @@ const lang* = language:
     of n_1, 0: fail
     of n_1, n_2: n_1 - (n_2 * trunc(n_1 / n_2))
 
+  func intCmp(a, b: z) -> equality =
+    ## Integer comparison.
+    if a < b: Lt
+    else:
+      if same(a, b): Eq
+      else:          Gt
+
   func floatAdd(a, b: r) -> r
     ## XXX: not defined
   func floatSub(a, b: r) -> r
     ## XXX: not defined
 
-  func valEq(a, b: val) -> val =
-    if same(a, b):
-      True
-    else:
-      False
+  func asBool(b: bool) -> val =
+    case b
+    of true:  True
+    of false: False
+
+  func valEq(a, b: val) -> val = asBool same(a, b)
 
   func lt(a, b: val) -> val =
     case (a, b)
     of IntVal(n_1), IntVal(n_2):
-      if n_1 < n_2: True
-      else:         False
+      asBool same(intCmp(n_1, n_2), Lt)
     of FloatVal(r_1), FloatVal(r_2):
       if r_1 < r_2: True
       else:         False
