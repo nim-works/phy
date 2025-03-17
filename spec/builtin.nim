@@ -93,6 +93,10 @@ const arr = [
     # TODO: this needs to produce a rational number, not an integer
     makeNum(n[0].num div n[1].num)
   ),
+  ("mod", proc(n: Node): Node =
+    # TODO: this needs to produce a rational number, not an integer
+    makeNum(divMod(n[0].num, n[1].num)[1])
+  ),
   ("neg", proc(n: Node): Node = makeNum(-n.num)),
   ("^", proc(n: Node): Node =
     assert not n[1].num.isNeg, "negative exponents not supported"

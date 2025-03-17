@@ -1736,6 +1736,7 @@ macro language*(body: untyped): LangDef =
   c.builtin("<=", forall(1, fntype(tup(tvar(0), tvar(0)), boolType)))
   c.builtin("<", forall(1, fntype(tup(tvar(0), tvar(0)), boolType)))
   c.builtin("/", forall(1, fntype(tup(tvar(0), tvar(0)), ratType)))
+  c.builtin("mod", fntype(tup(ratType, ratType), ratType))
   c.builtin("^", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
   c.builtin("*", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
 
