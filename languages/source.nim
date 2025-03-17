@@ -23,12 +23,20 @@ const lang* = language:
     Lt
     Eq
 
+  typ float:
+    # IEEE-754.2008 binary64 float representation (without signed nans and nan
+    # payloads)
+    Nan
+    Inf(bool)
+    Zero(bool)
+    Finite(bool, n, z) # sign, significand, exponent
+
   typ ident: Ident(string)
   alias x, ident
   typ expr:
     Ident(string)
     IntVal(z)
-    FloatVal(r)
+    FloatVal(float)
     TupleCons(*expr)
     Seq(texpr, *expr)
     Seq(StringVal(string))
@@ -93,7 +101,7 @@ const lang* = language:
   subtype val, e:
     # A value is an irreducible expression.
     IntVal(n)
-    FloatVal(z)
+    FloatVal(float)
     True
     False
     char(z)
@@ -245,7 +253,7 @@ const lang* = language:
 
   inductive types(inp C, inp e, out typ):
     axiom "S-int",   C, IntVal(n), IntTy()
-    axiom "S-float", C, FloatVal(r), FloatTy()
+    axiom "S-float", C, FloatVal(float), FloatTy()
     axiom "S-false", C, Ident("false"), BoolTy()
     axiom "S-true",  C, Ident("true"), BoolTy()
     axiom "S-unit",  C, TupleCons(), UnitTy()
@@ -599,9 +607,9 @@ const lang* = language:
       if same(a, b): Eq
       else:          Gt
 
-  func floatAdd(a, b: r) -> r
+  func floatAdd(a, b: float) -> float
     ## XXX: not defined
-  func floatSub(a, b: r) -> r
+  func floatSub(a, b: float) -> float
     ## XXX: not defined
 
   func asBool(b: bool) -> val =
@@ -760,11 +768,11 @@ const lang* = language:
       conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-add-float":
-      let r_3 = floatAdd(r_1, r_2)
-      conclusion Call(Ident("+"), FloatVal(r_1), FloatVal(r_2)), FloatVal(r_3)
+      let float_3 = floatAdd(float_1, float_2)
+      conclusion Call(Ident("+"), FloatVal(float_1), FloatVal(float_2)), FloatVal(float_3)
     rule "E-sub-float":
-      let r_3 = floatSub(r_1, r_2)
-      conclusion Call(Ident("-"), FloatVal(r_1), FloatVal(r_2)), FloatVal(r_3)
+      let float_3 = floatSub(float_1, float_2)
+      conclusion Call(Ident("-"), FloatVal(float_1), FloatVal(float_2)), FloatVal(float_3)
 
     rule "E-builtin-eq":
       let val_3 = valEq(val_1, val_2)
