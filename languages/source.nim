@@ -620,18 +620,12 @@ const lang* = language:
     locExact
     locInexact(equality)
 
-  record shrRecord, {
-    m : z, # the current significand
-    r : bool, # whether the most recently shifted-out bit was set
-    s : bool # whether any shifted-out bit prior to most recent one was set
-  }
-
   # TODO: make the floating-point operators generic over formats by
   #       making the below two defs parameters of the operators
   def emax, 1024
   def prec, 53
 
-  func align(m, ex_1, ex_2: z) -> z =
+  func align(m: n, ex_1, ex_2: z) -> n =
     ## Returns m' such that `m'*(2^ex_2) = m*2(2^ex_1)`, when ex_2 < ex_1.
     if ex_2 < ex_1:
       m * (2 ^ (ex_1 - ex_2))
@@ -650,7 +644,6 @@ const lang* = language:
     max(exp - prec, 3 - emax - prec)
 
   func even(a: n) -> bool = same(a mod 2, 0)
-  func odd (a: n) -> bool = not even(a)
 
   func shr1Int(a: z) -> z =
     trunc(a / 2) # shifting right by 1 is the same as dividing by two
@@ -666,49 +659,30 @@ const lang* = language:
     ## Boolean or operator.
     if a: true else: b
 
-  func shr1(mrs: shrRecord) -> shrRecord =
-    let m = mrs.m
-    let s = orb(mrs.r, mrs.s)
-    case m
-    of 0: shrRecord(m: 0, r: false, s: s)
-    of 1: shrRecord(m: 0, r: true, s: s)
-    of -1: shrRecord(m: 0, r: true, s: s)
-    else: shrRecord(m: shr1Int(m), r: odd(m), s: s)
-
-  func shrN(mrs: shrRecord, num: n) -> shrRecord =
-    ## Applies `shr1` to `rec` `num` times.
-    case num
-    of 0: mrs
-    of 1: shr1(mrs)
-    else: shrN(shr1(mrs), num - 1)
-
-  func locOfShrRecord(mrs: shrRecord) -> location =
-    case (mrs.r, mrs.s)
-    of false, false: locExact
-    of false, true: locInexact(Lt)
-    of true, false: locInexact(Eq)
-    of true, true: locInexact(Gt)
-
-  func shrRecordOfLoc(m: z, l: location) -> shrRecord =
-    case l
-    of locExact:       shrRecord(m: m, r: false, s: false)
-    of locInexact(Lt): shrRecord(m: m, r: false, s: true)
-    of locInexact(Eq): shrRecord(m: m, r: true, s: false)
-    of locInexact(Gt): shrRecord(m: m, r: true, s: true)
-
-  func `shr`(mrs: shrRecord, exp, by: z) -> (shrRecord, z) =
-    if 0 < by:
-      (shrN(mrs, by), exp + by)
+  func toLocation(f: r) -> location =
+    if same(f, 0.0):   locExact
     else:
-      (mrs, exp)
+      if same(f, 0.5): locInexact(Eq)
+      else:
+        if f < 0.5:    locInexact(Lt)
+        else:          locInexact(Gt)
 
-  func shrFexp(m, exp: z, l: location) -> (shrRecord, z) =
+  func `shr`(m: n, exp, by: z) -> (n, z, location) =
+    if 0 < by:
+      let shifted = m / (2 ^ by)
+      let i = trunc(shifted) # integer part of `r`
+      (i, exp + by, toLocation(shifted - i))
+    else:
+      (m, exp, locExact)
+
+  func shrFexp(m, exp: z) -> (n, z, location) =
     ## Shifts `m` such that the most significant bit is at `prec`, if
     ## possible. The resulting exponent stays in the [3-emax-prec, inf) range.
-    `shr`(shrRecordOfLoc(m, l), exp, fexp(digit2(m) + exp) - exp)
+    `shr`(m, exp, fexp(digit2(m) + exp) - exp)
 
-  func roundNearestEven(mx: z, lx: location) -> z =
-    ## Implements the floating-point to-nearest, tie-to-even rounding mode.
+  func roundNearestEven(mx: n, lx: location) -> n =
+    ## Implements the floating-point to-nearest, tie-to-even rounding
+    ## mode.
     case lx
     of locExact: mx
     of locInexact(Lt): mx # round down
@@ -717,11 +691,11 @@ const lang* = language:
     of locInexact(Gt):
       mx + 1 # round up
 
-  func binaryRoundAux(sx: bool, mx: n, ex: z, lx: location) -> float =
-    let (mrs_1, e_1) = shrFexp(mx, ex, lx) # normalize
-    let rnd = roundNearestEven(mrs_1.m, locOfShrRecord(mrs_1)) # round
-    let (mrs_2, e_2) = shrFexp(rnd, e_1, locExact) # normalize `rnd`
-    case mrs_2.m
+  func binaryRoundAux(sx: bool, mx: n, ex: z) -> float =
+    let (m_1, e_1, lx) = shrFexp(mx, ex) # normalize
+    let rnd = roundNearestEven(m_1, lx) # round
+    let (m_2, e_2, _) = shrFexp(rnd, e_1) # normalize `rnd`
+    case m_2
     of 0: Zero(sx)
     of z_1:
       if z_1 < 0: Nan
@@ -733,7 +707,7 @@ const lang* = language:
     let z_3 = fexp(digit2(m) + exp)
     let z_1 = align(m, exp, z_3)
     let exp_1 = min(exp, z_3)
-    binaryRoundAux(s, abs(z_1), exp_1, locExact)
+    binaryRoundAux(s, abs(z_1), exp_1)
 
   func normalize(m, exp: z, szero: bool) -> float =
     ## Yields the closest possible floating point representation
@@ -875,9 +849,6 @@ const lang* = language:
       of Some(Lt): True
       of Some(Eq): True
       else:        False
-
-  # TODO: the floating-point operations need to be defined according to the
-  #       IEEE 754.2008 standard
 
   record DC, {locs: (z -> val),
               nloc: z,
