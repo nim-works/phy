@@ -23,6 +23,10 @@ const lang* = language:
     Lt
     Eq
 
+  typ option:
+    None
+    Some(equality)
+
   typ float:
     # IEEE-754.2008 binary64 float representation (without signed nans and nan
     # payloads)
@@ -612,26 +616,86 @@ const lang* = language:
   func floatSub(a, b: float) -> float
     ## XXX: not defined
 
+
+  func floatCmp(a, b: float) -> option =
+    ## IEEE-754.2008 binary64 comparison.
+    case (a, b)
+    of Nan, _: None
+    of _, Nan: None
+    of Inf(bool_1), Inf(bool_2):
+      case (bool_1, bool_2)
+      of true, true:   Some(Eq)
+      of false, false: Some(Eq)
+      of true, false:  Some(Lt)
+      of false, true:  Some(Gt)
+    of Inf(bool_1), _:
+      if bool_1: Some(Lt) else: Some(Gt)
+    of _, Inf(bool_1):
+      if bool_1: Some(Gt) else: Some(Lt)
+    of Finite(bool_1, z, z), Zero(bool):
+      if bool_1: Some(Lt) else: Some(Gt)
+    of Zero(bool), Finite(bool_1, z, z):
+      if bool_1: Some(Lt) else: Some(Gt)
+    of Zero(bool), Zero(bool):
+      Some(Eq) # sign doesn't matter
+    of Finite(bool_1, n_1, z_1), Finite(bool_2, n_2, z_2):
+      case (bool_1, bool_2)
+      of true, false: Some(Lt)
+      of false, true: Some(Gt)
+      of false, false:
+        case intCmp(z_1, z_2)
+        of Lt: Some(Lt)
+        of Gt: Some(Gt)
+        of Eq: Some(intCmp(n_1, n_2))
+      of true, true:
+        case intCmp(z_1, z_2)
+        of Lt: Some(Gt)
+        of Gt: Some(Lt)
+        of Eq:
+          case intCmp(n_2, n_1)
+          of Lt: Some(Gt)
+          of Gt: Some(Lt)
+          of Eq: Some(Eq)
+
   func asBool(b: bool) -> val =
     case b
     of true:  True
     of false: False
 
-  func valEq(a, b: val) -> val = asBool same(a, b)
+  func eq(a, b: val) -> val =
+    case (a, b)
+    of True, True:
+      True
+    of False, False:
+      True
+    of False, True:
+      False
+    of True, False:
+      False
+    of IntVal(z_1), IntVal(z_2):
+      asBool same(intCmp(z_1, z_2), Eq)
+    of FloatVal(float_1), FloatVal(float_2):
+      asBool same(floatCmp(float_1, float_2), Some(Eq))
 
   func lt(a, b: val) -> val =
     case (a, b)
     of IntVal(n_1), IntVal(n_2):
       asBool same(intCmp(n_1, n_2), Lt)
-    of FloatVal(r_1), FloatVal(r_2):
-      if r_1 < r_2: True
-      else:         False
+    of FloatVal(float_1), FloatVal(float_2):
+      asBool same(floatCmp(float_1, float_2), Some(Lt))
 
-  func lessEqual(a, b: val) -> val =
-    if same(valEq(a, b), True):
-      True
-    else:
-      lt(a, b)
+  func leq(a, b: val) -> val =
+    case (a, b)
+    of IntVal(z_1), IntVal(z_2):
+      case intCmp(z_1, z_2)
+      of Lt: True
+      of Eq: True
+      of Gt: False
+    of FloatVal(float_1), FloatVal(float_2):
+      case floatCmp(float_1, float_2)
+      of Some(Lt): True
+      of Some(Eq): True
+      else:        False
 
   # TODO: the floating-point operations need to be defined according to the
   #       IEEE 754.2008 standard
@@ -775,10 +839,10 @@ const lang* = language:
       conclusion Call(Ident("-"), FloatVal(float_1), FloatVal(float_2)), FloatVal(float_3)
 
     rule "E-builtin-eq":
-      let val_3 = valEq(val_1, val_2)
+      let val_3 = eq(val_1, val_2)
       conclusion Call(Ident("=="), val_1, val_2), val_3
     rule "E-builtin-le":
-      let val_3 = lessEqual(val_1, val_2)
+      let val_3 = leq(val_1, val_2)
       conclusion Call(Ident("<="), val_1, val_2), val_3
     rule "E-builtin-lt":
       let val_3 = lt(val_1, val_2)
