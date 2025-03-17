@@ -611,11 +611,190 @@ const lang* = language:
       if same(a, b): Eq
       else:          Gt
 
-  func floatAdd(a, b: float) -> float
-    ## XXX: not defined
-  func floatSub(a, b: float) -> float
-    ## XXX: not defined
+  func opp(s: bool, v: z) -> z =
+    case s
+    of true:  neg(v)
+    of false: v
 
+  typ location:
+    locExact
+    locInexact(equality)
+
+  record shrRecord, {
+    m : z, # the current significand
+    r : bool, # whether the most recently shifted-out bit was set
+    s : bool # whether any shifted-out bit prior to most recent one was set
+  }
+
+  # TODO: make the floating-point operators generic over formats by
+  #       making the below two defs parameters of the operators
+  def emax, 1024
+  def prec, 53
+
+  func align(m, ex_1, ex_2: z) -> z =
+    ## Returns m' such that `m'*(2^ex_2) = m*2(2^ex_1)`, when ex_2 < ex_1.
+    if ex_2 < ex_1:
+      m * (2 ^ (ex_1 - ex_2))
+    else:
+      m
+
+  func min(a, b: z) -> z =
+    if a < b: a else: b
+  func max(a, b: z) -> z =
+    if a < b: b else: a
+
+  func abs(a: z) -> z =
+    if a < 0: neg(a) else: a
+
+  func fexp(exp: z) -> z =
+    max(exp - prec, 3 - emax - prec)
+
+  func even(a: n) -> bool = same(a mod 2, 0)
+  func odd (a: n) -> bool = not even(a)
+
+  func shr1Int(a: z) -> z =
+    trunc(a / 2) # shifting right by 1 is the same as dividing by two
+
+  func digit2(a : n) -> n =
+    ## Computes the 1-based position of the most-significant bit.
+    case a
+    of 0: 0
+    of 1: 1
+    else: digit2(shr1Int(a)) + 1
+
+  func orb(a, b: bool) -> bool =
+    ## Boolean or operator.
+    if a: true else: b
+
+  func shr1(mrs: shrRecord) -> shrRecord =
+    let m = mrs.m
+    let s = orb(mrs.r, mrs.s)
+    case m
+    of 0: shrRecord(m: 0, r: false, s: s)
+    of 1: shrRecord(m: 0, r: true, s: s)
+    of -1: shrRecord(m: 0, r: true, s: s)
+    else: shrRecord(m: shr1Int(m), r: odd(m), s: s)
+
+  func shrN(mrs: shrRecord, num: n) -> shrRecord =
+    ## Applies `shr1` to `rec` `num` times.
+    case num
+    of 0: mrs
+    of 1: shr1(mrs)
+    else: shrN(shr1(mrs), num - 1)
+
+  func locOfShrRecord(mrs: shrRecord) -> location =
+    case (mrs.r, mrs.s)
+    of false, false: locExact
+    of false, true: locInexact(Lt)
+    of true, false: locInexact(Eq)
+    of true, true: locInexact(Gt)
+
+  func shrRecordOfLoc(m: z, l: location) -> shrRecord =
+    case l
+    of locExact:       shrRecord(m: m, r: false, s: false)
+    of locInexact(Lt): shrRecord(m: m, r: false, s: true)
+    of locInexact(Eq): shrRecord(m: m, r: true, s: false)
+    of locInexact(Gt): shrRecord(m: m, r: true, s: true)
+
+  func `shr`(mrs: shrRecord, exp, by: z) -> (shrRecord, z) =
+    if 0 < by:
+      (shrN(mrs, by), exp + by)
+    else:
+      (mrs, exp)
+
+  func shrFexp(m, exp: z, l: location) -> (shrRecord, z) =
+    ## Shifts `m` such that the most significant bit is at `prec`, if
+    ## possible. The resulting exponent stays in the [3-emax-prec, inf) range.
+    `shr`(shrRecordOfLoc(m, l), exp, fexp(digit2(m) + exp) - exp)
+
+  func roundNearestEven(mx: z, lx: location) -> z =
+    ## Implements the floating-point to-nearest, tie-to-even rounding mode.
+    case lx
+    of locExact: mx
+    of locInexact(Lt): mx # round down
+    of locInexact(Eq):
+      if even(mx): mx else: (mx + 1) # tie; round to even
+    of locInexact(Gt):
+      mx + 1 # round up
+
+  func binaryRoundAux(sx: bool, mx: n, ex: z, lx: location) -> float =
+    let (mrs_1, e_1) = shrFexp(mx, ex, lx) # normalize
+    let rnd = roundNearestEven(mrs_1.m, locOfShrRecord(mrs_1)) # round
+    let (mrs_2, e_2) = shrFexp(rnd, e_1, locExact) # normalize `rnd`
+    case mrs_2.m
+    of 0: Zero(sx)
+    of z_1:
+      if z_1 < 0: Nan
+      else:
+        if e_2 <= (emax - prec): Finite(sx, z_1, e_2)
+        else: Inf(sx)
+
+  func binaryRound(s: bool, m, exp: z) -> float =
+    let z_3 = fexp(digit2(m) + exp)
+    let z_1 = align(m, exp, z_3)
+    let exp_1 = min(exp, z_3)
+    binaryRoundAux(s, abs(z_1), exp_1, locExact)
+
+  func normalize(m, exp: z, szero: bool) -> float =
+    ## Yields the closest possible floating point representation
+    ## for `m` and `exp` such that `f ~= m*(2^exp)`.
+    case m
+    of 0: Zero(szero)
+    else:
+      if m < 0: binaryRound(true, m, exp)
+      else:     binaryRound(false, m, exp)
+
+  func floatAdd(a, b: float) -> float =
+    ## IEEE-754.2008 binary64 addition (with simplified nans).
+    case (a, b)
+    of Nan, _: Nan
+    of _, Nan: Nan
+    of Inf(bool_1), Inf(bool_2):
+      if same(bool_1, bool_2): Inf(bool_1)
+      else:                    Nan
+    of Inf(bool), _: a
+    of _, Inf(bool): b
+    of Zero(bool_1), Zero(bool_2):
+      if same(bool_1, bool_2):
+        a
+      else:
+        Zero(false) # negative + positive = positive
+    of Zero(bool), float_1: float_1
+    of float_1, Zero(bool): float_1
+    of Finite(bool_1, z_1, z_2), Finite(bool_2, z_3, z_4):
+      # align the exponents, then add, then normalize the result
+      let exp = min(z_2, z_4)
+      normalize(
+        opp(bool_1, align(z_1, z_2, exp)) + opp(bool_2, align(z_3, z_4, exp)),
+        exp, false)
+
+  func floatSub(a, b: float) -> float =
+    ## IEEE-754.2008 binary64 subtraction (with simplified nans).
+    case (a, b)
+    of Nan, _: Nan
+    of _, Nan: Nan
+    of Inf(bool_1), Inf(bool_2):
+      # -inf - inf = -inf
+      if same(bool_1, not bool_2): Inf(bool_1)
+      else:                        Nan
+    of Inf(bool), _: a
+    of _, Inf(bool): b
+    of Zero(bool_1), Zero(bool_2):
+      if same(bool_1, not bool_2):
+        a
+      else:
+        Zero(false)
+    of Zero(bool), Finite(bool_1, n_1, z_1):
+      # 0 - f inverts the sign of f
+      Finite(not bool_1, n_1, z_1)
+    of float_1, Zero(bool): float_1
+    of Finite(bool_1, z_1, z_2), Finite(bool_2, z_3, z_4):
+      # align the exponents, then subtract, then normalize the result
+      let exp = min(z_2, z_4)
+      normalize(
+        opp(bool_1, align(z_1, z_2, exp)) -
+          opp(bool_2, align(z_3, z_4, exp)),
+        exp, false)
 
   func floatCmp(a, b: float) -> option =
     ## IEEE-754.2008 binary64 comparison.
