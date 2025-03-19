@@ -100,9 +100,9 @@ const lang* = language:
     FieldAccess(le, IntVal(n))
     At(le, IntVal(n))
 
-  function desugar, expr -> e:
+  func desugar(a: expr) -> e =
     # FIXME: the sub-expressions need to be desugared too!
-    case _
+    case a
     of And(expr_1, expr_2):
       If(expr_1, expr_2, Ident("false"))
     of Or(expr_1, expr_2):
@@ -135,9 +135,9 @@ const lang* = language:
       condition typ_1 in typ_2
       conclusion typ_1, UnionTy(+typ_2)
 
-  function `==`, (typ, typ) -> bool:
+  func `==`(a, b: typ) -> bool =
     ## Except for union types, all type equality uses *structural equality*.
-    case _
+    case (a, b)
     of UnionTy(+typ_1), UnionTy(+typ_2):
       if (for typ_3 in typ_1: contains(typ_2, typ_3)):
         if (for typ_3 in typ_2: contains(typ_1, typ_3)):
@@ -146,13 +146,10 @@ const lang* = language:
           false
       else:
         false
-    of typ_1, typ_2:
-      same(typ_1, typ_2) # same structure, equal type
+    else:
+      same(a, b) # same structure -> equivalent type
 
-  function `!=`, (typ, typ) -> bool:
-    case _
-    of typ_1, typ_2:
-      not(typ_1 == typ_2)
+  func `!=`(a, b: typ) -> bool = not(a == b)
 
   inductive `<:=`(inp typ, inp typ):
     ## :math:`<:=` is the "sub or equal type" operator.
@@ -172,17 +169,15 @@ const lang* = language:
   record C, (symbols: (string -> typ), ret: typ)
   ## :math:`C` is the symbol environment.
 
-  function common, (typ, typ) -> typ:
+  func common(a, b: typ) -> typ =
     ## Computes the closest common ancestor type for a type pair. The function
     ## is not total, as not all two types have a common ancestor type.
-    case _
-    of typ_1, typ_2:
-      if typ_1 == typ_2:     typ_1
+    if a == b:     a
+    else:
+      if a <: b:   b
       else:
-        if typ_1 <: typ_2:   typ_2
-        else:
-          if typ_2 <: typ_1: typ_1
-          else:              fail # no common type
+        if b <: a: a
+        else:      fail # no common type
 
   inductive ttypes(inp C, inp texpr, out typ):
     axiom "S-void-type",        C, VoidTy(),  VoidTy()
@@ -224,8 +219,8 @@ const lang* = language:
     {"==", "<=", "<", "+", "-", "*", "div", "mod", "true", "false", "write",
      "writeErr", "readFile"}
 
-  function stripMut, typ -> typ:
-    case _
+  func stripMut(t: typ) -> typ =
+    case t
     of mut(typ_1): typ_1
     of typ_1:      typ_1
 
@@ -235,8 +230,8 @@ const lang* = language:
       premise types(C_1, e_1, typ_1)
       conclusion C_1, e_1, stripMut(typ_1)
 
-  function isType, typ -> bool:
-    case _
+  func isType(t: typ) -> bool =
+    case t
     of type(typ): true
     of typ:       false
 
@@ -504,82 +499,76 @@ const lang* = language:
   ## Auxiliary Functions
   ## ~~~~~~~~~~~~~~~~~~~
 
-  function substitute, (e, (string -> e)) -> e:
+  func substitute(a: expr, with: string -> e) -> e =
     ## The substitution function, which handles binding values/expressions to
     ## identifiers. Identifiers cannot be shadowed.
-    case _
-    of Exprs(+e_1), any_1:
-      Exprs(...(substitute(e_1, any_1)))
-    of Let(ident_1, e_1, e_2), any_1:
-      Let(ident_1, substitute(e_1, any_1), substitute(e_2, any_1))
-    of If(e_1, e_2, e_3), any_1:
-      If(substitute(e_1, any_1), substitute(e_2, any_1), substitute(e_3, any_1))
-    of Call(+e_1), any_1:
-      Call(...substitute(e_1, any_1))
-    of Asgn(e_1, e_2), any_1:
-      Asgn(substitute(e_1, any_1), substitute(e_2, any_1))
-    of TupleCons(*e_1), any_1:
-      TupleCons(...substitute(e_1, any_1))
-    of Seq(texpr_1, *e_1), any_1:
-      Seq(texpr_1, ...substitute(e_1, any_1))
-    of FieldAccess(e_1, IntVal(z_1)), any_1:
-      FieldAccess(substitute(e_1, any_1), IntVal(z_1))
-    of At(e_1, e_2), any_1:
-      At(substitute(e_1, any_1), substitute(e_2, any_1))
-    of While(e_1, e_2), any_1:
-      While(substitute(e_1, any_1), substitute(e_2, any_1))
-    of Return(e_1), any_1:
-      Return(substitute(e_1, any_1))
-    of Ident(string_1), any_1:
+    case a
+    of Exprs(+e_1):
+      Exprs(...(substitute(e_1, with)))
+    of Let(ident_1, e_1, e_2):
+      Let(ident_1, substitute(e_1, with), substitute(e_2, with))
+    of If(e_1, e_2, e_3):
+      If(substitute(e_1, with), substitute(e_2, with), substitute(e_3, with))
+    of Call(+e_1):
+      Call(...substitute(e_1, with))
+    of Asgn(e_1, e_2):
+      Asgn(substitute(e_1, with), substitute(e_2, with))
+    of TupleCons(*e_1):
+      TupleCons(...substitute(e_1, with))
+    of Seq(texpr_1, *e_1):
+      Seq(texpr_1, ...substitute(e_1, with))
+    of FieldAccess(e_1, IntVal(z_1)):
+      FieldAccess(substitute(e_1, with), IntVal(z_1))
+    of At(e_1, e_2):
+      At(substitute(e_1, with), substitute(e_2, with))
+    of While(e_1, e_2):
+      While(substitute(e_1, with), substitute(e_2, with))
+    of Return(e_1):
+      Return(substitute(e_1, with))
+    of Ident(string_1):
       # the actual substitution
-      if string_1 in any_1:
-        any_1(string_1)
+      if string_1 in with:
+        with(string_1)
       else:
         Ident(string_1)
-    of e_1, _:
+    of e_1:
       e_1 # nothing to replace
 
-  function trunc, r -> n:
+  func trunc(a : r) -> n
     ## Round towards zero.
 
-  function intAdd, (n, n) -> n:
-    case _
-    of n_1, n_2:
-      let n_3 = n_1 + n_2
-      if n_3 <= (2 ^ 63):
-        if n_3 < (2 ^ 63):
-          n_3
-        else:
-          fail
+  func intAdd(a, b: n) -> n =
+    let n_3 = a + b
+    if n_3 <= (2 ^ 63):
+      if n_3 < (2 ^ 63):
+        n_3
       else:
         fail
+    else:
+      fail
 
-  function intSub, (n, n) -> n:
-    case _
-    of n_1, n_2:
-      let n_3 = n_1 - n_2
-      if n_3 <= (2 ^ 63):
-        if n_3 < (2 ^ 63):
-          n_3
-        else:
-          fail
+  func intSub(a, b: n) -> n =
+    let n_3 = a - b
+    if n_3 <= (2 ^ 63):
+      if n_3 < (2 ^ 63):
+        n_3
       else:
         fail
+    else:
+      fail
 
-  function intMul, (n, n) -> n:
-    case _
-    of n_1, n_2:
-      let n_3 = n_1 * n_2
-      if n_3 <= (2 ^ 63):
-        if n_3 < (2 ^ 63):
-          n_3
-        else:
-          fail
+  func intMul(a, b: n) -> n =
+    let n_3 = a * b
+    if n_3 <= (2 ^ 63):
+      if n_3 < (2 ^ 63):
+        n_3
       else:
         fail
+    else:
+      fail
 
-  function intDiv, (n, n) -> n:
-    case _
+  func intDiv(a, b: n) -> n =
+    case (a, b)
     of n_1, 0: fail
     of n_1, n_2:
       if same(n_1, (-2 ^ 63)):
@@ -590,26 +579,24 @@ const lang* = language:
       else:
         trunc(n_1 / n_2)
 
-  function intMod, (n, n) -> n:
-    case _
+  func intMod(a, b: n) -> n =
+    case (a, b)
     of n_1, 0: fail
     of n_1, n_2: n_1 - (n_2 * trunc(n_1 / n_2))
 
-  function floatAdd, (r, r) -> r:
+  func floatAdd(a, b: r) -> r
     ## XXX: not defined
-  function floatSub, (r, r) -> r:
+  func floatSub(a, b: r) -> r
     ## XXX: not defined
 
-  function valEq, (val, val) -> val:
-    case _
-    of val_1, val_2:
-      if same(val_1, val_2):
-        True
-      else:
-        False
+  func valEq(a, b: val) -> val =
+    if same(a, b):
+      True
+    else:
+      False
 
-  function lt, (val, val) -> val:
-    case _
+  func lt(a, b: val) -> val =
+    case (a, b)
     of IntVal(n_1), IntVal(n_2):
       if n_1 < n_2: True
       else:         False
@@ -617,13 +604,11 @@ const lang* = language:
       if r_1 < r_2: True
       else:         False
 
-  function lessEqual, (val, val) -> val:
-    case _
-    of val_1, val_2:
-      if same(valEq(val_1, val_2), True):
-        True
-      else:
-        lt(val_1, val_2)
+  func lessEqual(a, b: val) -> val =
+    if same(valEq(a, b), True):
+      True
+    else:
+      lt(a, b)
 
   # TODO: the floating-point operations need to be defined according to the
   #       IEEE 754.2008 standard
@@ -636,7 +621,7 @@ const lang* = language:
               files: ((string, z) -> val)} # name + time -> content
   ## `DC` is the dynamic context
 
-  function utf8Bytes, string -> *z:
+  func utf8Bytes(_: string) -> *z
     # TODO: the function is mostly self-explanatory, but it should be defined in
     #       a bit more detail nonetheless
     ##
@@ -904,26 +889,26 @@ const lang* = language:
   # ------------
   # boilerplate functions that should rather not exist
 
-  function `not`, bool -> bool:
-    case _
+  func `not`(b: bool) -> bool =
+    case b
     of true: false
     of false: true
 
   # XXX: the built-in `in` function should consider the custom equality
   #      operator, which would render `contains` obsolete
-  function contains, (*typ, typ) -> bool:
-    case _
-    of [typ_1, *typ_2], typ_3:
-      if typ_1 == typ_3:
+  func contains(list: *typ, t: typ) -> bool =
+    case list
+    of [typ_1, *typ_2]:
+      if typ_1 == t:
         true
       else:
-        contains(typ_2, typ_3)
+        contains(typ_2, t)
     of _:
       false
 
-  function uniqueTypes, *typ -> bool:
+  func uniqueTypes(list: *typ) -> bool =
     ## Computes whether all types in the list are unique.
-    case _
+    case list
     of [typ_1, +typ_2]:
       if not contains(typ_2, typ_1):
         uniqueTypes(typ_2)
@@ -932,9 +917,9 @@ const lang* = language:
     of _:
       true
 
-  function unique, *string -> bool:
+  func unique(list: *string) -> bool =
     ## Computes whether all strings in the list are unique.
-    case _
+    case list
     of [string_1, +string_2]:
       if string_1 notin string_2:
         unique(string_2)

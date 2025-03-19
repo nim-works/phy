@@ -746,6 +746,29 @@ proc finishUnpack(body: Node, vars: HashSet[int], info: NimNode): Node =
   result.add body
   result.typ = listT(body.typ)
 
+proc semBindingName(c; n: NimNode, typ: Type): Node =
+  ## Makes sure `n` is a valid identifier for a binding and - if so -
+  ## register a new binding with the given name and `typ` with `c`.
+  let name = name(n)
+  if name == "_":
+    # don't add a binding
+    result = Node(kind: nkType, typ: typ)
+  elif name in c.vars or name in c.lookup:
+    error(fmt"redeclaration of {name}", n)
+  else:
+    let i = find(name, '_')
+    if i != -1 and find(name, '_', i + 1) != -1:
+      error("identifiers must only contain a single underscore", n)
+
+    result = Node(kind: nkVar, id: c.vars.len)
+    c.vars[name] = (typ, result.id)
+
+proc toPattern(n: sink Node): Node =
+  case n.kind
+  of nkType: n
+  of nkVar:  tree(nkBind, n)
+  else:      unreachable()
+
 proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
   ## Analyzes and type-checks expression `n`. `inConstr` tells whether within
   ## a construction, `isHead` whether the `n` is the head of a construction.
@@ -907,18 +930,16 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
     result = recurse(n[0])
   of nnkForStmt:
     n.expectLen 3
-    let v = name(n[0])
     let frm = recurse(n[1])
-    if v in c.vars:
-      error(fmt"redeclaration of {v}", n[0])
     if frm.typ.kind != tkList:
       error(fmt"expected list type, but got {frm.typ}", n[1])
-    let id = c.vars.len
-    c.vars[v] = (frm.typ[0], id)
+    let to = c.semBindingName(n[0], frm.typ[0])
+    if to.kind == nkType:
+      error("discard underscore not allowed in this context", n[0])
     let body = recurse(n[2])
-    result = tree(nkUnpack, tree(nkBind, Node(kind: nkVar, id: id), frm), body)
+    result = tree(nkUnpack, tree(nkBind, to, frm), body)
     result.typ = listT(body.typ)
-    c.vars.del(v)
+    c.vars.del(name(n[0]))
   else:
     error("invalid expression", n)
 
@@ -1162,12 +1183,35 @@ proc semPredicate(c; n: NimNode): Node =
     unreachable()
 
 proc semLet(c; n: NimNode): Node =
+  ## Analyses and a ``let`` statement, transforming it into a ``nkMatches``
+  ## expression.
   n.expectLen 1
-  n[0].expectKind nnkIdentDefs
-  n[0].expectLen 3
-  n[0][1].expectKind nnkEmpty
-  let pat = semPatternIdent(c, n[0][0], {nkType, nkVar})
-  tree(nkMatches, pat, receive(c, n[0][2], pat.typ))
+  let def = n[0]
+  def.expectKind {nnkIdentDefs, nnkVarTuple}
+  let e = semExpr(c, def[^1])
+
+  var pat: Node
+  case def.kind
+  of nnkIdentDefs:
+    # a single identifier binding is introduced
+    def.expectLen 3
+    def[1].expectKind nnkEmpty
+    pat = toPattern c.semBindingName(def[0], e.typ)
+  of nnkVarTuple:
+    # tuple unpacking + identifier binding
+    pat = Node(kind: nkTuple)
+    if e.typ.kind != tkTuple:
+      error("expression must be of tuple type", def[^1])
+    elif (let L = e.typ.children.len; L != def.len - 2):
+      error(fmt"expected tuple with {def.len-2} elements, but got {L}",
+            def[^1])
+
+    for i in 0..<def.len-2:
+      pat.add toPattern(c.semBindingName(def[i], e.typ[i]))
+  else:
+    unreachable()
+
+  tree(nkMatches, pat, e)
 
 proc semRelation(c; n: NimNode, rel: var Relation[Type], id: int) =
   ## Parses and verifies the body of a relation.
@@ -1409,22 +1453,32 @@ proc semType(c; body: NimNode, self: Type; base = Type(nil)) =
     do:
       c.lookup[name] = sym
 
-proc semBody(c; n: NimNode, typ, input: Type): Node
+proc semBody(c; n: NimNode, typ: Type, top: bool): Node
 
-proc semCase(c; n: NimNode, typ: Type, input: Type): Node =
+proc restore(c; start: int) =
+  # collect the names of the vars to remove:
+  var names: seq[string]
+  for k, v in c.vars.pairs:
+    if v.id >= start:
+      names.add k
+  # then remove the vars:
+  for it in names.items:
+    c.vars.del(it)
+
+proc semScopedBody(c; n: NimNode, typ: Type): Node =
+  var start = c.vars.len
+  result = semBody(c, n, typ, false)
+  c.restore(start)
+
+proc semCase(c; n: NimNode, typ: Type): Node =
   ## Analyzes and type-checks a ``case`` expression.
-  var input = input
-  if input.isNil:
-    result = tree(nkMatch, semExpr(c, n[0]))
-    input = result[0].typ
-  else:
-    if n[0].kind != nnkIdent or n[0].strVal != "_":
-      error("selector of top-level 'case' must be '_'", n[0])
-    result = tree(nkMatch, Node(kind: nkHole))
+  result = tree(nkMatch, semExpr(c, n[0]))
+  let input = result[0].typ
 
   for i in 1..<n.len:
     let b = n[i]
     var o: Node
+    var start = c.vars.len
     case b.kind
     of nnkOfBranch:
       let len = b.len - 1
@@ -1458,32 +1512,35 @@ proc semCase(c; n: NimNode, typ: Type, input: Type): Node =
     else:
       error("expected 'else' or 'of' branch", b)
 
-    o.add semBody(c, b[^1], typ, nil)
+    o.add semBody(c, b[^1], typ, false)
     result.add o
-    # branches introduce a new scope
-    # FIXME: only remove the variables introduced in the current branch
-    c.flushVars()
+    # branches introduce a new scope:
+    c.restore(start)
 
-proc semBody(c; n: NimNode, typ, input: Type): Node =
+proc semBody(c; n: NimNode, typ: Type, top: bool): Node =
   ## Analyzes a tree appearing somwhere nested in a function body. `typ` is
-  ## the expected expression's expected type, `input` the type of the implicit
-  ## argument to a case expression (nil means no implicit argument).
+  ## the expected expression's expected type, and `top` signals whether it's a
+  ## top-level expression the type of the implicit.
   case n.kind
   of nnkStmtList:
     var stmts: seq[Node]
-    for i in 0..<n.len-1:
+    # skip leading comments:
+    var start = 0
+    while top and start < n.len and n[start].kind == nnkCommentStmt:
+      inc start
+    # process the leading 'let' statements:
+    for i in start..<n.len-1:
       if n[i].kind == nnkLetSection:
         stmts.add semLet(c, n[i])
       else:
         error("expected 'let' statement", n[i])
-    # no longer a top-level statement, so pass nil as the input type
-    result = semBody(c, n[^1], typ, nil)
+    result = semBody(c, n[^1], typ, top)
     if stmts.len > 0:
       # lower the let statements into nested match expressions
       for i in countdown(stmts.high, 0):
         result = tree(nkMatch, stmts[i][1], tree(nkOf, stmts[i][0], result))
   of nnkCaseStmt:
-    result = semCase(c, n, typ, input)
+    result = semCase(c, n, typ)
   of nnkIfStmt, nnkIfExpr:
     if n.len > 1 and n[1].kind == nnkElifBranch:
       error("only if/else is supported", n[1])
@@ -1496,34 +1553,69 @@ proc semBody(c; n: NimNode, typ, input: Type): Node =
       error(fmt"expected bool type, got {cond.typ}", n[0][0])
     let els =
       if n.len == 1: c.lookup["fail"].e
-      else:          semBody(c, n[1][0], typ, nil)
-    result = tree(nkIf, cond, semBody(c, n[0][1], typ, nil), els)
+      else:          semScopedBody(c, n[1][0], typ)
+    result = tree(nkIf, cond, semScopedBody(c, n[0][1], typ), els)
     result.typ = typ
   else:
     # must be a normal term
     result = receive(c, n, typ)
 
-proc semFunction(c; def: NimNode): Function[Type] =
+proc semFunctionHeader(c; params: NimNode): Type =
+  ## Constructs the function type using the parameter list.
+  params.expectKind nnkFormalParams
+  if params.len == 1:
+    error("functions must have at least one parameter", params)
+
+  var args: seq[Type]
+  # check and gather the parameters first:
+  for i in 1..<params.len:
+    let def = params[i]
+    def.expectKind nnkIdentDefs
+    if def[^1].kind != nnkEmpty:
+      error("default values are disallowed", def[^1])
+    # no parameter type is interpreted as meaning "accepts everything"
+    let typ =
+      if def[^2].kind == nnkEmpty:
+        Type(kind: tkAll)
+      else:
+        parseTypeUse(c, def[^2])
+
+    # the names are validated later, when registering the bindings
+    for _ in 0..<def.len-2:
+      args.add typ
+
+  # then assemble and return the function type:
+  if args.len == 1:
+    fntype(args[0], parseTypeUse(c, params[0]))
+  else:
+    fntype(tup(args), parseTypeUse(c, params[0]))
+
+proc semFunction(c; def: NimNode, sig: Type): Function[Type] =
   ## Analyzes and type-checks function definition `def`, producing the fully-
   ## typed definition.
-  result = Function[Type](name: $def[1])
-  var i = 0
-  # skip/parse the leading comment statements
-  while i < def[3].len and def[3][i].kind == nnkCommentStmt:
-    # TODO: handle
-    inc i
+  result = Function[Type](name: name(macros.name(def)))
+  let
+    body   = def.body
+    params = def.params
 
-  if i == def[3].len:
+  if body.kind == nnkEmpty:
     # empty function; this is currently allowed
     result.body = Node(kind: nkHole)
     return
 
-  let sig = parseTypeUse(c, def[2])
-  if sig.kind != tkFunc:
-    error("must be a function type", def[2])
+  # register the bindings for all parameters:
+  var branch = Node(kind: nkOf)
+  var paramIdx = 0
+  for i in 1..<params.len:
+    for j in 0..<params[i].len-2: # go over all identifiers
+      branch.add:
+        toPattern c.semBindingName(params[i][j], getParam(sig, paramIdx))
+      inc paramIdx
 
-  result.body = semBody(c, def[3][i], sig[1], sig[0])
+  branch.add semBody(c, body, sig[1], top=true)
+  result.body = tree(nkMatch, Node(kind: nkHole), branch)
   c.finalize(result.body)
+  c.flushVars()
 
 proc semRelationHeader(c; n: NimNode): Relation[Type] =
   ## Parses and checks the relation's signature from `n`.
@@ -1652,7 +1744,8 @@ macro language*(body: untyped): LangDef =
   # first pass: make sure the broad shape of `body` is correct and collect the
   # names of all symbols while looking for and reporting collisions
   for it in body.items:
-    if it.kind in nnkCallKinds:
+    case it.kind
+    of nnkCallKinds:
       it[0].expectKind nnkIdent
       case it[0].strVal
       of "inductive":
@@ -1668,11 +1761,6 @@ macro language*(body: untyped): LangDef =
         it.expectLen 4
         addSym(c, name(it[1]), it):
           Sym(kind: skType, typ: Type(kind: tkData))
-      of "function":
-        it.expectLen 4
-        addSym(c, name(it[1]), it):
-          Sym(kind: skFunc, id: c.functions.len)
-        c.functions.add Function[Type](name: name(it[1]))
       of "context":
         it.expectLen 3
         # use void as the type, so that an r-pattern can be used everywhere
@@ -1693,16 +1781,22 @@ macro language*(body: untyped): LangDef =
           Sym(kind: skDef, e: semExpr(c, it[2]))
       else:
         error(fmt"unknown declaration: '{it[0].strVal}'", it)
-    elif it.kind == nnkCommentStmt:
+    of nnkFuncDef:
+      addSym(c, name(macros.name(it)), it):
+        Sym(kind: skFunc, id: c.functions.len)
+      # only add a placeholder for now; it's replaced with a proper entry later
+      c.functions.add Function[Type]()
+    of nnkCommentStmt:
       # TODO: process
       discard
     else:
-      error("expected declaration or doc comment", it)
+      error("expected declaration, function, or doc comment", it)
 
   # second pass: process all type definitions, plus the signatures
   # of functions and relations
   for it in body.items:
-    if it.kind in nnkCallKinds:
+    case it.kind
+    of nnkCallKinds:
       case it[0].strVal
       of "inductive":
         let rel = semRelationHeader(c, it)
@@ -1728,12 +1822,15 @@ macro language*(body: untyped): LangDef =
             if f.name == name:
               error(fmt"field with name '{name}' already exists", ece[0])
           typ.fields.add (name, parseTypeUse(c, ece[1]))
-      of "function":
-        c.lookup[name(it[1])].typ = parseTypeUse(c, it[2])
+    of nnkFuncDef:
+      c.lookup[name(macros.name(it))].typ = semFunctionHeader(c, it.params)
+    else:
+      discard "nothing to do"
 
   # third pass: process the remaining declarations
   for it in body.items:
-    if it.kind in nnkCallKinds:
+    case it.kind
+    of nnkCallKinds:
       case it[0].strVal
       of "inductive":
         let id = c.lookup[name(it[1][0])].id
@@ -1747,8 +1844,9 @@ macro language*(body: untyped): LangDef =
           c.finalize(pat) # resolve type variables
           c.flushVars()
           c.matchers[id].patterns.add pat
-      of "function":
-        c.functions[c.lookup[name(it[1])].id] = semFunction(c, it)
+    of nnkFuncDef:
+      c.lookup.withValue name(macros.name(it)), val:
+        c.functions[val.id] = semFunction(c, it, val.typ)
     else:
       discard "nothing to do"
 
