@@ -778,7 +778,9 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
   case n.kind
   of nnkIdent, nnkAccQuoted:
     result = toExpr(c, resolveIdent(c, n))
-    if result.typ.kind == tkPat and not isHead:
+    if result.kind == nkType:
+      error("cannot use type here", n)
+    elif result.typ.kind == tkPat and not isHead:
       result = tree(nkConstr, result)
       typeConstr(c, result, n, isPattern=false)
     elif result.typ.kind == tkForall:
@@ -1713,7 +1715,7 @@ macro language*(body: untyped): LangDef =
   c.lookup["string"] = Sym(kind: skType, typ: listT(intType))
   c.lookup["true"] = Sym(kind: skDef, e: Node(kind: nkTrue, typ: boolType))
   c.lookup["false"] = Sym(kind: skDef, e: Node(kind: nkFalse, typ: boolType))
-  c.lookup["hole"] = Sym(kind: skDef, e: Node(kind: nkHole, typ: Type(kind: tkAll)))
+  c.lookup["hole"] = Sym(kind: skDef, e: Node(kind: nkHole, typ: Type(kind: tkVoid)))
   c.lookup["fail"] = Sym(kind: skDef, e: Node(kind: nkFail, typ: Type(kind: tkVoid)))
 
   proc builtin(c; name: string, typ: Type) {.nimcall.} =

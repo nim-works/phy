@@ -49,7 +49,6 @@ const lang* = language:
     char(z) # UTF-8 byte
     loc(z) # first-class location
     `array`(*val)
-    `tuple`(+val)
     `proc`(typ, *[x, typ], e)
 
     With(e, n, e) # return a tuple/array value with the n-th element replaced
@@ -91,9 +90,8 @@ const lang* = language:
     True
     False
     char(z)
-    loc(z)
     `array`(*val)
-    `tuple`(+val)
+    TupleCons(*val) # an empty tuple is also a valid value (i.e., unit)
     `proc`(typ, *[x, typ], e)
 
   subtype le, e:
@@ -517,8 +515,8 @@ const lang* = language:
       Asgn(substitute(e_1, with), substitute(e_2, with))
     of TupleCons(*e_1):
       TupleCons(...substitute(e_1, with))
-    of Seq(texpr, *e_1):
-      Seq(texpr, ...substitute(e_1, with))
+    of Seq(texpr_1, *e_1):
+      Seq(texpr_1, ...substitute(e_1, with))
     of FieldAccess(e_1, IntVal(z_1)):
       FieldAccess(substitute(e_1, with), IntVal(z_1))
     of At(e_1, e_2):
@@ -623,13 +621,6 @@ const lang* = language:
               files: ((string, z) -> val)} # name + time -> content
   ## `DC` is the dynamic context
 
-  func copy(c: DC, v: val) -> val =
-    ## The `copy` function takes a context and value and maps them to a value
-    ## that is neither a location nor contains any.
-    case v
-    of loc(z_1): copy(c, c.locs(z_1))
-    of val_1:    val_1
-
   func utf8Bytes(_: string) -> *z
     # TODO: the function is mostly self-explanatory, but it should be defined in
     #       a bit more detail nonetheless
@@ -638,23 +629,20 @@ const lang* = language:
   ## Evaluation Contexts
   ## ~~~~~~~~~~~~~~~~~~~
 
-  context Etick:
-    FieldAccess(Etick, IntVal(n))
-    At(Etick, e)
-    At(le, E)
-
   context L:
-    # evaluation context for lvalues
+    # evaluation context for locs in lvalue expressions
     hole
     FieldAccess(L, IntVal(n))
     At(L, IntVal(n))
+
   context E:
     hole
-    Exprs(E, *e)
+    Exprs(E, +e)
     FieldAccess(E, IntVal(n))
     At(E, e)
     At(le, E)
-    Asgn(Etick, e)
+    Asgn(E, e)
+    Asgn(le, E)
     With(E, n, e)
     With(val, n, E)
     TupleCons(*val, E, *e)
@@ -664,6 +652,23 @@ const lang* = language:
     If(E, e, e)
     Let(x, E, e)
     Return(E)
+
+  context F:
+    # defines where `loc` values are replaced with their value. These are all
+    # positions also described by `E`, minus the LHS of `Asgn` and roots of
+    # projections
+    Exprs(hole, +e)
+    At(le, hole)
+    Asgn(le, hole)
+    With(hole, n, e)
+    With(val, n, hole)
+    TupleCons(*val, hole, *e)
+    Seq(typ, *val, hole, *e)
+    Call(*val, hole, *e)
+    Call(x, *val, hole, *e)
+    If(hole, e, e)
+    Let(x, hole, e)
+    Return(hole)
 
   context B:
     E
@@ -679,7 +684,7 @@ const lang* = language:
     # context
     axiom "E-false", Ident("false"), False
     axiom "E-true",  Ident("true"),  True
-    axiom "E-exprs-fold", Exprs(val_1), val_1
+    axiom "E-exprs-fold", Exprs(e_1), e_1
     axiom "E-exprs", Exprs(TupleCons(), +e_1), Exprs(...e_1)
     axiom "E-if-true", If(True, e_1, e_2), e_1
     axiom "E-if-false", If(False, e_1, e_2), e_2
@@ -687,12 +692,14 @@ const lang* = language:
     axiom "E-while", While(e_1, e_2), If(e_1, Exprs(e_2, While(e_1, e_2)), TupleCons())
 
     rule "E-tuple-access":
-      where `tuple`(+val_3), val_1
+      where TupleCons(+val_3), val_1
       where val_2, val_3[n_1]
       conclusion FieldAccess(val_1, IntVal(n_1)), val_2
 
     axiom "E-field-asgn", Asgn(FieldAccess(le_1, IntVal(n_1)), val_1), Asgn(le_1, With(le_1, n_1, val_1))
     axiom "E-elem-asgn", Asgn(At(le_1, IntVal(n_1)), val_1), Asgn(le_1, With(le_1, n_1, val_1))
+
+    axiom "E-seq-cons", Seq(typ, *val_1), `array`(...val_1)
 
     rule "E-at":
       condition 0 <= n_1
@@ -779,14 +786,6 @@ const lang* = language:
       conclusion Call(val_1, *val_2), Frame(typ_r, e_2)
 
   inductive reducesTo(inp DC, inp e, out DC, out e):
-    rule "E-tuple-cons":
-      where +val_2, ...copy(DC_1, val_1)
-      conclusion DC_1, TupleCons(+val_1), DC_1, `tuple`(...val_2)
-
-    rule "E-seq-cons":
-      where +val_2, ...copy(DC_1, val_1)
-      conclusion DC_1, Seq(typ, *val_1), DC_1, `array`(...val_2)
-
     rule "E-string-cons":
       # FIXME: doesn't need to be an impure reduction
       where *z_1, utf8Bytes(string_1)
@@ -794,8 +793,7 @@ const lang* = language:
 
     rule "E-let-introduce":
       let z_1 = DC_1.nloc
-      let val_2 = copy(DC_1, val_1)
-      let DC_2 = DC_1 + DC(locs: {z_1 : val_2}, nloc: z_1 + 1)
+      let DC_2 = DC_1 + DC(locs: {z_1 : val_1}, nloc: z_1 + 1)
       let e_2 = substitute(e_1, {string_1: loc(z_1)})
       conclusion DC_1, Let(Ident(string_1), val_1, e_1), DC_2, e_2
     # TODO: the location needs to be removed from the execution context once
@@ -813,7 +811,7 @@ const lang* = language:
     rule "E-with-tuple":
       let val_3 = val_1[n_1]
       # FIXME: same here
-      conclusion DC_1, With(`tuple`(+val_1), n_1, val_2), DC_1, val_3
+      conclusion DC_1, With(TupleCons(+val_1), n_1, val_2), DC_1, val_3
 
     rule "E-asgn":
       let DC_2 = DC_1 + DC(locs: {z_1 : val_1})
@@ -848,16 +846,19 @@ const lang* = language:
       premise reducesTo(DC_1, e_1, DC_2, e_2)
       conclusion DC_1, E_1[e_1], DC_2, E_1[e_2]
 
-    rule "E-tuple-loc-access":
-      let val_1 = DC_1.locs(z_1)
-      conclusion DC_1, E_1[L_1[FieldAccess(loc(z_1), IntVal(n_1))]], DC_1, E_1[L_1[FieldAccess(val_1, IntVal(n_1))]]
-    rule "E-at-loc":
-      let val_1 = DC_1.locs(z_1)
-      conclusion DC_1, E_1[L_1[At(loc(z_1), IntVal(n_1))]], DC_1, E_1[L_1[At(val_1, IntVal(n_1))]]
+    rule "E-load":
+      # an automatic load only takes place:
+      # * outside of lvalue positions
+      # * in the root of otherwise fully evaluated lvalue expressions
+      conclusion DC_1, E_1[F_1[L_1[loc(z_1)]]],
+                 DC_1, E_1[F_1[L_1[DC_1.locs(z_1)]]]
+    rule "E-load-top":
+      # top-level version of E-load
+      conclusion DC_1, L_1[loc(z_1)],
+                 DC_1, L_1[DC_1.locs(z_1)]
 
     rule "E-return":
-      let val_2 = copy(DC_1, val_1)
-      conclusion DC_1, B_1[Frame(typ, E_1[Return(val_1)])], DC_1, B_1[val_2]
+      conclusion DC_1, B_1[Frame(typ, E_1[Return(val_1)])], DC_1, B_1[val_1]
     rule "E-return-unit":
       conclusion DC_1, B_1[Frame(typ, E_1[Return()])], DC_1, B_1[TupleCons()]
 
