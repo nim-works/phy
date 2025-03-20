@@ -1,0 +1,9 @@
+discard """
+  description: "
+    The type of a procedure's body must be equal to or a sub-type of its return
+    type
+  "
+  reject: true
+"""
+(ProcDecl (Ident "a") (IntTy) (Params)
+  (FloatVal 1.0))
