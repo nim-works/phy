@@ -179,7 +179,7 @@ func addDecl(c; name: string, entity: sink Entity) =
   ## it already existed.
   c.scopes[^1][name] = entity
 
-func removeDecl(c; name: string) =
+func removeDecl(c; name: string) {.used.} =
   ## Removes the entity with `name` from the current scope.
   c.scopes[^1].del(name)
 
@@ -1792,21 +1792,13 @@ proc declToIL*(c; t; n: NodeIndex) =
       c.addDecl(name, Entity(kind: ekParam, id: c.params.high))
 
     # analyse the body:
-    let e = c.exprToIL(t, t.child(n, 3))
+    var e = c.fitExpr(c.exprToIL(t, t.child(n, 3)), c.retType)
     c.closeScope()
 
-    # the body expression must always be a void expression
     if e.typ.kind != tkVoid:
-      c.error("a procedure body must be a 'void' expression")
-      c.removeDecl(name) # remove again
-      # the procedure cannot be removed from the lists again, as that would
-      # invalidate the IDs of the following procedures. Leaving the slot empty
-      # is also wrong, so it's filled with an import of a non-existent foreign
-      # procedure
-      c.procs[self] = buildTree Import:
-        bu.add Node(kind: Type, val: c.genProcType(procTy))
-        bu.add Node(kind: StringVal, val: c.literals.pack("error"))
-      return
+      # force into a void expression by appending a return statement
+      e.stmts.add newReturn(move e.expr)
+      e.typ = prim(tkVoid)
 
     var bu = initBuilder[NodeKind](ProcDef)
     bu.add Node(kind: Type, val: signature)
