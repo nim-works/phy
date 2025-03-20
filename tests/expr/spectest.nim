@@ -52,6 +52,7 @@ const
     "t05_proc_with_float_return_type.test",
     "t05_proc_with_int_return_type.test",
     "t05_proc_with_non_void_body.test",
+    "t05_proc_with_non_void_body_error.test",
     "t05_proc_with_non_void_body_subtype.test",
     "t05_proc_with_union_return_type.test",
     "t05_return_operand_cannot_be_void.test",
