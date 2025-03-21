@@ -233,6 +233,8 @@ proc matches(lang; pat, term: Node): Match =
     case lang[pat.typ].kind
     of tkAll:
       Match(has: true)
+    of tkBool:
+      test term.kind in {nkTrue, nkFalse}
     of tkInt:
       test term.kind == nkNumber # TODO: wrong, must be an int
     of tkRat:
