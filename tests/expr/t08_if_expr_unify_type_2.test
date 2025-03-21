@@ -1,5 +1,6 @@
 discard """
   description: "Ensure types unify for an if-expression"
+  output: "0.5 : (UnionTy (IntTy) (FloatTy))"
 """
 (If (Ident "false")
   (As (IntVal 100) (UnionTy (IntTy) (FloatTy)))
