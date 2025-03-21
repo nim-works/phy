@@ -1,13 +1,7 @@
 discard """
   description: "Ensure types unify for an if-expression"
+  output: "0.5 : (UnionTy (IntTy) (FloatTy))"
 """
-(Module
-  (ProcDecl (Ident "p") (UnionTy (IntTy) (FloatTy)) (Params)
-    (Return (IntVal 100)))
-  
-  (ProcDecl (Ident "test") (UnionTy (IntTy) (FloatTy)) (Params)
-    (Return
-      (If (Ident "true")
-        (FloatVal 0.5)
-        (Call (Ident "p")))))
-)
+(If (Ident "true")
+  (FloatVal 0.5)
+  (As (IntVal 100) (UnionTy (IntTy) (FloatTy)))))

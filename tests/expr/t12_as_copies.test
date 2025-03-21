@@ -1,0 +1,14 @@
+discard """
+  description: "
+    `As` is not an lvalue expression. The sub-expression is fully evaluated
+    early.
+  "
+  output: "1 : (IntTy)"
+"""
+(Exprs
+  (Decl x (Seq (IntTy) 1))
+  (At
+    (As x (SeqTy (IntTy)))
+    (Exprs
+      (Asgn x (Seq (IntTy) 2))
+      0)))

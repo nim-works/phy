@@ -1,0 +1,7 @@
+discard """
+  description: "An `As` expression is not an l-value expression"
+  reject: true
+"""
+(Exprs
+  (Decl x 1)
+  (Asgn (As x (IntTy)) 4))
