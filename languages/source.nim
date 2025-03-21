@@ -529,6 +529,8 @@ const lang* = language:
       FieldAccess(substitute(e_1, with), IntVal(z_1))
     of At(e_1, e_2):
       At(substitute(e_1, with), substitute(e_2, with))
+    of As(e_1, texpr_1):
+      As(substitute(e_1, with), texpr_1)
     of While(e_1, e_2):
       While(substitute(e_1, with), substitute(e_2, with))
     of Return(e_1):
@@ -649,6 +651,7 @@ const lang* = language:
     FieldAccess(E, IntVal(n))
     At(E, e)
     At(le, E)
+    As(E, texpr)
     Asgn(E, e)
     Asgn(le, E)
     With(E, n, e)
@@ -667,6 +670,7 @@ const lang* = language:
     # projections
     Exprs(hole, +e)
     At(le, hole)
+    As(hole, texpr)
     Asgn(le, hole)
     With(hole, n, e)
     With(val, n, hole)
@@ -696,7 +700,7 @@ const lang* = language:
     axiom "E-exprs", Exprs(TupleCons(), +e_1), Exprs(...e_1)
     axiom "E-if-true", If(True, e_1, e_2), e_1
     axiom "E-if-false", If(False, e_1, e_2), e_2
-    axiom "E-as", As(e_1, texpr), e_1 # a no-op
+    axiom "E-as", As(val_1, texpr), val_1 # a no-op
 
     axiom "E-while", While(e_1, e_2), If(e_1, Exprs(e_2, While(e_1, e_2)), TupleCons())
 
