@@ -1283,7 +1283,11 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       (a, b) = t.pair(n)
       e = c.exprToIL(t, a)
       typ = c.expectNot(c.evalType(t, b), tkVoid)
-    expr = inline(c.fitExpr(e, typ), stmts)
+    # a copy must always be created, even when there's no widening going on
+    if e.typ == typ:
+      expr = use(c, e, stmts)
+    else:
+      expr = inline(c.fitExpr(e, typ), stmts)
     result = typ + {} # lvalue-ness and mutability are discarded
   of SourceKind.Asgn:
     let (a, b) = t.pair(n)
