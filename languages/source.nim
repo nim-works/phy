@@ -100,23 +100,76 @@ const lang* = language:
     FieldAccess(le, IntVal(n))
     At(le, IntVal(n))
 
-  func desugar(a: expr) -> e =
-    # FIXME: the sub-expressions need to be desugared too!
+  func update(a: expr, xfrm: e -> e) -> expr =
+    ## Transforms and replaces all sub-expressions in `a` using the given
+    ## function.
     case a
-    of And(expr_1, expr_2):
-      If(expr_1, expr_2, Ident("false"))
-    of Or(expr_1, expr_2):
-      If(expr_1, Ident("true"), expr_2)
-    of Decl(x_1, expr_1):
-      Let(x_1, expr_1, TupleCons())
-    of Exprs(*expr_1, Decl(x_1, expr_2), +expr_3):
-      Exprs(...expr_1, Let(x_1, expr_2, Exprs(...expr_3)))
-    of If(expr_1, expr_2):
-      If(expr_1, expr_2, TupleCons())
-    of If(Exprs(*expr_1, expr_2), expr_3, expr_4):
-      Exprs(...expr_1, If(expr_2, expr_3, expr_4))
-    of expr_1:
-      expr_1
+    of Exprs(+e_1):
+      Exprs(...xfrm(e_1))
+    of Let(ident_1, e_1, e_2):
+      Let(ident_1, xfrm(e_1), xfrm(e_2))
+    of Decl(ident_1, e_1):
+      Decl(ident_1, xfrm(e_1))
+    of If(e_1, e_2, e_3):
+      If(xfrm(e_1), xfrm(e_2), xfrm(e_3))
+    of Call(+e_1):
+      Call(...xfrm(e_1))
+    of Asgn(e_1, e_2):
+      Asgn(xfrm(e_1), xfrm(e_2))
+    of TupleCons(*e_1):
+      TupleCons(...xfrm(e_1))
+    of Seq(texpr_1, *e_1):
+      Seq(texpr_1, ...xfrm(e_1))
+    of FieldAccess(e_1, IntVal(z_1)):
+      FieldAccess(xfrm(e_1), IntVal(z_1))
+    of At(e_1, e_2):
+      At(xfrm(e_1), xfrm(e_2))
+    of While(e_1, e_2):
+      While(xfrm(e_1), xfrm(e_2))
+    of Return(e_1):
+      Return(xfrm(e_1))
+    of e_1:
+      e_1
+
+  func up(a: expr) -> expr =
+    ## Moves exprs lists "upwards".
+    case a
+    of If(Exprs(*e_1, e_2), e_3, e_4):
+      # re-apply until there's no more exprs in the If's condition position
+      Exprs(...e_1, up(If(e_2, e_3, e_4)))
+    of e_1:
+      e_1
+
+  func expand(a: expr) -> expr =
+    ## Expands all non-Decl syntax sugar.
+    case a
+    of And(e_1, e_2):
+      expand(If(e_1, e_2, Ident("false")))
+    of Or(e_1, e_2):
+      expand(If(e_1, Ident("true"), e_2))
+    of If(e_1, e_2):
+      expand(If(e_1, e_2, TupleCons()))
+    of If(e_1, e_2, e_3):
+      up(update(If(e_1, e_2, e_3), expand))
+    of e_1:
+      update(e_1, expand)
+
+  func declToLet(a: expr) -> expr =
+    ## Transforms `Decl` into `Let`.
+    case a
+    of Decl(x_1, e_1):
+      # a trailing decl
+      Let(x_1, declToLet(e_1), TupleCons())
+    of Exprs(*e_1, Decl(x_1, e_2), +e_3):
+      # this only transforms the trailing decl, but there might be more than
+      # one decl in the list, hence the recursion
+      declToLet(Exprs(...e_1, Let(x_1, e_2, Exprs(...e_3))))
+    of e_1:
+      update(e_1, declToLet)
+
+  func desugar(a: expr) -> expr =
+    # first expand all sugar, then transform all decls
+    declToLet(expand(a))
 
   ## Type Relations
   ## --------------
