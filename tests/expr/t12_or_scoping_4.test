@@ -1,0 +1,4 @@
+discard """
+  output: "(True) : (BoolTy)"
+"""
+(Or (Or (Exprs (Decl x true) x) x) x)
