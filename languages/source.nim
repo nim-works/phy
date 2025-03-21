@@ -641,6 +641,7 @@ const lang* = language:
     FieldAccess(E, IntVal(n))
     At(E, e)
     At(le, E)
+    At(val, E)
     Asgn(E, e)
     Asgn(le, E)
     With(E, n, e)
@@ -659,6 +660,7 @@ const lang* = language:
     # projections
     Exprs(hole, +e)
     At(le, hole)
+    At(val, hole)
     Asgn(le, hole)
     With(hole, n, e)
     With(val, n, hole)
