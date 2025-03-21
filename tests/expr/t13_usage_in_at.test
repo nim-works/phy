@@ -1,0 +1,9 @@
+discard """
+  description: "Make sure a local can be used as an index operand"
+  output: "1 : (IntTy)"
+"""
+(Exprs
+  (Decl (Ident "a") (IntVal 0))
+  (At
+    (Seq (IntTy) 1)
+    (Ident "a")))

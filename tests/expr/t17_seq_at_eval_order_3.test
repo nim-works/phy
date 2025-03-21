@@ -1,0 +1,9 @@
+discard """
+  description: "
+    The index operand is also evaluated when the array operand is not an lvalue
+  "
+  output: "1 : (IntTy)"
+"""
+(At
+  (Seq (IntTy) 1 2)
+  (Exprs (IntVal 0)))
