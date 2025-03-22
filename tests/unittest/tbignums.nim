@@ -158,7 +158,7 @@ block add_sub_test:
 
   doAssert sum == Zero
 
-# test comparison, multiplication, and division with positive nubers:
+# test comparison, multiplication, and division with positive numbers:
 for i, a in d.pairs:
   for j, b in d.pairs:
     doAssert(cmp(a, b) == cmp(i, j))
@@ -167,7 +167,7 @@ for i, a in d.pairs:
     if i - j >= 0:
       doAssert a div b == d[i - j]
 
-# test comparison, multiplication, and division with negative nubers:
+# test comparison, multiplication, and division with negative numbers:
 for it in d.mitems:
   it = -it
 
