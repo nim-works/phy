@@ -288,6 +288,28 @@ const lang* = language:
     of type(typ): true
     of typ:       false
 
+  func unionOfAux(list: *typ, accum: typ) -> typ =
+    # `TupleTy` is used as the accumulator, because it can hold any number
+    # of types
+    case list
+    of [typ_1, *typ_2]:
+      if typ_1 in typ_2:
+        # it's a duplicate; skip
+        unionOfAux(typ_2, accum)
+      else:
+        case accum
+        of TupleTy(*typ_3):
+          unionOfAux(typ_2, TupleTy(...typ_3, typ_1))
+    else:
+      accum
+
+  func unionOf(list: *typ) -> typ =
+    case unionOfAux(list, TupleTy())
+    of TupleTy(typ_1, +typ_2):
+      UnionTy(typ_1, ...typ_2)
+    of TupleTy(typ_1):
+      typ_1
+
   inductive types(inp C, inp e, out typ):
     axiom "S-int",   C, IntVal(n), IntTy()
     axiom "S-float", C, FloatVal(r), FloatTy()
@@ -349,6 +371,11 @@ const lang* = language:
       premise mtypes(C_1, e_2, IntTy())
       where SeqTy(typ_2), typ_1
       conclusion C_1, At(e_1, e_2), mut(typ_2)
+
+    rule "S-at-tuple":
+      premise mtypes(C_1, e_1, TupleTy(+typ_2))
+      premise mtypes(C_1, e_2, IntTy())
+      conclusion C_1, At(e_1, e_2), unionOf(typ_2)
 
     rule "S-asgn":
       premise types(C_1, e_1, mut(typ_1))
@@ -763,13 +790,27 @@ const lang* = language:
       let val_2 = val_1[n_1]
       conclusion At(array(*val_1), IntVal(n_1)), val_2
 
+    rule "E-at-tuple":
+      condition 0 <= n_1
+      condition n_1 < len(val_1)
+      let val_2 = val_1[n_1]
+      conclusion At(TupleCons(*val_1), IntVal(n_1)), val_2
+
     rule "E-at-out-of-bounds":
       condition n_1 < 0 or len(val_1) <= n_1
       conclusion At(array(*val_1), IntVal(n_1)), Unreachable()
 
+    rule "E-at-tuple-out-of-bounds":
+      condition n_1 < 0 or len(val_1) <= n_1
+      conclusion At(TupleCons(*val_1), IntVal(n_1)), Unreachable()
+
     rule "E-with-out-of-bounds":
       condition n_1 < 0 or len(val_1) <= n_1
       conclusion With(array(*val_1), n_1, val_2), Unreachable()
+
+    rule "E-with-tuple-out-of-bounds":
+      condition n_1 < 0 or len(val_1) <= n_1
+      conclusion With(TupleCons(*val_1), n_1, val_2), Unreachable()
 
     axiom "E-not-false", Call(Ident("not"), False), True
     axiom "E-not-true",  Call(Ident("not"), True),  False
