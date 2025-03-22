@@ -109,7 +109,6 @@ const
     "t17_seq_copy_2.test",
     "t17_seq_copy_3.test",
     "t17_seq_copy_4.test",
-    "t17_seq_nested_copy_3.test",
     "t18_seq_character_string_1.test",
     "t18_seq_character_string_2.test",
     "t19_write.test",
