@@ -1,0 +1,4 @@
+discard """
+  output: "(Unreachable) : (IntTy)"
+"""
+(At (TupleCons 1 2) 2)

@@ -1,0 +1,10 @@
+discard """
+  description: "
+    An `At` projection from a heterogeneous tuple l-value is not an l-value
+    expression.
+  "
+  reject: true
+"""
+(Exprs
+  (Decl x (TupleCons 1 2.5 3))
+  (Asgn (At x 0) 4))
