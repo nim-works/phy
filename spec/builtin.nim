@@ -97,7 +97,7 @@ const arr = [
       Node(kind: nkNumber, num: rational(1))
     else:
       var val = base
-      for _ in 1..<exponent:
+      for _ in 1'n..<exponent:
         val = val * base
       makeNum(val)
   ),
