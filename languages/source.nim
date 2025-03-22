@@ -125,6 +125,8 @@ const lang* = language:
       FieldAccess(xfrm(e_1), IntVal(z_1))
     of At(e_1, e_2):
       At(xfrm(e_1), xfrm(e_2))
+    of As(e_1, texpr_1):
+      As(xfrm(e_1), texpr_1)
     of While(e_1, e_2):
       While(xfrm(e_1), xfrm(e_2))
     of Return(e_1):
