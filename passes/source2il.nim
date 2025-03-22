@@ -151,7 +151,7 @@ using
 
 func align(val: SizeUnit, to: SizeUnit): SizeUnit =
   ## Rounds `val` to the multiple of `to`, the latter must be a power of two.
-  let mask = val - 1
+  let mask = to - 1
   (val + mask) and not mask
 
 template `+`(t: SemType, a: set[ExprFlag]): ExprType =
