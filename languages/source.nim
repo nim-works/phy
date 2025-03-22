@@ -524,7 +524,8 @@ const lang* = language:
       let typ_3 = ProcTy(typ_1, ...typ_2)
       let C_2 = C_1 + C(symbols: {string_1: typ_3})
       let C_3 = C_2 + C(ret: typ_1, symbols: map(zip(string_2, typ_2)))
-      premise types(C_3, e_1, VoidTy())
+      premise types(C_3, e_1, typ_4)
+      condition typ_4 <:= typ_1
       conclusion C_1, ProcDecl(Ident(string_1), texpr_1, Params(*ParamDecl(Ident(string_2), texpr_2)), e_1), C_2
 
     axiom "S-empty-module", C_1, Module(), C_1
@@ -694,6 +695,7 @@ const lang* = language:
     FieldAccess(E, IntVal(n))
     At(E, e)
     At(le, E)
+    At(val, E)
     Asgn(E, e)
     Asgn(le, E)
     With(E, n, e)
@@ -712,6 +714,7 @@ const lang* = language:
     # projections
     Exprs(hole, +e)
     At(le, hole)
+    At(val, hole)
     Asgn(le, hole)
     With(hole, n, e)
     With(val, n, hole)
