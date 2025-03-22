@@ -232,6 +232,24 @@ proc expectNot(c; typ: sink SemType, kind: TypeKind): SemType =
     c.error("type not allowed in this context")
     result = errorType()
 
+proc unionOf(types: openArray[SemType]): tuple[typ: SemType, folded: bool] =
+  ## Attempts to create a union type from `types`. If the resulting union would
+  ## only consist of a single type, the single type is returned and `folded` is
+  ## set to true.
+  if types.len == 1:
+    (types[0], true)
+  else:
+    var union = SemType(kind: tkUnion)
+    for it in types.items:
+      let at = lowerBound(union.elems, it, cmp)
+      if at >= union.elems.len or union.elems[at] != it:
+        union.elems.insert(it, at)
+
+    if union.elems.len == 1:
+      (union.elems[0], true)
+    else:
+      (union, false)
+
 proc evalType(c; t; n: NodeIndex): SemType =
   ## Evaluates a type expression, yielding the resulting type.
   case t[n].kind
@@ -454,6 +472,9 @@ proc genCapAccess(c; e: sink IrNode, typ: SemType): IrNode =
 
 proc newIntOp(c; op: NodeKind, a, b: sink IrNode): IrNode =
   newBinaryOp(op, c.typeToIL(prim(tkInt)), a, b)
+
+proc newCmpOp(c; op: NodeKind, a, b: sink IrNode): IrNode =
+  newBinaryOp(op, c.typeToIL(prim(tkBool)), a, b)
 
 proc newAllocCall(size, align: sink IrNode): IrNode =
   newCall(AllocProc, @[size, align])
@@ -1252,12 +1273,13 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       arr = c.exprToIL(t, a)
       idx = c.exprToIL(t, b)
 
-    if arr.typ.kind notin {tkSeq, tkError}:
-      c.error("expected 'seq' value")
+    if arr.typ.kind notin {tkSeq, tkTuple, tkError}:
+      c.error("expected 'seq' or 'tuple' value")
     if idx.typ.kind notin {tkInt, tkError}:
       c.error("index expression must be of type 'int'")
 
-    if arr.typ.kind == tkSeq:
+    case arr.typ.kind
+    of tkSeq:
       result = arr.typ.elems[0] + arr.attribs
 
       let at = c.getTypeBoundOp(opAt, arr.typ)
@@ -1272,6 +1294,32 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       #   could render the array stale
       expr = newDeref(c.typeToIL(result.typ),
         newCall(at, @[c.inlineLvalue(arr, stmts), c.capture(idx, stmts)]))
+    of tkTuple:
+      let
+        (typ, folded) = unionOf(arr.typ.elems)
+        tupVal = c.capture(arr, stmts)
+        idxVal = c.capture(idx, stmts)
+      result = typ + {}
+
+      expr = c.newTemp(typ)
+      var caseStmt = newCase(c.typeToIL(prim(tkInt)), idxVal)
+      for i, it in arr.typ.elems.pairs:
+        var list = IrNode(kind: Stmts)
+        if folded:
+          # the tuple is really an array
+          list.add newAsgn(expr, newFieldExpr(tupVal, i))
+        else:
+          let pos = find(typ.elems, it)
+          list.add newAsgn(newFieldExpr(expr, 0), newIntVal(pos))
+          list.add newAsgn(newFieldExpr(newFieldExpr(expr, 1), pos),
+                           newFieldExpr(tupVal, i))
+        caseStmt.add newChoice(newIntVal(i), list)
+
+      let cond = c.newTemp(prim(tkBool))
+      stmts.add newIf(c.newCmpOp(Le, newIntVal(0), idxVal),
+        newAsgn(cond, c.newCmpOp(Lt, idxVal, newIntVal(arr.typ.elems.len))),
+        newAsgn(cond, newIntVal(0)))
+      stmts.add newIf(cond, caseStmt, newUnreachable())
     else:
       result = errorType() + arr.attribs
   of SourceKind.Asgn:
