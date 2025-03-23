@@ -1,15 +1,16 @@
 ## Provides a simple implementation for rational numbers and operations
 ## on them.
 
-import int128
+import bignums
 
 type Rational* = object
-  ## A rational number represented as a fraction of two 128-bit integers.
-  num, den: Int128
+  ## A rational number represented as a fraction of two arbitrary-precision
+  ## integers.
+  num, den: Bignum
 
 const
-  One = toInt128(1)
-  Ten = toInt128(10)
+  One = 1'n
+  Ten = 10'n
 
 proc reduced(r: Rational): Rational =
   ## Returns the normal form for `r`. The normal form uses the smallest
@@ -30,12 +31,11 @@ proc reduced(r: Rational): Rational =
 
     if r.den.isNeg:
       # invert the result, so that the denominator is positive
-      assert r.den != low(Int128) or denom != One, "overflow"
       Rational(num: -(r.num div denom), den: -(r.den div denom))
     else:
       Rational(num: r.num div denom, den: r.den div denom)
 
-proc frac*(num, denom: Int128): Rational =
+proc frac*(num, denom: Bignum): Rational =
   ## Creates a fraction from `num` and `denom`.
   assert denom != Zero
   reduced(Rational(num: num, den: denom))
@@ -63,7 +63,7 @@ proc `<`*(a, b: Rational): bool =
 proc `<=`*(a, b: Rational): bool =
   a.num * b.den <= b.num * a.den
 
-proc split*(r: Rational): tuple[i: Int128, frac: Rational] =
+proc split*(r: Rational): tuple[i: Bignum, frac: Rational] =
   ## Splits `r` into the integer and fractional parts, such that
   ## ``int + frac = r``.
   result.i = r.num div r.den
@@ -73,14 +73,18 @@ proc isInt*(r: Rational): bool =
   ## Whether `r` is an integer number.
   r.den == One
 
-proc rational*(i: int): Rational =
+proc rational*(i: SomeInteger): Rational {.inline.} =
   ## Lossless conversion from ``int`` to ``Rational``.
-  Rational(num: toInt128(i), den: One)
+  Rational(num: bignum(i), den: One)
 
-proc toInt*(r: Rational): int =
+proc rational*(i: Bignum): Rational {.inline.} =
+  ## Lossless conversion from ``Bignum`` to ``Rational``.
+  Rational(num: i, den: One)
+
+proc toInt*(r: Rational): Bignum =
   ## Converts `r`, which must be a valid integer number, to an int.
   assert r.den == One
-  r.num.toInt
+  r.num
 
 proc parseRational*(s: string): Rational =
   ## Parses a rational number from `s`. `s` must be a well-formed rational
@@ -91,7 +95,7 @@ proc parseRational*(s: string): Rational =
   var num = Zero
   while i < s.len and s[i] != '.':
     num = num * Ten
-    num = num + toInt128(ord(s[i]) - ord('0'))
+    num = num + (ord(s[i]) - ord('0'))
     inc i
 
   var denom = One
@@ -99,7 +103,7 @@ proc parseRational*(s: string): Rational =
     inc i
     while i < s.len:
       num = num * Ten
-      num = num + toInt128(ord(s[i]) - ord('0'))
+      num = num + (ord(s[i]) - ord('0'))
       denom = denom * Ten
       inc i
 
@@ -112,13 +116,13 @@ proc addRat*(res: var string, r: Rational) =
   ## Adds the text representation of `r` to `res`.
   if r.den == One:
     # it's an integer number
-    res.addInt128(r.num)
+    res.add(r.num)
   else:
     let (i, frac) = split(r)
     if i == Zero and frac.num.isNeg:
       # it's a negative number greater than -1
       res.add '-'
-    res.addInt128(i)
+    res.add(i)
     res.add '.'
     var num = frac.num * Ten
     if num.isNeg:
@@ -128,7 +132,7 @@ proc addRat*(res: var string, r: Rational) =
     var step = 0
     while num != Zero and step < 30: # 30 digits at max
       let (quot, rem) = udivMod(num, frac.den)
-      res.addInt toInt(quot)
+      res.add quot
       num = rem * Ten
       inc step
 

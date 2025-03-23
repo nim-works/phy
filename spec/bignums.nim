@@ -456,6 +456,11 @@ proc `inc`*(a: var Bignum; b = 1) =
   else:
     a = a + bignum(b)
 
+proc abs*(x: sink Bignum): Bignum =
+  ## Returns the absolute value of `x`.
+  if x.isNeg: -x
+  else:       x
+
 template `..<`*(a, b: Bignum): Slice[Bignum] =
   ## Constructs a half-open slice from `a` and `b`.
   a .. pred(b)
