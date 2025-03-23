@@ -12,7 +12,7 @@ const
   One = 1'n
   Ten = 10'n
 
-proc reduced(r: Rational): Rational =
+proc reduced(r: sink Rational): Rational =
   ## Returns the normal form for `r`. The normal form uses the smallest
   ## possible positive denominator.
   if r.num == Zero:
@@ -52,7 +52,7 @@ proc `-`*(a, b: Rational): Rational =
   else:
     reduced(Rational(num: a.num * b.den - b.num * a.den, den: a.den * b.den))
 
-proc `-`*(a: Rational): Rational =
+proc `-`*(a: sink Rational): Rational =
   Rational(num: -a.num, den: a.den)
 proc `*`*(a, b: Rational): Rational =
   reduced(Rational(num: a.num * b.num, den: a.den * b.den))
