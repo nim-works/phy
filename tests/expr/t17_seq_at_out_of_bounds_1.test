@@ -1,4 +1,4 @@
 discard """
-  output: "runtime error: ecUnreachable"
+  output: "(Unreachable) : (IntTy)"
 """
 (At (Seq (IntTy) 1) -1)

@@ -3,7 +3,7 @@ discard """
     Parameter declarations are not visible outside of the procedures they're
     part of
   "
-  output: "(): unit"
+  output: "(TupleCons) : (UnitTy)"
 """
 (Module
   (ProcDecl (Ident "p") (UnitTy)

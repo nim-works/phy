@@ -1,4 +1,4 @@
 discard """
-  output: "[1, 2.5, 3]: seq(union(int, float))"
+  output: "(array 1 2.5 3) : (SeqTy (UnionTy (IntTy) (FloatTy)))"
 """
 (Seq (UnionTy (IntTy) (FloatTy)) 1 2.5 3)

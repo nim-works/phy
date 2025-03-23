@@ -1,5 +1,5 @@
 discard """
-  output: "runtime error: ecUnreachable"
+  output: "(Unreachable) : (VoidTy)"
 """
 (Module
   (ProcDecl (Ident "a") (VoidTy) (Params)

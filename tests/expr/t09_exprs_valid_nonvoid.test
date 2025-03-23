@@ -1,6 +1,6 @@
 discard """
   description: "valid multi-item expression list"
-  output: "1.0: float"
+  output: "1.0 : (FloatTy)"
 """
 
 (Exprs (TupleCons) (FloatVal 1.0))

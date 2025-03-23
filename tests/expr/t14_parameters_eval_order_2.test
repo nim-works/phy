@@ -3,7 +3,7 @@ discard """
     Make sure arguments are evaluated and bound to parameters in the correct
     order (left to right)
   "
-  output: "200: int"
+  output: "200 : (IntTy)"
 """
 (Module
   (ProcDecl (Ident "p") (IntTy)

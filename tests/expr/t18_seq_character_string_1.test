@@ -1,4 +1,4 @@
 discard """
-  output: "['a', 'b', 'c']: seq(char)"
+  output: "(array (char 97) (char 98) (char 99)) : (SeqTy (CharTy))"
 """
 (Seq "abc")

@@ -1,6 +1,6 @@
 discard """
   description: "Make sure a tuple parameter's field is accessible"
-  output: "30: int"
+  output: "30 : (IntTy)"
 """
 (Module
   (ProcDecl (Ident "p") (IntTy)

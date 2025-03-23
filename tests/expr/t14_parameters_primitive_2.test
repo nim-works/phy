@@ -1,5 +1,5 @@
 discard """
-  output: "200: int"
+  output: "200 : (IntTy)"
 """
 (Module
   (ProcDecl (Ident "p") (IntTy)

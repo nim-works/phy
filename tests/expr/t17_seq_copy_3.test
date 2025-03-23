@@ -1,0 +1,10 @@
+discard """
+  output: "(array 1 2 3) : (UnionTy (IntTy) (SeqTy (IntTy)))"
+"""
+(Exprs
+  (Decl x (Seq (IntTy) 1 2 3))
+  (Decl y
+    (As 1 (UnionTy (IntTy) (SeqTy (IntTy)))))
+  (Asgn y x)
+  (Asgn (At x 0) 4)
+  y)

@@ -1,5 +1,5 @@
 discard """
-  output: "1: int"
+  output: "1 : (IntTy)"
 """
 (ProcDecl (Ident "a") (IntTy) (Params)
   (Return (IntVal 1)))

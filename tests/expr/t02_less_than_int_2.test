@@ -1,4 +1,4 @@
 discard """
-  output: "false: bool"
+  output: "(False) : (BoolTy)"
 """
 (Call (Ident "<") (IntVal 10) (IntVal 9))

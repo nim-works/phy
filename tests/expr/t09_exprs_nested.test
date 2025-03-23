@@ -1,6 +1,6 @@
 discard """
   description: "correctly unwrap nested expressions"
-  output: "10: int"
+  output: "10 : (IntTy)"
 """
 
 (Exprs (Exprs (IntVal 10)))

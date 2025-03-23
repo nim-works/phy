@@ -1,4 +1,4 @@
 discard """
-  output: "(100, 100): (int, int)"
+  output: "(TupleCons 100 100) : (TupleTy (IntTy) (IntTy))"
 """
 (TupleCons (IntVal 100) (IntVal 100))

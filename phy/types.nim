@@ -16,6 +16,11 @@ import
   ]
 
 type
+  SizeUnit* = int
+    ## Used for numbers that represent size and alignment values.
+    ## 1 size-unit = 1 byte.
+  # TODO: make the type a distinct unsigned type
+
   TypeKind* = enum
     tkError
     tkVoid
@@ -101,8 +106,8 @@ proc isSubtypeOf*(a, b: SemType): bool =
   else:
     false
 
-proc size*(t: SemType): int =
-  ## Computes the size-in-bytes that an instance of `t` occupies in memory.
+proc size*(t: SemType): SizeUnit =
+  ## Computes the size without padding of a location of type `t`.
   case t.kind
   of tkVoid: unreachable()
   of tkError: 8 # TODO: return a value indicating "unknown"
@@ -121,6 +126,47 @@ proc size*(t: SemType): int =
     s + 8 # +8 for the tag
   of tkSeq:
     size(prim(tkInt)) * 2 # length + pointer
+
+proc alignment*(t: SemType): SizeUnit =
+  ## Computes the alignment requirement for a location of type `t`.
+  case t.kind
+  of tkVoid: unreachable()
+  of tkError: 8
+  of tkUnit, tkBool, tkChar: 1
+  of tkInt, tkFloat: 8
+  of tkProc: 8
+  of tkTuple:
+    var a = 0
+    for it in t.elems.items:
+      a = max(a, alignment(it))
+    a
+  of tkUnion:
+    var a = 0
+    for it in t.elems.items:
+      a = max(a, alignment(it))
+    # the tag also contributes to the alignment
+    max(a, alignment(prim(tkInt)))
+  of tkSeq:
+    alignment(prim(tkInt))
+
+proc innerSize*(t: SemType): SizeUnit =
+  ## Computes the size without padding of a union (`t`) without the tag.
+  assert t.kind == tkUnion
+  result = 0
+  for it in t.elems.items:
+    result = max(size(it), result)
+
+proc innerAlignment*(t: SemType): SizeUnit =
+  ## Computes the size without padding of a union (`t`) without the tag.
+  assert t.kind == tkUnion
+  result = 0
+  for it in t.elems.items:
+    result = max(alignment(it), result)
+
+proc paddedSize*(t: SemType): SizeUnit =
+  ## Computes the size of an array element of type `t`.
+  let mask = alignment(t) - 1
+  (size(t) + mask) and not mask
 
 proc commonType*(a, b: SemType): SemType =
   ## Finds the common type between `a` and `b`, or produces an error.

@@ -1,6 +1,6 @@
 discard """
   description: "A projection from an l-value is an l-value expression"
-  output: "(): unit"
+  output: "(TupleCons) : (UnitTy)"
 """
 (Exprs
   (Decl x (Seq (IntTy) 1 2 3))

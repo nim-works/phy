@@ -1,4 +1,4 @@
 discard """
-  output: "4: int"
+  output: "4 : (IntTy)"
 """
 (Call (Ident "mod") (IntVal 4) (IntVal 5))

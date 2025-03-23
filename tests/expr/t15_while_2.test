@@ -1,6 +1,6 @@
 discard """
   description: "The condition expression is always evaluated at least once"
-  output: "10: int"
+  output: "10 : (IntTy)"
 """
 (Exprs
   (Decl (Ident "x") (IntVal 0))

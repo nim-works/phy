@@ -75,6 +75,9 @@ jobs:
       - name: "Run tests"
         run: bin/tester
 
+      - name: "Run specification tests"
+        run: nim c --opt:speed -d:nimStrictMode -r tests/expr/spectest.nim
+
   languages:
     name: "Check and generate languages"
     runs-on: ubuntu-22.04
@@ -92,6 +95,9 @@ jobs:
 
       - name: Build koch
         run: nim c -d:nimStrictMode --outdir:bin koch.nim
+
+      - name: Build language definitions
+        run: bin/koch build-defs
 
       - name: Build passtool
         run: bin/koch single passtool -d:nimStrictMode -d:release
@@ -142,4 +148,4 @@ jobs:
           fi
         env:
           TEST_FILE: tests/expr/t06_call_proc_with_tuple_return_type.test
-          TEST_OUTPUT: "(100, 200): (int, int)(Done 0)"
+          TEST_OUTPUT: "(TupleCons 100 200) : (TupleTy (IntTy) (IntTy))(Done 0)"

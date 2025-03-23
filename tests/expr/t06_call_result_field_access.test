@@ -2,7 +2,7 @@ discard """
   description: "
     A call expression can be used directly as a field access operand
   "
-  output: "1: int"
+  output: "1 : (IntTy)"
 """
 (Module
   (ProcDecl p (TupleTy (IntTy)) (Params)

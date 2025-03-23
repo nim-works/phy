@@ -1,6 +1,6 @@
 discard """
   description: "Make sure a local can be used as the `not` operand"
-  output: "true: bool"
+  output: "(True) : (BoolTy)"
 """
 (Exprs
   (Decl (Ident "a") (Ident "false"))

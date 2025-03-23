@@ -2,7 +2,7 @@ discard """
   description: "
     Sequences part of sequences are fully copied when the enclosing sequence is
   "
-  output: "[[1, 2, 3]]: seq(seq(int))"
+  output: "(array (array 1 2 3)) : (SeqTy (SeqTy (IntTy)))"
 """
 (Exprs
   (Decl x (Seq (SeqTy (IntTy)) (Seq (IntTy) 1 2 3)))

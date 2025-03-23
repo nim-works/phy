@@ -1,5 +1,5 @@
 discard """
-  output: "(): union(unit, int)"
+  output: "(TupleCons) : (UnionTy (UnitTy) (IntTy))"
 """
 (ProcDecl (Ident "a") (UnionTy (UnitTy) (IntTy)) (Params)
   (Return))
