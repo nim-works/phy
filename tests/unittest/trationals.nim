@@ -2,9 +2,9 @@ discard """
   description: "Tests for rational numbers"
 """
 
-import spec/[rationals, int128]
+import spec/[bignums, rationals]
 
-proc frac(a, b: int): Rational = frac(toInt128(a), toInt128(b))
+proc frac(a, b: int): Rational = frac(bignum(a), bignum(b))
 
 block equality:
   # make sure non-normal-form fractions are equal to their corresponding
@@ -17,16 +17,6 @@ block equality:
   doAssert frac(-4, 1) == frac(4, -1) # integer number
   doAssert frac(-10, 4) == frac(10, -4) # not directly dividable
   doAssert frac(-1, 4) != frac(1, 4)
-
-block edge_cases:
-  # make sure that values at the numeric upper and lower borders are handled
-  # correctly
-  discard frac(low(Int128), toInt128(1)) # must succeed and not get stuck
-  doAssert frac(toInt128(2), low(Int128)) ==
-           frac(toInt128(1), low(Int128) div toInt128(2))
-  doAssertRaises AssertionDefect:
-    # overflows the allowed range
-    discard frac(toInt128(1), low(Int128))
 
 block addition:
   # make sure addition works
@@ -81,15 +71,15 @@ block comparison:
   doAssert frac(4, 1) > frac(8, 9)
 
 block split:
-  doAssert split(frac(2, 1))  == (toInt128(2), frac(0, 1))
-  doAssert split(frac(-2, 1)) == (toInt128(-2), frac(0, 1))
-  doAssert split(frac(1, 4))  == (toInt128(0), frac(1, 4))
-  doAssert split(frac(5, 4))  == (toInt128(1), frac(1, 4))
-  doAssert split(frac(-1, 4)) == (toInt128(0), frac(-1, 4))
-  doAssert split(frac(-5, 4)) == (toInt128(-1), frac(-1, 4))
+  doAssert split(frac(2, 1))  == (bignum(2), frac(0, 1))
+  doAssert split(frac(-2, 1)) == (bignum(-2), frac(0, 1))
+  doAssert split(frac(1, 4))  == (bignum(0), frac(1, 4))
+  doAssert split(frac(5, 4))  == (bignum(1), frac(1, 4))
+  doAssert split(frac(-1, 4)) == (bignum(0), frac(-1, 4))
+  doAssert split(frac(-5, 4)) == (bignum(-1), frac(-1, 4))
 
 block parsing:
-  doAssert parseRational("0.5") == frac(1,  2)
+  doAssert parseRational("0.5") == frac(1, 2)
   doAssert parseRational("0.3") == frac(3, 10)
   doAssert parseRational("1.5") == frac(3, 2)
   doAssert parseRational("-0.5") == frac(-1, 2)
