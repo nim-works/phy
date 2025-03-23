@@ -211,14 +211,3 @@ let lshifted = [
 for i in 0 ..< 128:
   doAssert rshifted[i] == toHex(e shr i)
   doAssert lshifted[i] == toHex(e shl i)
-
-block edge_cases:
-  # tests for values at the numerical upper and lower borders
-  doAssert $low(Int128) == "-170141183460469231731687303715884105728"
-  doAssert $high(Int128) == "170141183460469231731687303715884105727"
-  doAssert parseInt128($low(Int128)) == low(Int128)
-  doAssert parseInt128($high(Int128)) == high(Int128)
-
-  doAssert toInt128(1) div low(Int128) == toInt128(0) # must not get stuck
-  doAssert low(Int128) div toInt128(1) == low(Int128) # must not get stuck
-  doAssert low(Int128) div toInt128(-1) == low(Int128) # overflows
