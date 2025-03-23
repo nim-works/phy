@@ -170,7 +170,7 @@ proc convert(tree: PackedTree[syntax_source.NodeKind], n: NodeIndex): Node =
     #       proper support for both in the reference implementation
     tree(nkConstr,
       Node(kind: nkSymbol, sym: "FloatVal"),
-      Node(kind: nkNumber, num: parseRational($tree.getFloat(n))))
+      Node(kind: nkNumber, num: rational(tree.getFloat(n))))
   of Ident:
     tree(nkConstr,
       Node(kind: nkSymbol, sym: "Ident"),

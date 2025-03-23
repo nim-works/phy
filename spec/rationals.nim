@@ -1,7 +1,9 @@
 ## Provides a simple implementation for rational numbers and operations
 ## on them.
 
-import bignums
+import
+  bignums,
+  std/math
 
 type Rational* = object
   ## A rational number represented as a fraction of two arbitrary-precision
@@ -161,3 +163,31 @@ proc addRat*(res: var string, r: Rational) =
 
 proc `$`*(r: Rational): string =
   result.addRat(r)
+
+proc rational*(f: float): Rational =
+  ## Converts `f` to a rational number. All finite float values can are are
+  ## represented *exactly*. Zero (both signed and unsigned) are converted to
+  ## 0 and inf and nan are forbidden.
+  proc convert(m: uint64, exp: int, sign: bool): Rational =
+    if exp < 0:
+      result = frac(bignum(m), 1'n shl (-exp))
+    else:
+      # it's an integer number
+      result = frac(bignum(m) shl exp, 1'n)
+
+    if sign:
+      result = -result
+
+  case classify(f)
+  of fcNormal:
+    let bits = cast[uint64](f)
+    let m = (bits and 0xF_FFFF_FFFF_FFFF'u64) or (1 shl 52)
+    convert(m, int((bits shr 52) and 0x7FF) - 1075, f < 0)
+  of fcSubnormal:
+    let bits = cast[uint64](f)
+    convert(bits and 0xF_FFFF_FFFF_FFFF'u64, -1074, f < 0)
+  of fcZero, fcNegZero:
+    rational(0)
+  of fcInf, fcNegInf, fcNan:
+    assert false, "not a rational value"
+    rational(0)

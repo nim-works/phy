@@ -110,7 +110,7 @@ proc fromSexp(s: SexpNode): Node =
   of SInt:
     Node(kind: nkNumber, num: rational(s.num))
   of SFloat:
-    Node(kind: nkNumber, num: parseRational($s.fnum))
+    Node(kind: nkNumber, num: rational(s.fnum))
   of SString:
     Node(kind: nkString, sym: s.str)
   of SNil, SCons, SKeyword:

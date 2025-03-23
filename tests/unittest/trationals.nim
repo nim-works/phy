@@ -106,3 +106,15 @@ block stringify:
   doAssert $frac(-1, 2) == "-0.5"
   doAssert $frac(-3, 2) == "-1.5"
   doAssert $frac(-1, 3) == "-1/3"
+
+block float_conversion:
+  doAssert rational(0.0) == rational(0)
+  doAssert rational(-0.0) == rational(0)
+  doAssert rational(0.5) == frac(1, 2)
+  doAssert rational(1.5) == frac(3, 2)
+  doAssert rational(-0.5) == frac(-1, 2)
+  # smallest (closest to zero) positive subnormal floating-point value:
+  doAssert rational(5e-324) == frac(1'n, 1'n shl 1074)
+  # largest finite floating-point value:
+  doAssert rational(cast[float64](0x7FEF_FFFF_FFFF_FFFF)) ==
+           frac(bignum(0x1F_FFFF_FFFF_FFFF) shl 971, 1'n)

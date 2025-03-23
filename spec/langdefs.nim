@@ -792,7 +792,7 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
     result = Node(kind: nkNumber, num: rational(n.intVal.int),
                   typ: c.lookup["z"].typ)
   of nnkFloatLit:
-    result = Node(kind: nkNumber, num: parseRational($n.floatVal),
+    result = Node(kind: nkNumber, num: rational(n.floatVal),
                   typ: c.lookup["r"].typ)
   of nnkStrLit:
     result = Node(kind: nkString, sym: n.strVal, typ: c.lookup["string"].typ)
@@ -1896,7 +1896,7 @@ proc parse(n: NimNode): TNode =
   of nnkIntLit:
     TNode(kind: nkNumber, num: rational(n.intVal.int))
   of nnkFloatLit:
-    TNode(kind: nkNumber, num: parseRational($n.floatVal))
+    TNode(kind: nkNumber, num: rational(n.floatVal))
   of nnkStrLit:
     TNode(kind: nkString, sym: n.strVal)
   of nnkIdent, nnkSym:
