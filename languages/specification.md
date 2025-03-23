@@ -20,6 +20,7 @@ expr     ::= <ident>
           |  (Call <expr>+)
           |  (FieldAccess <expr> <intVal>)
           |  (At <expr> <expr>)
+          |  (As <expr> <texpr>)
           |  (And <expr> <expr>)
           |  (Or <expr> <expr>)
           |  (If <expr> <expr> <expr>?)
