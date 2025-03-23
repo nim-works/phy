@@ -63,6 +63,14 @@ proc `<`*(a, b: Rational): bool =
 proc `<=`*(a, b: Rational): bool =
   a.num * b.den <= b.num * a.den
 
+proc reciprocal*(x: sink Rational): Rational =
+  ## Computes and returns the reciprocal of `x` (that is, `1 / x`).
+  if x.num.isNeg:
+    # keep the denominator positive
+    Rational(num: -x.den, den: -x.num)
+  else:
+    Rational(num: x.den, den: x.num)
+
 proc split*(r: Rational): tuple[i: Bignum, frac: Rational] =
   ## Splits `r` into the integer and fractional parts, such that
   ## ``int + frac = r``.

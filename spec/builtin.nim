@@ -2,7 +2,7 @@
 ## be used by the interpreter.
 
 import std/tables
-import rationals
+import bignums, rationals
 import types except Node
 
 type Node = types.Node[TypeId]
@@ -92,9 +92,13 @@ const arr = [
   ("^", proc(n: Node): Node =
     let base = n[0].num
     let exponent = n[1].num.toInt
-    assert exponent > 0, "negative exponents not supported"
-    if exponent == 0:
+    if exponent == 0'n:
       Node(kind: nkNumber, num: rational(1))
+    elif exponent.isNeg:
+      var val = base
+      for _ in 1'n..<abs(exponent):
+        val = val * base
+      makeNum(reciprocal(val))
     else:
       var val = base
       for _ in 1'n..<exponent:
