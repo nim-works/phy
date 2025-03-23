@@ -2,7 +2,7 @@
 ## evaluated directly, without an intermediate IR or a VM.
 
 import std/[tables, sugar]
-import builtin, rationals
+import builtin, bignums, rationals
 import types except Node
 
 type
@@ -650,8 +650,9 @@ proc interpret(c; lang; n: Node, then: Next): Node =
           then(c, lang, interpretRelation(c, lang, val.id, makeTuple(args)))
         of nkGroup:
           # it's a list lookup
-          if args[0].num.toInt in 0..(val.len-1):
-            then(c, lang, val[args[0].num.toInt])
+          let idx = args[0].num.toInt
+          if idx in 0'n..bignum(val.len-1):
+            then(c, lang, val[idx.toInt.int])
           else:
             raise Failure.newException("")
         of nkMap:

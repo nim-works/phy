@@ -18,7 +18,6 @@ import
   ],
   phy/sexpstreams,
   spec/[
-    int128,
     interpreter,
     rationals
   ]
@@ -109,7 +108,7 @@ proc fromSexp(s: SexpNode): Node =
     else:
       Node(kind: nkSymbol, sym: s.symbol)
   of SInt:
-    Node(kind: nkNumber, num: frac(toInt128(s.num), toInt128(1)))
+    Node(kind: nkNumber, num: rational(s.num))
   of SFloat:
     Node(kind: nkNumber, num: parseRational($s.fnum))
   of SString:
@@ -163,7 +162,7 @@ proc getDefault(lang: LangDef, typ: TypeId): types.Node[TypeId] =
   ## Returns the default value for `typ`.
   case lang[typ].kind
   of tkInt, tkRat, tkAll:
-    Node(kind: nkNumber, num: frac(toInt128(0), toInt128(1)), typ: typ)
+    Node(kind: nkNumber, num: rational(0), typ: typ)
   of tkBool:
     Node(kind: nkFalse, typ: typ)
   of tkVoid:

@@ -7,7 +7,7 @@ import
   languages/source,
   passes/[syntax_source, trees],
   phy/tree_parser,
-  spec/[int128, interpreter, langdefs, rationals]
+  spec/[interpreter, langdefs, rationals]
 
 import spec/types except Node
 
@@ -164,7 +164,7 @@ proc convert(tree: PackedTree[syntax_source.NodeKind], n: NodeIndex): Node =
   of IntVal:
     tree(nkConstr,
       Node(kind: nkSymbol, sym: "IntVal"),
-      Node(kind: nkNumber, num: frac(toInt128(tree.getInt(n)), toInt128(1))))
+      Node(kind: nkNumber, num: rational(tree.getInt(n))))
   of FloatVal:
     # TODO: +/-inf and +/-nan need to be handled properly. This first requires
     #       proper support for both in the reference implementation
