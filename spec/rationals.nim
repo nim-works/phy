@@ -10,7 +10,6 @@ type Rational* = object
 
 const
   One = 1'n
-  Ten = 10'n
 
 proc reduced(r: sink Rational): Rational =
   ## Returns the normal form for `r`. The normal form uses the smallest
@@ -95,54 +94,70 @@ proc toInt*(r: Rational): Bignum =
   r.num
 
 proc parseRational*(s: string): Rational =
-  ## Parses a rational number from `s`. `s` must be a well-formed rational
-  ## number representation.
+  ## Parses a rational number from `s`. `s` must use either the "i.i" or "i/i"
+  ## rational number representation.
   var i = 0
   if s[0] == '-':
     inc i
   var num = Zero
-  while i < s.len and s[i] != '.':
-    num = num * Ten
+  while i < s.len and s[i] in '0'..'9':
+    num = num * 10
     num = num + (ord(s[i]) - ord('0'))
     inc i
 
   var denom = One
   if i < s.len and s[i] == '.':
     inc i
-    while i < s.len:
-      num = num * Ten
+    while i < s.len and s[i] in '0'..'9':
+      num = num * 10
       num = num + (ord(s[i]) - ord('0'))
-      denom = denom * Ten
+      denom = denom * 10
+      inc i
+  elif i < s.len and s[i] == '/':
+    inc i
+    denom = Zero
+    while i < s.len and s[i] in '0'..'9':
+      denom = denom * 10
+      denom = denom + (ord(s[i]) - ord('0'))
       inc i
 
   if s[0] == '-':
     num = -num
 
-  result = reduced(Rational(num: num, den: denom))
+  result = frac(num, denom)
 
 proc addRat*(res: var string, r: Rational) =
-  ## Adds the text representation of `r` to `res`.
+  ## Adds the text representation of `r` to `res`, which is either a fraction
+  ## (i.e, "x/y") or a decimal number.
   if r.den == One:
     # it's an integer number
     res.add(r.num)
   else:
+    let start = res.len
     let (i, frac) = split(r)
     if i == Zero and frac.num.isNeg:
       # it's a negative number greater than -1
       res.add '-'
     res.add(i)
     res.add '.'
-    var num = frac.num * Ten
+    var num = frac.num * 10
     if num.isNeg:
       num = -num
     # multiply by ten and divide by the denominator until there's
     # no remainder left
     var step = 0
-    while num != Zero and step < 30: # 30 digits at max
+    while num != Zero and step < 10: # 10 digits at max
       let (quot, rem) = udivMod(num, frac.den)
       res.add quot
-      num = rem * Ten
+      num = rem * 10
       inc step
+
+    if num != Zero and step == 10:
+      # fall back to rendering as a fraction
+      res.setLen(start)
+      res.add(r.num)
+      res.add '/'
+      res.add(r.den)
 
 proc `$`*(r: Rational): string =
   result.addRat(r)

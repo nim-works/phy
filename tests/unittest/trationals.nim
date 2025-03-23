@@ -86,11 +86,23 @@ block parsing:
   doAssert parseRational("-0.3") == frac(-3, 10)
   doAssert parseRational("-1.5") == frac(-3, 2)
 
+  doAssert parseRational("0/1") == rational(0)
+  doAssert parseRational("1/1") == rational(1)
+  doAssert parseRational("2/1") == rational(2)
+  doAssert parseRational("1/4") == frac(1, 4)
+  doAssert parseRational("2/8") == frac(1, 4)
+  doAssert parseRational("-2/8") == frac(-1, 4)
+
 block stringify:
+  doAssert $rational(0) == "0"
+  doAssert $rational(2) == "2"
+  doAssert $rational(-2) == "-2"
+
   doAssert $frac(1, 2) == "0.5"
-  doAssert $frac(1, 3) == "0.333333333333333333333333333333"
+  doAssert $frac(1, 3) == "1/3"
   doAssert $frac(1, 4) == "0.25"
   doAssert $frac(1, 5) == "0.2"
   doAssert $frac(11, 5) == "2.2"
   doAssert $frac(-1, 2) == "-0.5"
   doAssert $frac(-3, 2) == "-1.5"
+  doAssert $frac(-1, 3) == "-1/3"
