@@ -25,7 +25,7 @@ type
     Asgn
     Return
     Unreachable
-    Match, As
+    Match
     Params
     ProcDecl, ParamDecl
     Decl
