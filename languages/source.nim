@@ -740,6 +740,7 @@ const lang* = language:
     Call(*val, E, *e)
     Call(x, *val, E, *e)
     If(E, e, e)
+    Match(E, +branch)
     Let(x, E, e)
     Return(E)
 
@@ -759,6 +760,7 @@ const lang* = language:
     Call(*val, hole, *e)
     Call(x, *val, hole, *e)
     If(hole, e, e)
+    Match(hole, +branch)
     Let(x, hole, e)
     Return(hole)
 
