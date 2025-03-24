@@ -93,6 +93,11 @@ const arr = [
     # TODO: this needs to produce a rational number, not an integer
     makeNum(n[0].num div n[1].num)
   ),
+  ("trunc", proc(n: Node): Node =
+    # parsing the string as a bignum (i.e., via `num`) discards the fractional
+    # part, effectively performing the truncation
+    makeNum(n.num)
+  ),
   ("neg", proc(n: Node): Node = makeNum(-n.num)),
   ("^", proc(n: Node): Node =
     assert not n[1].num.isNeg, "negative exponents not supported"

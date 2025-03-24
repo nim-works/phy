@@ -600,9 +600,6 @@ const lang* = language:
     of e_1:
       e_1 # nothing to replace
 
-  func trunc(a : r) -> n
-    ## Round towards zero.
-
   func intAdd(a, b: n) -> n =
     let n_3 = a + b
     if n_3 < (2 ^ 63):
