@@ -19,6 +19,10 @@ const lang* = language:
   #       numbers, not *integer* numbers
   typ ident: Ident(string)
   alias x, ident
+  typ branch:
+    # TODO: automatically create an anonymous type for sub-constructors and
+    #       then remove the `branch` type again
+    As(x, texpr, expr)
   typ expr:
     Ident(string)
     IntVal(z)
@@ -34,6 +38,7 @@ const lang* = language:
     Or(expr, expr)
     If(expr, expr, expr)
     If(expr, expr)
+    Match(expr, +branch)
     While(expr, expr)
     Return(expr)
     Return()
@@ -195,13 +200,7 @@ const lang* = language:
     ## Except for union types, all type equality uses *structural equality*.
     case (a, b)
     of UnionTy(+typ_1), UnionTy(+typ_2):
-      if (for typ_3 in typ_1: contains(typ_2, typ_3)):
-        if (for typ_3 in typ_2: contains(typ_1, typ_3)):
-          true
-        else:
-          false
-      else:
-        false
+      identical(typ_1, typ_2)
     else:
       same(a, b) # same structure -> equivalent type
 
@@ -234,6 +233,17 @@ const lang* = language:
       else:
         if b <: a: a
         else:      fail # no common type
+
+  func commonAll(list: *typ) -> typ =
+    ## Computes the closest common ancestor of all types in the list, or
+    ## fails, if there's no such type.
+    case list
+    of [typ_1, typ_2, +typ_3]:
+      common(common(typ_1, typ_2), commonAll(typ_3))
+    of [typ_1, typ_2]:
+      common(typ_1, typ_2)
+    of [typ_1]:
+      typ_1
 
   inductive ttypes(inp C, inp texpr, out typ):
     axiom "S-void-type",        C, VoidTy(),  VoidTy()
@@ -393,6 +403,18 @@ const lang* = language:
       premise mtypes(C_1, e_3, typ_2)
       let typ_3 = common(typ_1, typ_2)
       conclusion C_1, If(e_1, e_2, e_3), typ_3
+
+    rule "S-match":
+      premise mtypes(C_1, e_1, typ_1)
+      where UnionTy(+typ_2), typ_1
+      premise ...ttypes(C_1, texpr_1, typ_3)
+      condition uniqueTypes(typ_3)
+      condition identical(typ_2, typ_3)
+      condition ...(string_1 notin C_1.symbols)
+      let C_2 = ...(C_1 + C(symbols: {string_1 : typ_3}))
+      premise ...mtypes(C_2, e_2, typ_4)
+      let typ_5 = commonAll(typ_4)
+      conclusion C_1, Match(e_1, +As(Ident(string_1), texpr_1, e_2)), typ_5
 
     rule "S-while":
       premise mtypes(C_1, e_1, BoolTy())
@@ -762,6 +784,18 @@ const lang* = language:
 
     axiom "E-while", While(e_1, e_2), If(e_1, Exprs(e_2, While(e_1, e_2)), TupleCons())
 
+    rule "E-match-success":
+      premise types(C(ret: VoidTy), val_1, typ_1)
+      condition typ_1 == texpr_1
+      conclusion Match(val_1, As(Ident(string_1), texpr_1, e_1), *any),
+                 substitute(e_1, {string_1 : val_1})
+
+    rule "E-match-next":
+      premise types(C(ret: VoidTy), val_1, typ_1)
+      condition typ_1 != texpr_1
+      conclusion Match(val_1, As(x, texpr_1, e), +branch_1),
+                 Match(val_1, ...branch_1)
+
     rule "E-tuple-access":
       where TupleCons(+val_3), val_1
       where val_2, val_3[n_1]
@@ -975,6 +1009,16 @@ const lang* = language:
       else:
         contains(typ_2, t)
     of _:
+      false
+
+  func identical(set_1, set_2: *typ) -> bool =
+    ## Treats the lists as sets and computes whether they're equal.
+    if (for a in set_1: contains(set_2, a)):
+      if (for a in set_2: contains(set_1, a)):
+        true
+      else:
+        false
+    else:
       false
 
   func uniqueTypes(list: *typ) -> bool =
