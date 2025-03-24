@@ -476,7 +476,7 @@ const lang* = language:
       premise mtypes(C_1, e_1, SeqTy(typ_1))
       premise mtypes(C_1, e_2, typ_2)
       condition typ_2 <:= typ_1
-      conclusion C_1, Call(Ident("concat"), e_1, e_2), UnitTy()
+      conclusion C_1, Call(Ident("concat"), e_1, e_2), SeqTy(typ_1)
 
     rule "S-builtin-write":
       premise mtypes(C_1, e_1, SeqTy(CharTy()))

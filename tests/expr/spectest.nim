@@ -101,8 +101,6 @@ const
     "t16_seq_type_with_void_error.test",
     "t17_seq_at_out_of_bounds_1.test",
     "t17_seq_at_out_of_bounds_2.test",
-    "t17_seq_concat_to_empty.test",
-    "t17_seq_concat_to_non_empty.test",
     "t17_seq_copy_1.test",
     "t17_seq_copy_2.test",
     "t17_seq_copy_3.test",
