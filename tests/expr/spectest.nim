@@ -32,7 +32,6 @@ const
     ## the initial dynamic context to pass to `cstep`
   issues = [ # tests that are currently expected to fail
     "t02_add_float_values.test",
-    "t02_add_integer_values_overflow.test",
     "t02_div_integer_values_1.test",
     "t02_div_integer_values_2.test",
     "t02_div_integer_values_3.test",
@@ -42,7 +41,6 @@ const
     "t02_mod_integer_values_4.test",
     "t02_mod_integer_values_div_by_zero.test",
     "t02_sub_float_values.test",
-    "t02_sub_integer_values_overflow.test",
     "t04_empty_module.test",
     "t04_proc_declaration.test",
     "t04_type_declaration.test",

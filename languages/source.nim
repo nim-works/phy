@@ -793,14 +793,14 @@ const lang* = language:
       let n_3 = intAdd(n_1, n_2)
       conclusion Call(Ident("+"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-add-int-overflow":
-      condition (n_1, n_2) notin intAdd(n_1, n_2)
+      condition (n_1, n_2) notin intAdd
       conclusion Call(Ident("+"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-sub-int":
       let n_3 = intSub(n_1, n_2)
       conclusion Call(Ident("-"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-sub-int-overflow":
-      condition (n_1, n_2) notin intSub(n_1, n_2)
+      condition (n_1, n_2) notin intSub
       conclusion Call(Ident("-"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-mul-int":
