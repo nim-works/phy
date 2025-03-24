@@ -314,6 +314,7 @@ const lang* = language:
 
     rule "S-seq-cons":
       premise ttypes(C_1, texpr_1, typ_1)
+      condition typ_1 != VoidTy()
       premise ...types(C_1, e_2, typ_2)
       condition ...(typ_2 <:= typ_1)
       conclusion C_1, Seq(texpr_1, *e_2), SeqTy(typ_1)
@@ -370,6 +371,7 @@ const lang* = language:
       condition string_1 notin C_1.symbols
       condition string_1 notin builtIn
       premise mtypes(C_1, e_1, typ_1)
+      condition typ_1 != VoidTy()
       let C_2 = C_1 + C(symbols: {string_1: mut(typ_1)})
       premise mtypes(C_2, e_2, typ_2)
       conclusion C_1, Let(Ident(string_1), e_1, e_2), typ_2
