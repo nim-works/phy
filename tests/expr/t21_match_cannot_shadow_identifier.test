@@ -1,0 +1,12 @@
+discard """
+  description: "The pattern's identifier cannot shadow existing ones"
+  reject: true
+"""
+(Exprs
+  (Decl x (As 10 (UnionTy (IntTy) (UnitTy))))
+  (Match
+    x
+    (As x (IntTy)
+      1)
+    (As x (UnitTy)
+      2)))

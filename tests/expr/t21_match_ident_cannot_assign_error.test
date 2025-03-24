@@ -1,0 +1,12 @@
+discard """
+  description: "The bound value cannot be modified"
+  reject: true
+"""
+(Exprs
+  (Decl val (As 10 (UnionTy (IntTy) (UnitTy))))
+  (Match
+    val
+    (As x (IntTy)
+      (Asgn x 1))
+    (As x (UnitTy)
+      (Asgn x (TupleCons)))))
