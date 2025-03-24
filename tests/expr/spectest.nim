@@ -99,8 +99,6 @@ const
     "t15_while_true_complex_error.test",
     "t16_seq_construct_with_void_error.test",
     "t16_seq_type_with_void_error.test",
-    "t17_seq_at_out_of_bounds_1.test",
-    "t17_seq_at_out_of_bounds_2.test",
     "t17_seq_concat_to_empty.test",
     "t17_seq_concat_to_non_empty.test",
     "t17_seq_copy_4.test",
