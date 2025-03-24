@@ -118,6 +118,8 @@ const lang* = language:
       Decl(ident_1, xfrm(e_1))
     of If(e_1, e_2, e_3):
       If(xfrm(e_1), xfrm(e_2), xfrm(e_3))
+    of Match(e_1, +As(x_1, texpr_1, e_2)):
+      Match(xfrm(e_1), ...As(x_1, texpr_1, xfrm(e_2)))
     of Call(+e_1):
       Call(...xfrm(e_1))
     of Asgn(e_1, e_2):
@@ -595,6 +597,8 @@ const lang* = language:
       Let(ident_1, substitute(e_1, with), substitute(e_2, with))
     of If(e_1, e_2, e_3):
       If(substitute(e_1, with), substitute(e_2, with), substitute(e_3, with))
+    of Match(e_1, +As(x_1, texpr_1, e_2)):
+      Match(substitute(e_1, with), ...As(x_1, texpr_1, substitute(e_2)))
     of Call(+e_1):
       Call(...substitute(e_1, with))
     of Asgn(e_1, e_2):
