@@ -605,8 +605,8 @@ const lang* = language:
 
   func intAdd(a, b: n) -> n =
     let n_3 = a + b
-    if n_3 <= (2 ^ 63):
-      if n_3 < (2 ^ 63):
+    if n_3 < (2 ^ 63):
+      if neg(2 ^ 63) <= n_3:
         n_3
       else:
         fail
@@ -615,8 +615,8 @@ const lang* = language:
 
   func intSub(a, b: n) -> n =
     let n_3 = a - b
-    if n_3 <= (2 ^ 63):
-      if n_3 < (2 ^ 63):
+    if n_3 < (2 ^ 63):
+      if neg(2 ^ 63) <= n_3:
         n_3
       else:
         fail
@@ -625,8 +625,8 @@ const lang* = language:
 
   func intMul(a, b: n) -> n =
     let n_3 = a * b
-    if n_3 <= (2 ^ 63):
-      if n_3 < (2 ^ 63):
+    if n_3 < (2 ^ 63):
+      if neg(2 ^ 63) <= n_3:
         n_3
       else:
         fail
@@ -637,7 +637,7 @@ const lang* = language:
     case (a, b)
     of n_1, 0: fail
     of n_1, n_2:
-      if same(n_1, (-2 ^ 63)):
+      if same(n_1, neg(2 ^ 63)):
         if same(n_2, -1):
           fail
         else:
