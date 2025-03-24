@@ -1723,6 +1723,8 @@ macro language*(body: untyped): LangDef =
     c.functions.add Function[Type](name: name, body: Node(kind: nkHole))
     c.lookup[name] = Sym(kind: skFunc, id: c.functions.high, typ: typ)
 
+  c.builtin("updated", forall(1, fntype(tup(listT(tvar(0)), intType, tvar(0)),
+                                        listT(tvar(0)))))
   c.builtin("or", fntype(tup(boolType, boolType), boolType))
   c.builtin("and", fntype(tup(boolType, boolType), boolType))
   c.builtin("in", forall(2, fntype(tup(tvar(0), tvar(1)), boolType)))

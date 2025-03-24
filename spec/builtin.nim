@@ -124,6 +124,13 @@ const arr = [
     assert n[1].kind == nkGroup
     for i in 0..<min(n[0].len, n[1].len):
       result.add tree(nkTuple, n[0][i], n[1][i])
+  ),
+  ("updated", proc(n: Node): Node =
+    let idx = toInt(n[1].num)
+    assert n[0].kind == nkGroup
+    assert idx in 0..n[0].children.high
+    result = n[0]
+    result.children[idx] = n[2]
   )]
 
 const functions* = block:
