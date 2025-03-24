@@ -818,11 +818,11 @@ const lang* = language:
       conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-mod-int":
-      let n_3 = intDiv(n_1, n_2)
-      conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
+      let n_3 = intMod(n_1, n_2)
+      conclusion Call(Ident("mod"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-mod-int-overflow":
-      condition (n_1, n_2) notin intDiv
-      conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), Unreachable()
+      condition (n_1, n_2) notin intMod
+      conclusion Call(Ident("mod"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-add-float":
       let r_3 = floatAdd(r_1, r_2)

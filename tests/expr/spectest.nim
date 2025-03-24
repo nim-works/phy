@@ -39,7 +39,6 @@ const
     "t02_mod_integer_values_2.test",
     "t02_mod_integer_values_3.test",
     "t02_mod_integer_values_4.test",
-    "t02_mod_integer_values_div_by_zero.test",
     "t02_sub_float_values.test",
     "t04_empty_module.test",
     "t04_proc_declaration.test",
