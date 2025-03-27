@@ -1,12 +1,8 @@
 discard """
   output: "1.5 : (UnionTy (IntTy) (FloatTy))"
 """
-(Module
-  (ProcDecl (Ident "union") (UnionTy (IntTy) (FloatTy)) (Params)
-    (Return (IntVal 100)))
-
-  (ProcDecl (Ident "test") (UnionTy (IntTy) (FloatTy)) (Params)
-    (Exprs
-      (Decl (Ident "x") (Call (Ident "union")))
-      (Asgn (Ident "x") (FloatVal 1.5))
-      (Return (Ident "x")))))
+(Exprs
+  (Decl (Ident "x")
+    (As (IntVal 100) (UnionTy (IntTy) (FloatTy))))
+  (Asgn (Ident "x") (FloatVal 1.5))
+  (Ident "x"))

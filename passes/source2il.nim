@@ -179,7 +179,7 @@ func addDecl(c; name: string, entity: sink Entity) =
   ## it already existed.
   c.scopes[^1][name] = entity
 
-func removeDecl(c; name: string) =
+func removeDecl(c; name: string) {.used.} =
   ## Removes the entity with `name` from the current scope.
   c.scopes[^1].del(name)
 
@@ -697,7 +697,11 @@ proc fitExpr(c; e: sink Expr, target: SemType): Expr =
   else:
     # TODO: this needs a better error message
     c.error("type mismatch")
-    result = Expr(stmts: e.stmts, typ: errorType())
+    # still return a proper expression so that analysis can carry on
+    if target.kind == tkVoid:
+      result = Expr(typ: target, stmts: e.stmts)
+    else:
+      result = Expr(typ: target, stmts: e.stmts, expr: e.expr)
 
 proc fitExprStrict(c; e: sink Expr, typ: SemType): Expr =
   ## Makes sure expression `e` fits `typ` exactly, reporting an error and
@@ -1274,6 +1278,17 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
         newCall(at, @[c.inlineLvalue(arr, stmts), c.capture(idx, stmts)]))
     else:
       result = errorType() + arr.attribs
+  of SourceKind.As:
+    let
+      (a, b) = t.pair(n)
+      e = c.exprToIL(t, a)
+      typ = c.expectNot(c.evalType(t, b), tkVoid)
+    # a copy must always be created, even when there's no widening going on
+    if e.typ == typ:
+      expr = use(c, e, stmts)
+    else:
+      expr = inline(c.fitExpr(e, typ), stmts)
+    result = typ + {} # lvalue-ness and mutability are discarded
   of SourceKind.Asgn:
     let (a, b) = t.pair(n)
     var dst = c.exprToIL(t, a)
@@ -1792,21 +1807,13 @@ proc declToIL*(c; t; n: NodeIndex) =
       c.addDecl(name, Entity(kind: ekParam, id: c.params.high))
 
     # analyse the body:
-    let e = c.exprToIL(t, t.child(n, 3))
+    var e = c.fitExpr(c.exprToIL(t, t.child(n, 3)), c.retType)
     c.closeScope()
 
-    # the body expression must always be a void expression
     if e.typ.kind != tkVoid:
-      c.error("a procedure body must be a 'void' expression")
-      c.removeDecl(name) # remove again
-      # the procedure cannot be removed from the lists again, as that would
-      # invalidate the IDs of the following procedures. Leaving the slot empty
-      # is also wrong, so it's filled with an import of a non-existent foreign
-      # procedure
-      c.procs[self] = buildTree Import:
-        bu.add Node(kind: Type, val: c.genProcType(procTy))
-        bu.add Node(kind: StringVal, val: c.literals.pack("error"))
-      return
+      # force into a void expression by appending a return statement
+      e.stmts.add newReturn(move e.expr)
+      e.typ = prim(tkVoid)
 
     var bu = initBuilder[NodeKind](ProcDef)
     bu.add Node(kind: Type, val: signature)

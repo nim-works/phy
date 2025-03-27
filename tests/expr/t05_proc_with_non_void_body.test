@@ -1,0 +1,9 @@
+discard """
+  description: "
+    The type of a procedure's body must be equal to or a sub-type of its return
+    type
+  "
+  output: "1 : (IntTy)"
+"""
+(ProcDecl (Ident "a") (IntTy) (Params)
+  (IntVal 1))

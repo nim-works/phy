@@ -7,9 +7,8 @@ with a focus on defining/describing the semantics of programming languages.
 ## Types
 
 There are three built-in primitive types:
-* `z` - the type of integer numbers (with a maximum range of a 128-bit signed
-  integer)
-* `r` - rational values (with an unspecified range)
+* `z` - integer numbers
+* `r` - rational numbers
 * `bool` - `true` and `false`
 
 There are some additional primitive types, such as `void` and `all`, but

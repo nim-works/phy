@@ -47,6 +47,7 @@ const lang* = language:
     Call(+expr)
     FieldAccess(expr, IntVal(z))
     At(expr, expr)
+    As(expr, texpr)
     And(expr, expr)
     Or(expr, expr)
     If(expr, expr, expr)
@@ -67,7 +68,6 @@ const lang* = language:
     char(z) # UTF-8 byte
     loc(z) # first-class location
     `array`(*val)
-    `tuple`(+val)
     `proc`(typ, *[x, typ], e)
 
     With(e, n, e) # return a tuple/array value with the n-th element replaced
@@ -109,9 +109,8 @@ const lang* = language:
     True
     False
     char(z)
-    loc(z)
     `array`(*val)
-    `tuple`(+val)
+    TupleCons(*val) # an empty tuple is also a valid value (i.e., unit)
     `proc`(typ, *[x, typ], e)
 
   subtype le, e:
@@ -120,23 +119,78 @@ const lang* = language:
     FieldAccess(le, IntVal(n))
     At(le, IntVal(n))
 
-  func desugar(a: expr) -> e =
-    # FIXME: the sub-expressions need to be desugared too!
+  func update(a: expr, xfrm: e -> e) -> expr =
+    ## Transforms and replaces all sub-expressions in `a` using the given
+    ## function.
     case a
-    of And(expr_1, expr_2):
-      If(expr_1, expr_2, Ident("false"))
-    of Or(expr_1, expr_2):
-      If(expr_1, Ident("true"), expr_2)
-    of Decl(x_1, expr_1):
-      Let(x_1, expr_1, TupleCons())
-    of Exprs(*expr_1, Decl(x_1, expr_2), +expr_3):
-      Exprs(...expr_1, Let(x_1, expr_2, Exprs(...expr_3)))
-    of If(expr_1, expr_2):
-      If(expr_1, expr_2, TupleCons())
-    of If(Exprs(*expr_1, expr_2), expr_3, expr_4):
-      Exprs(...expr_1, If(expr_2, expr_3, expr_4))
-    of expr_1:
-      expr_1
+    of Exprs(+e_1):
+      Exprs(...xfrm(e_1))
+    of Let(ident_1, e_1, e_2):
+      Let(ident_1, xfrm(e_1), xfrm(e_2))
+    of Decl(ident_1, e_1):
+      Decl(ident_1, xfrm(e_1))
+    of If(e_1, e_2, e_3):
+      If(xfrm(e_1), xfrm(e_2), xfrm(e_3))
+    of Call(+e_1):
+      Call(...xfrm(e_1))
+    of Asgn(e_1, e_2):
+      Asgn(xfrm(e_1), xfrm(e_2))
+    of TupleCons(*e_1):
+      TupleCons(...xfrm(e_1))
+    of Seq(texpr_1, *e_1):
+      Seq(texpr_1, ...xfrm(e_1))
+    of FieldAccess(e_1, IntVal(z_1)):
+      FieldAccess(xfrm(e_1), IntVal(z_1))
+    of At(e_1, e_2):
+      At(xfrm(e_1), xfrm(e_2))
+    of As(e_1, texpr_1):
+      As(xfrm(e_1), texpr_1)
+    of While(e_1, e_2):
+      While(xfrm(e_1), xfrm(e_2))
+    of Return(e_1):
+      Return(xfrm(e_1))
+    of e_1:
+      e_1
+
+  func up(a: expr) -> expr =
+    ## Moves exprs lists "upwards".
+    case a
+    of If(Exprs(*e_1, e_2), e_3, e_4):
+      # re-apply until there's no more exprs in the If's condition position
+      Exprs(...e_1, up(If(e_2, e_3, e_4)))
+    of e_1:
+      e_1
+
+  func expand(a: expr) -> expr =
+    ## Expands all non-Decl syntax sugar.
+    case a
+    of And(e_1, e_2):
+      expand(If(e_1, e_2, Ident("false")))
+    of Or(e_1, e_2):
+      expand(If(e_1, Ident("true"), e_2))
+    of If(e_1, e_2):
+      expand(If(e_1, e_2, TupleCons()))
+    of If(e_1, e_2, e_3):
+      up(update(If(e_1, e_2, e_3), expand))
+    of e_1:
+      update(e_1, expand)
+
+  func declToLet(a: expr) -> expr =
+    ## Transforms `Decl` into `Let`.
+    case a
+    of Decl(x_1, e_1):
+      # a trailing decl
+      Let(x_1, declToLet(e_1), TupleCons())
+    of Exprs(*e_1, Decl(x_1, e_2), +e_3):
+      # this only transforms the trailing decl, but there might be more than
+      # one decl in the list, hence the recursion
+      declToLet(Exprs(...e_1, Let(x_1, e_2, Exprs(...e_3))))
+    of e_1:
+      update(e_1, declToLet)
+
+  func desugar(a: expr) -> expr =
+    # first expand all sugar, then transform all decls
+    declToLet(expand(a))
 
   ## Type Relations
   ## --------------
@@ -317,6 +371,13 @@ const lang* = language:
       where SeqTy(typ_2), typ_1
       conclusion C_1, At(e_1, e_2), mut(typ_2)
 
+    rule "S-as":
+      premise mtypes(C_1, e_1, typ_1)
+      premise ttypes(C_1, texpr_1, typ_2)
+      condition typ_2 != VoidTy()
+      condition typ_1 <:= typ_2
+      conclusion C_1, As(e_1, texpr_1), typ_2
+
     rule "S-asgn":
       premise types(C_1, e_1, mut(typ_1))
       premise mtypes(C_1, e_2, typ_2)
@@ -491,7 +552,8 @@ const lang* = language:
       let typ_3 = ProcTy(typ_1, ...typ_2)
       let C_2 = C_1 + C(symbols: {string_1: typ_3})
       let C_3 = C_2 + C(ret: typ_1, symbols: map(zip(string_2, typ_2)))
-      premise types(C_3, e_1, VoidTy())
+      premise types(C_3, e_1, typ_4)
+      condition typ_4 <:= typ_1
       conclusion C_1, ProcDecl(Ident(string_1), texpr_1, Params(*ParamDecl(Ident(string_2), texpr_2)), e_1), C_2
 
     axiom "S-empty-module", C_1, Module(), C_1
@@ -535,12 +597,14 @@ const lang* = language:
       Asgn(substitute(e_1, with), substitute(e_2, with))
     of TupleCons(*e_1):
       TupleCons(...substitute(e_1, with))
-    of Seq(texpr, *e_1):
-      Seq(texpr, ...substitute(e_1, with))
+    of Seq(texpr_1, *e_1):
+      Seq(texpr_1, ...substitute(e_1, with))
     of FieldAccess(e_1, IntVal(z_1)):
       FieldAccess(substitute(e_1, with), IntVal(z_1))
     of At(e_1, e_2):
       At(substitute(e_1, with), substitute(e_2, with))
+    of As(e_1, texpr_1):
+      As(substitute(e_1, with), texpr_1)
     of While(e_1, e_2):
       While(substitute(e_1, with), substitute(e_2, with))
     of Return(e_1):
@@ -556,8 +620,8 @@ const lang* = language:
 
   func intAdd(a, b: n) -> n =
     let n_3 = a + b
-    if n_3 <= (2 ^ 63):
-      if n_3 < (2 ^ 63):
+    if n_3 < (2 ^ 63):
+      if neg(2 ^ 63) <= n_3:
         n_3
       else:
         fail
@@ -566,8 +630,8 @@ const lang* = language:
 
   func intSub(a, b: n) -> n =
     let n_3 = a - b
-    if n_3 <= (2 ^ 63):
-      if n_3 < (2 ^ 63):
+    if n_3 < (2 ^ 63):
+      if neg(2 ^ 63) <= n_3:
         n_3
       else:
         fail
@@ -576,8 +640,8 @@ const lang* = language:
 
   func intMul(a, b: n) -> n =
     let n_3 = a * b
-    if n_3 <= (2 ^ 63):
-      if n_3 < (2 ^ 63):
+    if n_3 < (2 ^ 63):
+      if neg(2 ^ 63) <= n_3:
         n_3
       else:
         fail
@@ -588,7 +652,7 @@ const lang* = language:
     case (a, b)
     of n_1, 0: fail
     of n_1, n_2:
-      if same(n_1, (-2 ^ 63)):
+      if same(n_1, neg(2 ^ 63)):
         if same(n_2, -1):
           fail
         else:
@@ -855,13 +919,6 @@ const lang* = language:
               files: ((string, z) -> val)} # name + time -> content
   ## `DC` is the dynamic context
 
-  func copy(c: DC, v: val) -> val =
-    ## The `copy` function takes a context and value and maps them to a value
-    ## that is neither a location nor contains any.
-    case v
-    of loc(z_1): copy(c, c.locs(z_1))
-    of val_1:    val_1
-
   func utf8Bytes(_: string) -> *z
     # TODO: the function is mostly self-explanatory, but it should be defined in
     #       a bit more detail nonetheless
@@ -870,23 +927,22 @@ const lang* = language:
   ## Evaluation Contexts
   ## ~~~~~~~~~~~~~~~~~~~
 
-  context Etick:
-    FieldAccess(Etick, IntVal(n))
-    At(Etick, e)
-    At(le, E)
-
   context L:
-    # evaluation context for lvalues
+    # evaluation context for locs in lvalue expressions
     hole
     FieldAccess(L, IntVal(n))
     At(L, IntVal(n))
+
   context E:
     hole
-    Exprs(E, *e)
+    Exprs(E, +e)
     FieldAccess(E, IntVal(n))
     At(E, e)
     At(le, E)
-    Asgn(Etick, e)
+    At(val, E)
+    As(E, texpr)
+    Asgn(E, e)
+    Asgn(le, E)
     With(E, n, e)
     With(val, n, E)
     TupleCons(*val, E, *e)
@@ -896,6 +952,25 @@ const lang* = language:
     If(E, e, e)
     Let(x, E, e)
     Return(E)
+
+  context F:
+    # defines where `loc` values are replaced with their value. These are all
+    # positions also described by `E`, minus the LHS of `Asgn` and roots of
+    # projections
+    Exprs(hole, +e)
+    At(le, hole)
+    At(val, hole)
+    As(hole, texpr)
+    Asgn(le, hole)
+    With(hole, n, e)
+    With(val, n, hole)
+    TupleCons(*val, hole, *e)
+    Seq(typ, *val, hole, *e)
+    Call(*val, hole, *e)
+    Call(x, *val, hole, *e)
+    If(hole, e, e)
+    Let(x, hole, e)
+    Return(hole)
 
   context B:
     E
@@ -911,20 +986,23 @@ const lang* = language:
     # context
     axiom "E-false", Ident("false"), False
     axiom "E-true",  Ident("true"),  True
-    axiom "E-exprs-fold", Exprs(val_1), val_1
+    axiom "E-exprs-fold", Exprs(e_1), e_1
     axiom "E-exprs", Exprs(TupleCons(), +e_1), Exprs(...e_1)
     axiom "E-if-true", If(True, e_1, e_2), e_1
     axiom "E-if-false", If(False, e_1, e_2), e_2
+    axiom "E-as", As(val_1, texpr), val_1 # a no-op
 
     axiom "E-while", While(e_1, e_2), If(e_1, Exprs(e_2, While(e_1, e_2)), TupleCons())
 
     rule "E-tuple-access":
-      where `tuple`(+val_3), val_1
+      where TupleCons(+val_3), val_1
       where val_2, val_3[n_1]
       conclusion FieldAccess(val_1, IntVal(n_1)), val_2
 
     axiom "E-field-asgn", Asgn(FieldAccess(le_1, IntVal(n_1)), val_1), Asgn(le_1, With(le_1, n_1, val_1))
     axiom "E-elem-asgn", Asgn(At(le_1, IntVal(n_1)), val_1), Asgn(le_1, With(le_1, n_1, val_1))
+
+    axiom "E-seq-cons", Seq(typ, *val_1), `array`(...val_1)
 
     rule "E-at":
       condition 0 <= n_1
@@ -936,6 +1014,12 @@ const lang* = language:
       condition n_1 < 0 or len(val_1) <= n_1
       conclusion At(array(*val_1), IntVal(n_1)), Unreachable()
 
+    rule "E-with-array":
+      where val_3, array(for y in updated(val_1, n_1, val_2): y)
+      conclusion With(array(*val_1), n_1, val_2), val_3
+    rule "E-with-tuple":
+      where val_3, TupleCons(for y in updated(val_1, n_1, val_2): y)
+      conclusion With(TupleCons(+val_1), n_1, val_2), val_3
     rule "E-with-out-of-bounds":
       condition n_1 < 0 or len(val_1) <= n_1
       conclusion With(array(*val_1), n_1, val_2), Unreachable()
@@ -947,14 +1031,14 @@ const lang* = language:
       let n_3 = intAdd(n_1, n_2)
       conclusion Call(Ident("+"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-add-int-overflow":
-      condition (n_1, n_2) notin intAdd(n_1, n_2)
+      condition (n_1, n_2) notin intAdd
       conclusion Call(Ident("+"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-sub-int":
       let n_3 = intSub(n_1, n_2)
       conclusion Call(Ident("-"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-sub-int-overflow":
-      condition (n_1, n_2) notin intSub(n_1, n_2)
+      condition (n_1, n_2) notin intSub
       conclusion Call(Ident("-"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-mul-int":
@@ -972,11 +1056,11 @@ const lang* = language:
       conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-mod-int":
-      let n_3 = intDiv(n_1, n_2)
-      conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
+      let n_3 = intMod(n_1, n_2)
+      conclusion Call(Ident("mod"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-mod-int-overflow":
-      condition (n_1, n_2) notin intDiv
-      conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), Unreachable()
+      condition (n_1, n_2) notin intMod
+      conclusion Call(Ident("mod"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-add-float":
       let float_3 = floatAdd(float_1, float_2)
@@ -1011,14 +1095,6 @@ const lang* = language:
       conclusion Call(val_1, *val_2), Frame(typ_r, e_2)
 
   inductive reducesTo(inp DC, inp e, out DC, out e):
-    rule "E-tuple-cons":
-      where +val_2, ...copy(DC_1, val_1)
-      conclusion DC_1, TupleCons(+val_1), DC_1, `tuple`(...val_2)
-
-    rule "E-seq-cons":
-      where +val_2, ...copy(DC_1, val_1)
-      conclusion DC_1, Seq(typ, *val_1), DC_1, `array`(...val_2)
-
     rule "E-string-cons":
       # FIXME: doesn't need to be an impure reduction
       where *z_1, utf8Bytes(string_1)
@@ -1026,8 +1102,7 @@ const lang* = language:
 
     rule "E-let-introduce":
       let z_1 = DC_1.nloc
-      let val_2 = copy(DC_1, val_1)
-      let DC_2 = DC_1 + DC(locs: {z_1 : val_2}, nloc: z_1 + 1)
+      let DC_2 = DC_1 + DC(locs: {z_1 : val_1}, nloc: z_1 + 1)
       let e_2 = substitute(e_1, {string_1: loc(z_1)})
       conclusion DC_1, Let(Ident(string_1), val_1, e_1), DC_2, e_2
     # TODO: the location needs to be removed from the execution context once
@@ -1036,16 +1111,6 @@ const lang* = language:
     #       first-class locations (e.g., pointers) in the source language.
     #       Removing the location from the store could be achieved via a new
     #       `(Pop x)` construct, where `(Let x val e)` reduces to `(Pop x e)`
-
-    rule "E-with-array":
-      let val_3 = val_1[n_1]
-      # FIXME: this is wrong. The n-th element of the array must be replaced
-      #        with val_2
-      conclusion DC_1, With(array(*val_1), n_1, val_2), DC_1, val_3
-    rule "E-with-tuple":
-      let val_3 = val_1[n_1]
-      # FIXME: same here
-      conclusion DC_1, With(`tuple`(+val_1), n_1, val_2), DC_1, val_3
 
     rule "E-asgn":
       let DC_2 = DC_1 + DC(locs: {z_1 : val_1})
@@ -1080,16 +1145,19 @@ const lang* = language:
       premise reducesTo(DC_1, e_1, DC_2, e_2)
       conclusion DC_1, E_1[e_1], DC_2, E_1[e_2]
 
-    rule "E-tuple-loc-access":
-      let val_1 = DC_1.locs(z_1)
-      conclusion DC_1, E_1[L_1[FieldAccess(loc(z_1), IntVal(n_1))]], DC_1, E_1[L_1[FieldAccess(val_1, IntVal(n_1))]]
-    rule "E-at-loc":
-      let val_1 = DC_1.locs(z_1)
-      conclusion DC_1, E_1[L_1[At(loc(z_1), IntVal(n_1))]], DC_1, E_1[L_1[At(val_1, IntVal(n_1))]]
+    rule "E-load":
+      # an automatic load only takes place:
+      # * outside of lvalue positions
+      # * in the root of otherwise fully evaluated lvalue expressions
+      conclusion DC_1, E_1[F_1[L_1[loc(z_1)]]],
+                 DC_1, E_1[F_1[L_1[DC_1.locs(z_1)]]]
+    rule "E-load-top":
+      # top-level version of E-load
+      conclusion DC_1, L_1[loc(z_1)],
+                 DC_1, L_1[DC_1.locs(z_1)]
 
     rule "E-return":
-      let val_2 = copy(DC_1, val_1)
-      conclusion DC_1, B_1[Frame(typ, E_1[Return(val_1)])], DC_1, B_1[val_2]
+      conclusion DC_1, B_1[Frame(typ, E_1[Return(val_1)])], DC_1, B_1[val_1]
     rule "E-return-unit":
       conclusion DC_1, B_1[Frame(typ, E_1[Return()])], DC_1, B_1[TupleCons()]
 
