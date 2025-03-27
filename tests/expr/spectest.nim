@@ -7,7 +7,7 @@ import
   languages/source,
   passes/[syntax_source, trees],
   phy/tree_parser,
-  spec/[interpreter, langdefs, rationals]
+  spec/[bignums, interpreter, langdefs, rationals]
 
 import spec/types except Node
 
@@ -147,8 +147,8 @@ proc convertFloat(f: float): Node =
       m = (bits and 0xF_FFFF_FFFF_FFFF'u64) + (1 shl 52) # add the implied bit
       s = if f < 0.0: Node(kind: nkTrue) else: Node(kind: nkFalse)
     tree(nkConstr, sym("Finite"), s,
-      Node(kind: nkNumber, sym: $m),
-      Node(kind: nkNumber, sym: $exp))
+      Node(kind: nkNumber, num: rational(m)),
+      Node(kind: nkNumber, num: rational(exp)))
   of fcSubnormal:
     let
       bits = cast[uint64](f)
@@ -156,8 +156,8 @@ proc convertFloat(f: float): Node =
       m = (bits and 0xF_FFFF_FFFF_FFFF'u64) # no implied bit
       s = if f < 0.0: Node(kind: nkTrue) else: Node(kind: nkFalse)
     tree(nkConstr, sym("Finite"), s,
-      Node(kind: nkNumber, sym: $m),
-      Node(kind: nkNumber, sym: $exp))
+      Node(kind: nkNumber, num: rational(m)),
+      Node(kind: nkNumber, num: rational(exp)))
   of fcZero:
     tree(nkConstr, sym("Zero"), Node(kind: nkFalse))
   of fcNegZero:
@@ -176,7 +176,7 @@ proc convert(tree: PackedTree[syntax_source.NodeKind], n: NodeIndex): Node =
   of IntVal:
     tree(nkConstr,
       sym("IntVal"),
-      Node(kind: nkNumber, sym: rational(tree.getInt(n))))
+      Node(kind: nkNumber, num: rational(tree.getInt(n))))
   of FloatVal:
     tree(nkConstr,
       sym("FloatVal"),
@@ -213,7 +213,8 @@ proc add(res: var string, n: Node) =
         res.add "-"
       res.add "0.0"
     elif n[0].sym == "Finite":
-      var tmp = float(parseInt(n[2].sym)) * pow(2, float(parseInt(n[3].sym)))
+      var tmp = float(n[2].num.toInt.toInt) *
+                pow(2, float(n[3].num.toInt.toInt))
       if n[1].kind == nkTrue:
         tmp = -tmp
       res.addFloat tmp
