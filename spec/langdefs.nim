@@ -3,7 +3,8 @@
 ## implementing a type checker and (basic) transformer for it.
 
 import
-  std/[macros, tables, sets, strutils, strformat, hashes]
+  std/[macros, tables, sets, strutils, strformat, hashes],
+  rationals
 
 # a lot of the types from ``types`` are redefined here, so everything is
 # imported explicitly
@@ -623,7 +624,9 @@ proc matchesPattern(c; pat, term: Node): bool =
     true # matches everything
   of nkTrue, nkFalse:
     term.kind == pat.kind
-  of nkSymbol, nkNumber, nkString:
+  of nkNumber:
+    term.kind == nkNumber and term.num == pat.num
+  of nkSymbol, nkString:
     term.kind == pat.kind and term.sym == pat.sym
   of nkType:
     matchesType(c, pat.typ, term)
@@ -786,9 +789,11 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
     elif result.typ.kind == tkForall:
       result.typ = c.instantiate(result.typ)
   of nnkIntLit:
-    result = Node(kind: nkNumber, sym: $n.intVal, typ: c.lookup["z"].typ)
+    result = Node(kind: nkNumber, num: rational(n.intVal.int),
+                  typ: c.lookup["z"].typ)
   of nnkFloatLit:
-    result = Node(kind: nkNumber, sym: $n.floatVal, typ: c.lookup["r"].typ)
+    result = Node(kind: nkNumber, num: rational(n.floatVal),
+                  typ: c.lookup["r"].typ)
   of nnkStrLit:
     result = Node(kind: nkString, sym: n.strVal, typ: c.lookup["string"].typ)
   of nnkPar:
@@ -825,6 +830,19 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
       let body = recurse(n[1], false) # analyze the body
       let vars = c.unpacked.pop() # pop the context again
       return finishUnpack(body, vars, n)
+    elif n.kind == nnkInfix and n[0].eqIdent("or") or n[0].eqIdent("and"):
+      # short-circuiting 'or' or 'and'; both are implemented as an 'if'
+      let typ = c.lookup["bool"].typ
+      let a = recurse(n[1])
+      let b = recurse(n[2])
+      check(c, typ, a.typ, n[1])
+      check(c, typ, b.typ, n[2])
+      if n[0].eqIdent("or"):
+        result = tree(nkIf, a, Node(kind: nkTrue, typ: typ), b)
+      else:
+        result = tree(nkIf, a, b, Node(kind: nkFalse, typ: typ))
+      result.typ = typ
+      return
 
     let callee = semExpr(c, n[0], false, isHead=true)
     var call: Node
@@ -1025,7 +1043,7 @@ proc semPattern(c; n: NimNode; accept: set[NodeKind], check = true): Node =
       typeConstr(c, result, n, isPattern=true)
   of nnkIntLit:
     require(nkNumber, "number not allowed in this context")
-    result = Node(kind: nkNumber, sym: $n.intVal,
+    result = Node(kind: nkNumber, num: rational(n.intVal.int),
                   typ: c.lookup["z"].typ)
   of nnkStrLit:
     require(nkString, "string not allowed in this context")
@@ -1684,19 +1702,8 @@ proc convertFrom(to: var types.TypeId, x: sink Type,
       types[id] = c
     to = id + 1
 
-proc newLit[K, V](t: Table[K, V]): NimNode =
-  ## Creates the construction expression for `t`.
-  if t.len == 0:
-    result = newCall(ident"default", t.typeof.getTypeInst)
-  else:
-    result = newNimNode(nnkTableConstr)
-    for k, v in t.pairs:
-      result.add newTree(nnkExprColonExpr, newLit(k), newLit(v))
-    result = newCall(bindSym"toTable", result)
-
-macro language*(body: untyped): LangDef =
-  ## Parses and type-checks the meta-language module `body` and returns it as
-  ## a ``LangDef`` object.
+proc sem(body: NimNode): LangDef =
+  ## The entry point into the semantic checker.
   body.expectKind nnkStmtList
 
   var
@@ -1723,8 +1730,8 @@ macro language*(body: untyped): LangDef =
     c.functions.add Function[Type](name: name, body: Node(kind: nkHole))
     c.lookup[name] = Sym(kind: skFunc, id: c.functions.high, typ: typ)
 
-  c.builtin("or", fntype(tup(boolType, boolType), boolType))
-  c.builtin("and", fntype(tup(boolType, boolType), boolType))
+  c.builtin("updated", forall(1, fntype(tup(listT(tvar(0)), intType, tvar(0)),
+                                        listT(tvar(0)))))
   c.builtin("in", forall(2, fntype(tup(tvar(0), tvar(1)), boolType)))
   c.builtin("notin", forall(2, fntype(tup(tvar(0), tvar(1)), boolType)))
   c.builtin("same", forall(1, fntype(tup(tvar(0), tvar(0)), boolType)))
@@ -1735,10 +1742,11 @@ macro language*(body: untyped): LangDef =
   c.builtin("neg", forall(1, fntype(tvar(0), tvar(0))))
   c.builtin("+", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
   c.builtin("-", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
-  c.builtin("<=", forall(1, fntype(tup(tvar(0), tvar(0)), boolType)))
-  c.builtin("<", forall(1, fntype(tup(tvar(0), tvar(0)), boolType)))
-  c.builtin("/", forall(1, fntype(tup(tvar(0), tvar(0)), ratType)))
-  c.builtin("^", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
+  c.builtin("<=", forall(1, fntype(tup(ratType, ratType), boolType)))
+  c.builtin("<", forall(1, fntype(tup(ratType, ratType), boolType)))
+  c.builtin("/", forall(1, fntype(tup(ratType, ratType), ratType)))
+  c.builtin("trunc", fntype(ratType, intType))
+  c.builtin("^", forall(1, fntype(tup(tvar(0), intType), tvar(0))))
   c.builtin("*", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
 
   # first pass: make sure the broad shape of `body` is correct and collect the
@@ -1865,10 +1873,32 @@ macro language*(body: untyped): LangDef =
       convertFrom(id, sym.typ, map, lang.types)
       lang.names[id] = name
 
-  result = newLit(lang)
+  result = lang
 
-macro term*(x: untyped): TNode =
-  ## Turns the meta-language term `x` into its data representation.
+proc removeQuoted(n: NimNode): NimNode =
+  ## Replaces all accent-quoted identifiers with raw identifiers.
+  if n.kind == nnkAccQuoted and n.len == 1:
+    result = n[0] # remove the quote
+  else:
+    result = n
+    for i in 0..<n.len:
+      result[i] = removeQuoted(n[i])
+
+macro language*(body: untyped): LangDef =
+  ## Parses and type-checks the meta-language module `body` and returns it as
+  ## a ``LangDef`` object.
+
+  # instead of performing anaylsis of the body directly in the macro and
+  # turning the data into a construction expression (via ``newLit``), the
+  # code block is turned into a NimNode-literal (via quote) which is then
+  # passed to `sem`. This has the major upside of not requiring using
+  # `newLit` and getting rid the subsequent analysis/evaluation of the
+  # construction.
+  # The accent-quotes in the body need to be filtered out, otherwise `quote`
+  # would use them for interpolation
+  newCall(bindSym"sem", newCall(bindSym"quote", removeQuoted(body)))
+
+proc parse(n: NimNode): TNode =
   template wrap(nk: NodeKind, start: int, body: untyped): untyped =
     var r = TNode(kind: nk)
     for i in start..<n.len:
@@ -1876,33 +1906,44 @@ macro term*(x: untyped): TNode =
       r.add body
     r
 
+  case n.kind
+  of nnkIntLit:
+    TNode(kind: nkNumber, num: rational(n.intVal.int))
+  of nnkFloatLit:
+    TNode(kind: nkNumber, num: rational(n.floatVal))
+  of nnkStrLit:
+    TNode(kind: nkString, sym: n.strVal)
+  of nnkIdent, nnkSym:
+    TNode(kind: nkSymbol, sym: n.strVal)
+  of nnkAccQuoted:
+    TNode(kind: nkSymbol, sym: n[0].strVal)
+  of nnkCurly:
+    wrap(nkSet, 0, parse(it))
+  of nnkCall:
+    wrap(nkConstr, 0, parse(it))
+  of nnkTupleConstr:
+    wrap(nkTuple, 0, parse(it))
+  of nnkObjConstr:
+    wrap(nkRecord, 1,
+      TNode(kind: nkAssoc, children: @[parse(it[0]), parse(it[1])]))
+  of nnkTableConstr:
+    wrap(nkMap, 0,
+      TNode(kind: nkAssoc, children: @[parse(it[0]), parse(it[1])]))
+  of nnkStmtList, nnkStmtListExpr:
+    n.expectLen 1
+    parse(n[0])
+  else:
+    error("invalid expression", n)
+    TNode()
+
+macro term*(x: untyped): TNode =
+  ## Returns the AST for the meta-language term `x`.
+  # the NimSkull grammar requires the ``quote`` argument being a statement
+  # list...
+  let x =
+    case x.kind
+    of nnkStmtList: x
+    else:           newTree(nnkStmtList, x)
   # TODO: take the language as a parameter and use ``semExpr`` instead of
   #       ``parse``
-  proc parse(n: NimNode): TNode =
-    case n.kind
-    of nnkIntLit, nnkFloatLit:
-      TNode(kind: nkNumber, sym: $n.intVal)
-    of nnkStrLit:
-      TNode(kind: nkString, sym: n.strVal)
-    of nnkIdent, nnkSym:
-      TNode(kind: nkSymbol, sym: n.strVal)
-    of nnkAccQuoted:
-      TNode(kind: nkSymbol, sym: n[0].strVal)
-    of nnkCurly:
-      wrap(nkSet, 0, parse(it))
-    of nnkCall:
-      wrap(nkConstr, 0, parse(it))
-    of nnkTupleConstr:
-      wrap(nkTuple, 0, parse(it))
-    of nnkObjConstr:
-      wrap(nkRecord, 1,
-        TNode(kind: nkAssoc, children: @[parse(it[0]), parse(it[1])]))
-    of nnkTableConstr:
-      wrap(nkMap, 0,
-        TNode(kind: nkAssoc, children: @[parse(it[0]), parse(it[1])]))
-    else:
-      error("invalid expression", n)
-      TNode()
-
-  let ast = parse(x)
-  result = newLit(ast)
+  newCall(bindSym"parse", newCall(bindSym"quote", removeQuoted(x)))
