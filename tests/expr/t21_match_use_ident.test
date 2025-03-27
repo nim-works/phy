@@ -1,0 +1,9 @@
+discard """
+  output: "10 : (IntTy)"
+"""
+(Match
+  (As 10 (UnionTy (IntTy) (UnitTy)))
+  (As x (IntTy)
+    x)
+  (As x (UnitTy)
+    2))

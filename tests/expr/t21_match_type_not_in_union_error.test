@@ -1,0 +1,12 @@
+discard """
+  description: "There must be exactly one branch for each type in the union"
+  reject: true
+"""
+(Match
+  (As 10 (UnionTy (IntTy) (UnitTy)))
+  (As x (IntTy)
+    1)
+  (As x (UnitTy)
+    2)
+  (As x (FloatTy)
+    3))
