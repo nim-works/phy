@@ -17,7 +17,10 @@ import
     colortext
   ],
   phy/sexpstreams,
-  spec/interpreter
+  spec/[
+    interpreter,
+    rationals
+  ]
 
 import spec/types except Node
 
@@ -105,9 +108,9 @@ proc fromSexp(s: SexpNode): Node =
     else:
       Node(kind: nkSymbol, sym: s.symbol)
   of SInt:
-    Node(kind: nkNumber, sym: $s.num)
+    Node(kind: nkNumber, num: rational(s.num))
   of SFloat:
-    Node(kind: nkNumber, sym: $s.fnum)
+    Node(kind: nkNumber, num: rational(s.fnum))
   of SString:
     Node(kind: nkString, sym: s.str)
   of SNil, SCons, SKeyword:
@@ -131,7 +134,9 @@ proc add(res: var string, n: Node) =
         res.add ' '
       res.add it
     res.add ")"
-  of nkSymbol, nkNumber:
+  of nkNumber:
+    res.addRat n.num
+  of nkSymbol:
     res.add n.sym
   of nkString:
     res.add escape(n.sym)
@@ -157,7 +162,7 @@ proc getDefault(lang: LangDef, typ: TypeId): types.Node[TypeId] =
   ## Returns the default value for `typ`.
   case lang[typ].kind
   of tkInt, tkRat, tkAll:
-    Node(kind: nkNumber, sym: "0", typ: typ)
+    Node(kind: nkNumber, num: rational(0), typ: typ)
   of tkBool:
     Node(kind: nkFalse, typ: typ)
   of tkVoid:
