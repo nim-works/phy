@@ -600,13 +600,10 @@ const lang* = language:
     of e_1:
       e_1 # nothing to replace
 
-  func trunc(a : r) -> n
-    ## Round towards zero.
-
   func intAdd(a, b: n) -> n =
     let n_3 = a + b
-    if n_3 <= (2 ^ 63):
-      if n_3 < (2 ^ 63):
+    if n_3 < (2 ^ 63):
+      if neg(2 ^ 63) <= n_3:
         n_3
       else:
         fail
@@ -615,8 +612,8 @@ const lang* = language:
 
   func intSub(a, b: n) -> n =
     let n_3 = a - b
-    if n_3 <= (2 ^ 63):
-      if n_3 < (2 ^ 63):
+    if n_3 < (2 ^ 63):
+      if neg(2 ^ 63) <= n_3:
         n_3
       else:
         fail
@@ -625,8 +622,8 @@ const lang* = language:
 
   func intMul(a, b: n) -> n =
     let n_3 = a * b
-    if n_3 <= (2 ^ 63):
-      if n_3 < (2 ^ 63):
+    if n_3 < (2 ^ 63):
+      if neg(2 ^ 63) <= n_3:
         n_3
       else:
         fail
@@ -637,7 +634,7 @@ const lang* = language:
     case (a, b)
     of n_1, 0: fail
     of n_1, n_2:
-      if same(n_1, (-2 ^ 63)):
+      if same(n_1, neg(2 ^ 63)):
         if same(n_2, -1):
           fail
         else:
@@ -799,14 +796,14 @@ const lang* = language:
       let n_3 = intAdd(n_1, n_2)
       conclusion Call(Ident("+"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-add-int-overflow":
-      condition (n_1, n_2) notin intAdd(n_1, n_2)
+      condition (n_1, n_2) notin intAdd
       conclusion Call(Ident("+"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-sub-int":
       let n_3 = intSub(n_1, n_2)
       conclusion Call(Ident("-"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-sub-int-overflow":
-      condition (n_1, n_2) notin intSub(n_1, n_2)
+      condition (n_1, n_2) notin intSub
       conclusion Call(Ident("-"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-mul-int":
@@ -824,11 +821,11 @@ const lang* = language:
       conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-mod-int":
-      let n_3 = intDiv(n_1, n_2)
-      conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
+      let n_3 = intMod(n_1, n_2)
+      conclusion Call(Ident("mod"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-mod-int-overflow":
-      condition (n_1, n_2) notin intDiv
-      conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), Unreachable()
+      condition (n_1, n_2) notin intMod
+      conclusion Call(Ident("mod"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-add-float":
       let r_3 = floatAdd(r_1, r_2)
