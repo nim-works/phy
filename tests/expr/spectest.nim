@@ -7,7 +7,7 @@ import
   languages/source,
   passes/[syntax_source, trees],
   phy/tree_parser,
-  spec/[interpreter, langdefs]
+  spec/[interpreter, langdefs, rationals]
 
 import spec/types except Node
 
@@ -156,13 +156,13 @@ proc convert(tree: PackedTree[syntax_source.NodeKind], n: NodeIndex): Node =
   of IntVal:
     tree(nkConstr,
       Node(kind: nkSymbol, sym: "IntVal"),
-      Node(kind: nkNumber, sym: $tree.getInt(n)))
+      Node(kind: nkNumber, num: rational(tree.getInt(n))))
   of FloatVal:
     # TODO: +/-inf and +/-nan need to be handled properly. This first requires
     #       proper support for both in the reference implementation
     tree(nkConstr,
       Node(kind: nkSymbol, sym: "FloatVal"),
-      Node(kind: nkNumber, sym: $tree.getFloat(n)))
+      Node(kind: nkNumber, num: rational(tree.getFloat(n))))
   of Ident:
     tree(nkConstr,
       Node(kind: nkSymbol, sym: "Ident"),
@@ -179,8 +179,14 @@ proc add(res: var string, n: Node) =
   ## Appends the pretty-printed S-expression representation of `n` to `res`.
   case n.kind
   of nkConstr:
-    if n[0].sym in ["IntVal", "FloatVal"]:
+    if n[0].sym == "IntVal":
       res.add n[^1]
+    elif n[0].sym == "FloatVal":
+      let tmp = $n[^1].num
+      res.add tmp
+      if '.' notin tmp:
+        # rendered float values must always contain a dot
+        res.add ".0"
     elif n[0].sym == "proc":
       res.add "(proc ...)"
     else:
@@ -190,7 +196,9 @@ proc add(res: var string, n: Node) =
           res.add ' '
         res.add it
       res.add ")"
-  of nkSymbol, nkNumber:
+  of nkNumber:
+    res.addRat n.num
+  of nkSymbol:
     res.add n.sym
   of nkString:
     res.add escape(n.sym)
