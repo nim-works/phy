@@ -7,7 +7,7 @@ import
   languages/source,
   passes/[syntax_source, trees],
   phy/tree_parser,
-  spec/[interpreter, langdefs]
+  spec/[interpreter, langdefs, rationals]
 
 import spec/types except Node
 
@@ -32,17 +32,7 @@ const
     ## the initial dynamic context to pass to `cstep`
   issues = [ # tests that are currently expected to fail
     "t02_add_float_values.test",
-    "t02_add_integer_values_overflow.test",
-    "t02_div_integer_values_1.test",
-    "t02_div_integer_values_2.test",
-    "t02_div_integer_values_3.test",
-    "t02_mod_integer_values_1.test",
-    "t02_mod_integer_values_2.test",
-    "t02_mod_integer_values_3.test",
-    "t02_mod_integer_values_4.test",
-    "t02_mod_integer_values_div_by_zero.test",
     "t02_sub_float_values.test",
-    "t02_sub_integer_values_overflow.test",
     "t04_empty_module.test",
     "t04_proc_declaration.test",
     "t04_type_declaration.test",
@@ -57,9 +47,6 @@ const
     "t05_proc_with_union_return_type.test",
     "t05_return_operand_cannot_be_void.test",
     "t05_return_type_mismatch.test",
-    "t05_union_type_1.test",
-    "t05_union_type_2.test",
-    "t05_union_type_of_single_type.test",
     "t05_unreachable_is_void.test",
     "t06_call_lookup_error.test",
     "t06_call_lookup_self_visible.test",
@@ -75,13 +62,7 @@ const
     "t06_redeclaration_error_1.test",
     "t06_redeclaration_error_2.test",
     "t06_redeclaration_error_3.test",
-    "t06_union_duplicate_types.test",
-    "t08_if_expr_unify_type_1.test",
-    "t08_if_expr_unify_type_2.test",
-    "t09_asgn_compatible_type.test",
-    "t09_asgn_field.test",
     "t09_decl_void_error.test",
-    "t10_asgn_lhs_must_be_lvalue_8.test",
     "t11_scopes_local_cannot_shadow_error_1.test",
     "t11_scopes_procdef.test",
     "t13_proc_type_mismatch_error.test",
@@ -108,15 +89,9 @@ const
     "t15_while_true_complex_error.test",
     "t16_seq_construct_with_void_error.test",
     "t16_seq_type_with_void_error.test",
-    "t17_seq_at_out_of_bounds_1.test",
-    "t17_seq_at_out_of_bounds_2.test",
     "t17_seq_concat_to_empty.test",
     "t17_seq_concat_to_non_empty.test",
-    "t17_seq_copy_1.test",
-    "t17_seq_copy_2.test",
-    "t17_seq_copy_3.test",
     "t17_seq_copy_4.test",
-    "t17_seq_nested_copy_3.test",
     "t18_seq_character_string_1.test",
     "t18_seq_character_string_2.test",
     "t19_write.test",
@@ -164,13 +139,13 @@ proc convert(tree: PackedTree[syntax_source.NodeKind], n: NodeIndex): Node =
   of IntVal:
     tree(nkConstr,
       Node(kind: nkSymbol, sym: "IntVal"),
-      Node(kind: nkNumber, sym: $tree.getInt(n)))
+      Node(kind: nkNumber, num: rational(tree.getInt(n))))
   of FloatVal:
     # TODO: +/-inf and +/-nan need to be handled properly. This first requires
     #       proper support for both in the reference implementation
     tree(nkConstr,
       Node(kind: nkSymbol, sym: "FloatVal"),
-      Node(kind: nkNumber, sym: $tree.getFloat(n)))
+      Node(kind: nkNumber, num: rational(tree.getFloat(n))))
   of Ident:
     tree(nkConstr,
       Node(kind: nkSymbol, sym: "Ident"),
@@ -187,8 +162,14 @@ proc add(res: var string, n: Node) =
   ## Appends the pretty-printed S-expression representation of `n` to `res`.
   case n.kind
   of nkConstr:
-    if n[0].sym in ["IntVal", "FloatVal"]:
+    if n[0].sym == "IntVal":
       res.add n[^1]
+    elif n[0].sym == "FloatVal":
+      let tmp = $n[^1].num
+      res.add tmp
+      if '.' notin tmp:
+        # rendered float values must always contain a dot
+        res.add ".0"
     elif n[0].sym == "proc":
       res.add "(proc ...)"
     else:
@@ -198,7 +179,9 @@ proc add(res: var string, n: Node) =
           res.add ' '
         res.add it
       res.add ")"
-  of nkSymbol, nkNumber:
+  of nkNumber:
+    res.addRat n.num
+  of nkSymbol:
     res.add n.sym
   of nkString:
     res.add escape(n.sym)

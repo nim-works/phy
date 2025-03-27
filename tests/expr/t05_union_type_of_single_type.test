@@ -1,5 +1,4 @@
 discard """
   output: "100 : (UnionTy (IntTy))"
 """
-(ProcDecl (Ident "a") (UnionTy (IntTy)) (Params)
-  (Return (IntVal 100)))
+(As 100 (UnionTy (IntTy)))

@@ -718,7 +718,11 @@ proc fitExpr(c; e: sink Expr, target: SemType): Expr =
   else:
     # TODO: this needs a better error message
     c.error("type mismatch")
-    result = Expr(stmts: e.stmts, typ: errorType())
+    # still return a proper expression so that analysis can carry on
+    if target.kind == tkVoid:
+      result = Expr(typ: target, stmts: e.stmts)
+    else:
+      result = Expr(typ: target, stmts: e.stmts, expr: e.expr)
 
 proc fitExprStrict(c; e: sink Expr, typ: SemType): Expr =
   ## Makes sure expression `e` fits `typ` exactly, reporting an error and
@@ -1322,6 +1326,17 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       stmts.add newIf(cond, caseStmt, newUnreachable())
     else:
       result = errorType() + arr.attribs
+  of SourceKind.As:
+    let
+      (a, b) = t.pair(n)
+      e = c.exprToIL(t, a)
+      typ = c.expectNot(c.evalType(t, b), tkVoid)
+    # a copy must always be created, even when there's no widening going on
+    if e.typ == typ:
+      expr = use(c, e, stmts)
+    else:
+      expr = inline(c.fitExpr(e, typ), stmts)
+    result = typ + {} # lvalue-ness and mutability are discarded
   of SourceKind.Asgn:
     let (a, b) = t.pair(n)
     var dst = c.exprToIL(t, a)

@@ -1,10 +1,7 @@
 discard """
-  description: "
-    An `At` projection from a homogeneous tuple l-value is not an l-value
-    expression.
-  "
+  description: "An `As` expression is not an l-value expression"
   reject: true
 """
 (Exprs
-  (Decl x (TupleCons 1 2 3))
-  (Asgn (At x 0) 4))
+  (Decl x 1)
+  (Asgn (As x (IntTy)) 4))

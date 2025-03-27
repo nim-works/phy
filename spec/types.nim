@@ -1,7 +1,9 @@
 ## Provides the main data representation for meta-language constructs, plus
 ## basic operations for operating on the data.
 
-import std/tables
+import
+  std/tables,
+  rationals
 
 type
   NodeKind* = enum
@@ -42,7 +44,9 @@ type
     case kind*: NodeKind
     of nkType, nkHole, nkTrue, nkFalse, nkFail:
       discard
-    of nkNumber, nkSymbol, nkString:
+    of nkNumber:
+      num*: Rational
+    of nkSymbol, nkString:
       sym*: string
     of nkFunc, nkRelation, nkVar, nkContext:
       id*: int

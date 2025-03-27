@@ -29,6 +29,7 @@ const lang* = language:
     Call(+expr)
     FieldAccess(expr, IntVal(z))
     At(expr, expr)
+    As(expr, texpr)
     And(expr, expr)
     Or(expr, expr)
     If(expr, expr, expr)
@@ -86,7 +87,7 @@ const lang* = language:
   subtype val, e:
     # A value is an irreducible expression.
     IntVal(n)
-    FloatVal(z)
+    FloatVal(r)
     True
     False
     char(z)
@@ -124,6 +125,8 @@ const lang* = language:
       FieldAccess(xfrm(e_1), IntVal(z_1))
     of At(e_1, e_2):
       At(xfrm(e_1), xfrm(e_2))
+    of As(e_1, texpr_1):
+      As(xfrm(e_1), texpr_1)
     of While(e_1, e_2):
       While(xfrm(e_1), xfrm(e_2))
     of Return(e_1):
@@ -377,6 +380,13 @@ const lang* = language:
       premise mtypes(C_1, e_2, IntTy())
       conclusion C_1, At(e_1, e_2), unionOf(typ_2)
 
+    rule "S-as":
+      premise mtypes(C_1, e_1, typ_1)
+      premise ttypes(C_1, texpr_1, typ_2)
+      condition typ_2 != VoidTy()
+      condition typ_1 <:= typ_2
+      conclusion C_1, As(e_1, texpr_1), typ_2
+
     rule "S-asgn":
       premise types(C_1, e_1, mut(typ_1))
       premise mtypes(C_1, e_2, typ_2)
@@ -602,6 +612,8 @@ const lang* = language:
       FieldAccess(substitute(e_1, with), IntVal(z_1))
     of At(e_1, e_2):
       At(substitute(e_1, with), substitute(e_2, with))
+    of As(e_1, texpr_1):
+      As(substitute(e_1, with), texpr_1)
     of While(e_1, e_2):
       While(substitute(e_1, with), substitute(e_2, with))
     of Return(e_1):
@@ -615,13 +627,10 @@ const lang* = language:
     of e_1:
       e_1 # nothing to replace
 
-  func trunc(a : r) -> n
-    ## Round towards zero.
-
   func intAdd(a, b: n) -> n =
     let n_3 = a + b
-    if n_3 <= (2 ^ 63):
-      if n_3 < (2 ^ 63):
+    if n_3 < (2 ^ 63):
+      if neg(2 ^ 63) <= n_3:
         n_3
       else:
         fail
@@ -630,8 +639,8 @@ const lang* = language:
 
   func intSub(a, b: n) -> n =
     let n_3 = a - b
-    if n_3 <= (2 ^ 63):
-      if n_3 < (2 ^ 63):
+    if n_3 < (2 ^ 63):
+      if neg(2 ^ 63) <= n_3:
         n_3
       else:
         fail
@@ -640,8 +649,8 @@ const lang* = language:
 
   func intMul(a, b: n) -> n =
     let n_3 = a * b
-    if n_3 <= (2 ^ 63):
-      if n_3 < (2 ^ 63):
+    if n_3 < (2 ^ 63):
+      if neg(2 ^ 63) <= n_3:
         n_3
       else:
         fail
@@ -652,7 +661,7 @@ const lang* = language:
     case (a, b)
     of n_1, 0: fail
     of n_1, n_2:
-      if same(n_1, (-2 ^ 63)):
+      if same(n_1, neg(2 ^ 63)):
         if same(n_2, -1):
           fail
         else:
@@ -723,6 +732,7 @@ const lang* = language:
     At(E, e)
     At(le, E)
     At(val, E)
+    As(E, texpr)
     Asgn(E, e)
     Asgn(le, E)
     With(E, n, e)
@@ -742,6 +752,7 @@ const lang* = language:
     Exprs(hole, +e)
     At(le, hole)
     At(val, hole)
+    As(hole, texpr)
     Asgn(le, hole)
     With(hole, n, e)
     With(val, n, hole)
@@ -771,6 +782,7 @@ const lang* = language:
     axiom "E-exprs", Exprs(TupleCons(), +e_1), Exprs(...e_1)
     axiom "E-if-true", If(True, e_1, e_2), e_1
     axiom "E-if-false", If(False, e_1, e_2), e_2
+    axiom "E-as", As(val_1, texpr), val_1 # a no-op
 
     axiom "E-while", While(e_1, e_2), If(e_1, Exprs(e_2, While(e_1, e_2)), TupleCons())
 
@@ -804,6 +816,12 @@ const lang* = language:
       condition n_1 < 0 or len(val_1) <= n_1
       conclusion At(TupleCons(*val_1), IntVal(n_1)), Unreachable()
 
+    rule "E-with-array":
+      where val_3, array(for y in updated(val_1, n_1, val_2): y)
+      conclusion With(array(*val_1), n_1, val_2), val_3
+    rule "E-with-tuple":
+      where val_3, TupleCons(for y in updated(val_1, n_1, val_2): y)
+      conclusion With(TupleCons(+val_1), n_1, val_2), val_3
     rule "E-with-out-of-bounds":
       condition n_1 < 0 or len(val_1) <= n_1
       conclusion With(array(*val_1), n_1, val_2), Unreachable()
@@ -819,14 +837,14 @@ const lang* = language:
       let n_3 = intAdd(n_1, n_2)
       conclusion Call(Ident("+"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-add-int-overflow":
-      condition (n_1, n_2) notin intAdd(n_1, n_2)
+      condition (n_1, n_2) notin intAdd
       conclusion Call(Ident("+"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-sub-int":
       let n_3 = intSub(n_1, n_2)
       conclusion Call(Ident("-"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-sub-int-overflow":
-      condition (n_1, n_2) notin intSub(n_1, n_2)
+      condition (n_1, n_2) notin intSub
       conclusion Call(Ident("-"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-mul-int":
@@ -844,11 +862,11 @@ const lang* = language:
       conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-mod-int":
-      let n_3 = intDiv(n_1, n_2)
-      conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
+      let n_3 = intMod(n_1, n_2)
+      conclusion Call(Ident("mod"), IntVal(n_1), IntVal(n_2)), IntVal(n_3)
     rule "E-mod-int-overflow":
-      condition (n_1, n_2) notin intDiv
-      conclusion Call(Ident("div"), IntVal(n_1), IntVal(n_2)), Unreachable()
+      condition (n_1, n_2) notin intMod
+      conclusion Call(Ident("mod"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-add-float":
       let r_3 = floatAdd(r_1, r_2)
@@ -899,16 +917,6 @@ const lang* = language:
     #       first-class locations (e.g., pointers) in the source language.
     #       Removing the location from the store could be achieved via a new
     #       `(Pop x)` construct, where `(Let x val e)` reduces to `(Pop x e)`
-
-    rule "E-with-array":
-      let val_3 = val_1[n_1]
-      # FIXME: this is wrong. The n-th element of the array must be replaced
-      #        with val_2
-      conclusion DC_1, With(array(*val_1), n_1, val_2), DC_1, val_3
-    rule "E-with-tuple":
-      let val_3 = val_1[n_1]
-      # FIXME: same here
-      conclusion DC_1, With(TupleCons(+val_1), n_1, val_2), DC_1, val_3
 
     rule "E-asgn":
       let DC_2 = DC_1 + DC(locs: {z_1 : val_1})
