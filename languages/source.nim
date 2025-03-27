@@ -782,6 +782,12 @@ const lang* = language:
       condition n_1 < 0 or len(val_1) <= n_1
       conclusion At(array(*val_1), IntVal(n_1)), Unreachable()
 
+    rule "E-with-array":
+      where val_3, array(for y in updated(val_1, n_1, val_2): y)
+      conclusion With(array(*val_1), n_1, val_2), val_3
+    rule "E-with-tuple":
+      where val_3, TupleCons(for y in updated(val_1, n_1, val_2): y)
+      conclusion With(TupleCons(+val_1), n_1, val_2), val_3
     rule "E-with-out-of-bounds":
       condition n_1 < 0 or len(val_1) <= n_1
       conclusion With(array(*val_1), n_1, val_2), Unreachable()
@@ -873,16 +879,6 @@ const lang* = language:
     #       first-class locations (e.g., pointers) in the source language.
     #       Removing the location from the store could be achieved via a new
     #       `(Pop x)` construct, where `(Let x val e)` reduces to `(Pop x e)`
-
-    rule "E-with-array":
-      let val_3 = val_1[n_1]
-      # FIXME: this is wrong. The n-th element of the array must be replaced
-      #        with val_2
-      conclusion DC_1, With(array(*val_1), n_1, val_2), DC_1, val_3
-    rule "E-with-tuple":
-      let val_3 = val_1[n_1]
-      # FIXME: same here
-      conclusion DC_1, With(TupleCons(+val_1), n_1, val_2), DC_1, val_3
 
     rule "E-asgn":
       let DC_2 = DC_1 + DC(locs: {z_1 : val_1})

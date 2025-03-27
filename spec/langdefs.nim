@@ -830,6 +830,19 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
       let body = recurse(n[1], false) # analyze the body
       let vars = c.unpacked.pop() # pop the context again
       return finishUnpack(body, vars, n)
+    elif n.kind == nnkInfix and n[0].eqIdent("or") or n[0].eqIdent("and"):
+      # short-circuiting 'or' or 'and'; both are implemented as an 'if'
+      let typ = c.lookup["bool"].typ
+      let a = recurse(n[1])
+      let b = recurse(n[2])
+      check(c, typ, a.typ, n[1])
+      check(c, typ, b.typ, n[2])
+      if n[0].eqIdent("or"):
+        result = tree(nkIf, a, Node(kind: nkTrue, typ: typ), b)
+      else:
+        result = tree(nkIf, a, b, Node(kind: nkFalse, typ: typ))
+      result.typ = typ
+      return
 
     let callee = semExpr(c, n[0], false, isHead=true)
     var call: Node
@@ -1717,8 +1730,8 @@ proc sem(body: NimNode): LangDef =
     c.functions.add Function[Type](name: name, body: Node(kind: nkHole))
     c.lookup[name] = Sym(kind: skFunc, id: c.functions.high, typ: typ)
 
-  c.builtin("or", fntype(tup(boolType, boolType), boolType))
-  c.builtin("and", fntype(tup(boolType, boolType), boolType))
+  c.builtin("updated", forall(1, fntype(tup(listT(tvar(0)), intType, tvar(0)),
+                                        listT(tvar(0)))))
   c.builtin("in", forall(2, fntype(tup(tvar(0), tvar(1)), boolType)))
   c.builtin("notin", forall(2, fntype(tup(tvar(0), tvar(1)), boolType)))
   c.builtin("same", forall(1, fntype(tup(tvar(0), tvar(0)), boolType)))
