@@ -88,6 +88,9 @@ const arr = [
   ("-", proc(n: Node): Node = makeNum(n[0].num - n[1].num)),
   ("*", proc(n: Node): Node = makeNum(n[0].num * n[1].num)),
   ("/", proc(n: Node): Node = makeNum(n[0].num / n[1].num)),
+  ("mod", proc(n: Node): Node =
+    makeNum(rational(divMod(n[0].num.toInt, n[1].num.toInt)[1]))
+  ),
   ("trunc", proc(n: Node): Node = makeNum(rational(split(n.num).i))),
   ("neg", proc(n: Node): Node = makeNum(-n.num)),
   ("^", proc(n: Node): Node =
