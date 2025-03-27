@@ -127,9 +127,9 @@ const arr = [
   ("updated", proc(n: Node): Node =
     let idx = toInt(n[1].num)
     assert n[0].kind == nkGroup
-    assert idx in 0..n[0].children.high
+    assert idx in 0'n..bignum(n[0].children.high)
     result = n[0]
-    result.children[idx] = n[2]
+    result.children[idx.toInt] = n[2]
   )]
 
 const functions* = block:
