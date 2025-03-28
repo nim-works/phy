@@ -1,0 +1,4 @@
+discard """
+  arguments: "c"
+"""
+(TypeDecl rec (RecordTy (Field x (IntTy))))

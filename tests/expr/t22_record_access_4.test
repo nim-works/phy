@@ -1,0 +1,8 @@
+discard """
+  description: "A record field's value can be modified with assignments"
+  output: "(RecordCons (Field x 2)) : (RecordTy (Field x (IntTy)))"
+"""
+(Exprs
+  (Decl rec (RecordCons (Field x 1)))
+  (Asgn (FieldAccess rec x) 2)
+  rec)

@@ -1,0 +1,4 @@
+discard """
+  output: "(RecordCons (Field x (TupleCons 1 2))) : (RecordTy (Field x (TupleTy (IntTy) (IntTy))))"
+"""
+(RecordCons (Field x (TupleCons 1 2)))

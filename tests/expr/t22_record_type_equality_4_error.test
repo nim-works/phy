@@ -1,0 +1,8 @@
+discard """
+  description: "No overlapping fields -> different type"
+  reject: true
+"""
+(Exprs
+  (Decl rec (RecordCons (Field x 1)))
+  (Asgn rec (RecordCons (Field y 1)))
+  rec)
