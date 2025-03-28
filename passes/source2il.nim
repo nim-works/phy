@@ -583,24 +583,71 @@ proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
     else:
       unreachable() # no copy procedure needed
   of opAt:
-    # at(s: seq(T), index: int) -> pointer
-    procTy = SemType(kind: tkProc, elems: @[pointerType, typ, prim(tkInt)])
-    params.add 0
-    params.add 1
-    locals.add typ
-    locals.add prim(tkInt)
+    case typ.kind
+    of tkSeq:
+      # at(s: seq(T), index: int) -> pointer
+      procTy = SemType(kind: tkProc, elems: @[pointerType, typ, prim(tkInt)])
+      params.add 0
+      params.add 1
+      locals.add typ
+      locals.add prim(tkInt)
 
-    let
-      s   = newLocal(0)
-      idx = newLocal(1)
+      let
+        s   = newLocal(0)
+        idx = newLocal(1)
 
-    body = IrNode(kind: Stmts)
-    body.add newIf(
-      c.newIntOp(Le, newIntVal(0), idx),
-      newIf(
-        c.newIntOp(Lt, idx, newFieldExpr(s, 0)),
-        newReturn(newAddr(c.genSeqAccess(s, idx, typ)))))
-    body.add newUnreachable()
+      body = IrNode(kind: Stmts)
+      body.add newIf(
+        c.newIntOp(Le, newIntVal(0), idx),
+        newIf(
+          c.newIntOp(Lt, idx, newFieldExpr(s, 0)),
+          newReturn(newAddr(c.genSeqAccess(s, idx, typ)))))
+      body.add newUnreachable()
+    of tkTuple:
+      # at(s: tuple, index: int, tmp: pointer) -> pointer
+      let (ret, folded) = unionOf(typ.elems)
+      procTy = SemType(kind: tkProc,
+                       elems: @[pointerType, typ, prim(tkInt), pointerType])
+      params.add 0
+      params.add 1
+      params.add 2
+      locals.add typ
+      locals.add prim(tkInt)
+      locals.add pointerType
+      locals.add prim(tkBool) # temporary
+      let
+        tup = newLocal(0)
+        idx = newLocal(1)
+        res = newDeref(c.typeToIL(ret), newLocal(2))
+
+      # the extra pointer parameters must hold a pointer to a location that is
+      # used as an intermediary. The external intermediary is needed so that
+      # the procedure can return a pointer to the result value, which is needed
+      # for the receiver to wrap it in an Deref, so that the tuple access can
+      # be an lvalue expression in the IL...
+
+      body = IrNode(kind: Stmts)
+      var caseStmt = newCase(c.typeToIL(prim(tkInt)), idx)
+      for i, it in typ.elems.pairs:
+        var list = IrNode(kind: Stmts)
+        if folded:
+          # the tuple is really an array
+          list.add newAsgn(res, newFieldExpr(tup, i))
+        else:
+          let pos = find(typ.elems, it)
+          list.add newAsgn(newFieldExpr(res, 0), newIntVal(pos))
+          list.add newAsgn(newFieldExpr(newFieldExpr(res, 1), pos),
+                           newFieldExpr(tup, i))
+        caseStmt.add newChoice(newIntVal(i), list)
+
+      let cond = newLocal(3)
+      body.add newIf(c.newCmpOp(Le, newIntVal(0), idx),
+        newAsgn(cond, c.newCmpOp(Lt, idx, newIntVal(typ.elems.len))),
+        newAsgn(cond, newIntVal(0)))
+      body.add newIf(cond, caseStmt, newUnreachable())
+      body.add newReturn(newLocal(2))
+    else:
+      unreachable()
 
   # assemble the final definition and add it to the module:
   var bu = initBuilder(ProcDef)
@@ -1299,31 +1346,27 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       expr = newDeref(c.typeToIL(result.typ),
         newCall(at, @[c.inlineLvalue(arr, stmts), c.capture(idx, stmts)]))
     of tkTuple:
+      let (typ, _) = unionOf(arr.typ.elems)
+      # the result is neither mutable nor is it an lvalue, but lvalue-ness
+      # currently has to be preserved for the enclosing `At` access to
+      # produce the right IL code
+      result = typ + (arr.attribs * {Lvalue})
+
+      let at = c.getTypeBoundOp(opAt, arr.typ)
+      # while not yielding a mutable lvalue, dynamic tuple access has the same
+      # evaluation order as seq access
       let
-        (typ, folded) = unionOf(arr.typ.elems)
-        tupVal = c.capture(arr, stmts)
-        idxVal = c.capture(idx, stmts)
-      result = typ + {}
-
-      expr = c.newTemp(typ)
-      var caseStmt = newCase(c.typeToIL(prim(tkInt)), idxVal)
-      for i, it in arr.typ.elems.pairs:
-        var list = IrNode(kind: Stmts)
-        if folded:
-          # the tuple is really an array
-          list.add newAsgn(expr, newFieldExpr(tupVal, i))
-        else:
-          let pos = find(typ.elems, it)
-          list.add newAsgn(newFieldExpr(expr, 0), newIntVal(pos))
-          list.add newAsgn(newFieldExpr(newFieldExpr(expr, 1), pos),
-                           newFieldExpr(tupVal, i))
-        caseStmt.add newChoice(newIntVal(i), list)
-
-      let cond = c.newTemp(prim(tkBool))
-      stmts.add newIf(c.newCmpOp(Le, newIntVal(0), idxVal),
-        newAsgn(cond, c.newCmpOp(Lt, idxVal, newIntVal(arr.typ.elems.len))),
-        newAsgn(cond, newIntVal(0)))
-      stmts.add newIf(cond, caseStmt, newUnreachable())
+        tmp = c.newTemp(typ)
+        res = newCall(at, @[c.inlineLvalue(arr, stmts), c.capture(idx, stmts),
+                            newAddr(tmp)])
+      if Lvalue in arr.attribs:
+        # use deferred evaluation for the actual tuple access (including the
+        # index check)
+        expr = newDeref(c.typeToIL(result.typ), res)
+      else:
+        # evaluate the access eagerly
+        stmts.add newDrop(res)
+        expr = tmp
     else:
       result = errorType() + arr.attribs
   of SourceKind.As:
