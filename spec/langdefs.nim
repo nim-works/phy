@@ -680,6 +680,9 @@ proc typeConstr(c; n: var Node, info: NimNode, isPattern: static[bool]) =
     when isPattern: matchesPattern(c, pat, witness(term))
     else:           matchesPattern(c, pat, term)
 
+  if n[0].sym notin c.lookup:
+    error(fmt"no constructor with name {n[0].sym}", info)
+
   let s = c.lookup[n[0].sym]
   case s.kind
   of skConstr:
@@ -1105,7 +1108,7 @@ proc semPattern(c; n: NimNode; accept: set[NodeKind], check = true): Node =
     result.add Node(kind: nkSymbol, sym: name(n[0]))
     let accept = accept + InConstrPat
     for i in 1..<n.len:
-      result.add semPattern(c, n[i], accept, check=false)
+      result.add semPattern(c, n[i], accept)
     if check:
       typeConstr(c, result, n, isPattern=false)
   else:
@@ -1384,6 +1387,19 @@ proc parseTypeUse(c: Context; n: NimNode): Type =
     error("not a type use", n)
     unreachable()
 
+proc addConstrSym(c; name: string, typ: Type, id: int, info: NimNode) =
+  ## Adds a symbol for a constructor with name `name` to the symbol table.
+  let sym = Sym(kind: skConstr, id: id, typ: typ)
+  c.lookup.withValue name, prev:
+    if prev.kind == skConstr:
+      prev[] = Sym(kind: skOverload, overloads: @[move prev[], sym])
+    elif prev.kind == skOverload:
+      prev.overloads.add sym
+    else:
+      error(fmt"{name} cannot be overloaded", info)
+  do:
+    c.lookup[name] = sym
+
 proc semConstrDef(c; n: NimNode, typ: Type): Node =
   ## Parses a constructor definition, which use a subset of the available
   ## pattern syntax.
@@ -1422,14 +1438,18 @@ proc semConstrDef(c; n: NimNode, typ: Type): Node =
         for it in n.items:
           result.addChecked(semConstrSub(c, it), it)
       of nnkCall:
-        result = tree(nkConstr, Node(kind: nkSymbol, sym: name(n[0])))
-        for i in 1..<n.len:
-          result.addChecked(semConstrSub(c, n[i]), n[i])
+        # treat the constructor as constructing a new anonymous data type
+        let typ = Type(kind: tkData)
+        typ.constr.add semConstrDef(c, n, typ)
+        c.addConstrSym(typ.constr[0][0].sym, typ, typ.constr.high, n[0])
+        result = Node(kind: nkType, typ: typ)
       else:
         error("expected identifier or call syntax", n)
 
-    result = semConstrSub(c, n)
-    result[0].typ = Type(kind: tkPat)
+    result = tree(nkConstr, Node(kind: nkSymbol, sym: name(n[0]),
+                                 typ: Type(kind: tkPat)))
+    for i in 1..<n.len:
+      result.add semConstrSub(c, n[i])
     result.typ = typ
   else:
     error("expected identifier or call syntax", n)
@@ -1457,19 +1477,7 @@ proc semType(c; body: NimNode, self: Type; base = Type(nil)) =
       error("construction is not covered by the parent type", it)
 
     self.constr.add pat
-    # add the constructor symbol to the lookup table:
-    let
-      name = pat[0].sym
-      sym = Sym(kind: skConstr, id: self.constr.high, typ: self)
-    c.lookup.withValue name, prev:
-      if prev.kind == skConstr:
-        prev[] = Sym(kind: skOverload, overloads: @[move prev[], sym])
-      elif prev.kind == skOverload:
-        prev.overloads.add sym
-      else:
-        error(fmt"{name} cannot be overloaded", it)
-    do:
-      c.lookup[name] = sym
+    c.addConstrSym(pat[0].sym, self, self.constr.high, it)
 
 proc semBody(c; n: NimNode, typ: Type, top: bool): Node
 
