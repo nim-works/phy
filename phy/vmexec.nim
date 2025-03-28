@@ -83,6 +83,16 @@ proc valueToSexp(env: var VmEnv, a: VirtualAddr, typ: SemType): SexpNode =
     for i, it in typ.elems.pairs:
       result.add valueToSexp(env, VirtualAddr(a.uint64 + offset.uint64), it)
       offset += size(it)
+  of tkRecord:
+    result = newCons("RecordCons")
+    var offset = 0
+    for i, it in typ.fields.pairs:
+      let mask = alignment(it.typ) - 1
+      offset = (offset + mask) and not mask # align the offset
+      var field = newCons("Field", newSSymbol(it.name))
+      field.add valueToSexp(env, VirtualAddr(a.uint64 + offset.uint64), it.typ)
+      result.add field
+      offset += size(it.typ)
   of tkUnion:
     let tag = readInt(p, 8)
     if tag in 0..typ.elems.high:
