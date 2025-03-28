@@ -172,6 +172,8 @@ proc add(res: var string, n: Node) =
         res.add ".0"
     elif n[0].sym == "proc":
       res.add "(proc ...)"
+    elif n[0].sym == "Ident":
+      res.add n[^1].sym
     else:
       res.add "("
       for i, it in n.children.pairs:

@@ -701,7 +701,7 @@ proc typeConstr(c; n: var Node, info: NimNode, isPattern: static[bool]) =
       # the choice
       n.typ = c.newTypeVar(info, Type(kind: tkOr, children: cand))
   else:
-    unreachable()
+    error(fmt"not a constructor: {n[0].sym}", info)
 
   if n.typ.isNil:
     error("no valid construction with the given shape exists", info)
