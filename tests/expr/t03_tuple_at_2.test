@@ -1,0 +1,5 @@
+discard """
+  description: "No union is created for homogeneous tuples"
+  output: "2 : (IntTy)"
+"""
+(At (TupleCons 1 2) 1)

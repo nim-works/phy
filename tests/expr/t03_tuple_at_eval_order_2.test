@@ -1,0 +1,14 @@
+discard """
+  description: "
+    The index check for lvalue operands takes place only once all index
+    expressions in the enclosing lvalue expression are evaluated (layered
+    evaluation).
+  "
+  output: "3 : (IntTy)"
+"""
+(ProcDecl test (IntTy) (Params)
+  (Exprs
+    (Decl tup (TupleCons (TupleCons 1 2)))
+    (At
+      (At tup 2)
+      (If true (Return 3) 0))))

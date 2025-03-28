@@ -1,0 +1,5 @@
+discard """
+  description: "A union is created for heterogeneous tuples"
+  output: "(TupleCons) : (UnionTy (UnitTy) (IntTy) (FloatTy))"
+"""
+(At (TupleCons (TupleCons) 1 2.5) 0)
