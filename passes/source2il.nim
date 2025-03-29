@@ -259,6 +259,20 @@ proc evalType(c; t; n: NodeIndex): SemType =
           discard "all good"
 
       tup
+  of RecordTy:
+    var rec = SemType(kind: tkRecord)
+    for it in t.items(n):
+      let
+        name = t.getString(t.child(it, 0))
+        elem = c.expectNot(evalType(c, t, t.child(it, 1)), tkVoid)
+        i = lowerBound(rec.fields, name,
+          proc(a, b: auto): int = cmp(a.name, b))
+      # important: keep the lexicographic order of the fields intact
+      if i >= rec.fields.len or rec.fields[i].name != name:
+        rec.fields.insert((name, elem), i)
+      else:
+        c.error("record type has a field with name '$1'" % [name])
+    rec
   of UnionTy:
     var list = newSeq[SemType]()
     for i, it in t.pairs(n):
@@ -325,6 +339,9 @@ proc typeToIL(c; typ: SemType): uint32 =
           c.types.add Node(kind: Immediate, val: off.uint32)
           c.types.add Node(kind: Type, val: it)
         off += paddedSize(typ.elems[i])
+  of tkRecord:
+    # records and tuples share the same translation logic
+    c.typeToIL(SemType(kind: tkTuple, elems: mapIt(typ.fields, it.typ)))
   of tkUnion:
     let args = mapIt(typ.elems, c.typeToIL(it))
     let inner = c.addType Union:
@@ -1153,6 +1170,38 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       # it's the unit value
       expr = UnitNode
       result = prim(tkUnit) + {}
+  of SourceKind.RecordCons:
+    var
+      typ = SemType(kind: tkRecord)
+      elems = newSeq[(string, Expr)]()
+
+    for it in t.items(n):
+      let
+        (nameN, elemN) = t.pair(it)
+        name = t.getString(nameN)
+
+      var e = c.exprToIL(t, elemN)
+      if e.typ.kind == tkVoid:
+        c.error("field type cannot be void")
+        # turn into an error expression:
+        e.typ = errorType()
+        e.expr = IrNode(kind: None)
+
+      if find(typ, name) != -1:
+        c.error("record already has field with name " & name)
+      else:
+        # make sure to keep the lexicographic order
+        typ.fields.insert((name, e.typ), lowerBound(typ.fields, name,
+          proc(a: auto, b: auto): int = cmp(a.name, b)))
+
+      elems.add (name, e)
+
+    expr = c.newTemp(typ)
+
+    for (name, elem) in elems.items:
+      stmts.add newAsgn(newFieldExpr(expr, find(typ, name)), c.use(elem, stmts))
+
+    result = typ + {}
   of SourceKind.Seq:
     if t[n, 0].kind == SourceKind.StringVal:
       # it's a string constructor
@@ -1238,12 +1287,28 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       tup = c.exprToIL(t, a)
     case tup.typ.kind
     of tkTuple:
-      let idx = t.getInt(b)
-      if idx >= 0 and idx < tup.typ.elems.len:
-        result = tup.typ.elems[idx] + tup.attribs
-        expr = newFieldExpr(inlineLvalue(c, tup, stmts), idx.int)
+      if t[b].kind == SourceKind.IntVal:
+        let idx = t.getInt(b)
+        if idx >= 0 and idx < tup.typ.elems.len:
+          result = tup.typ.elems[idx] + tup.attribs
+          expr = newFieldExpr(inlineLvalue(c, tup, stmts), idx.int)
+        else:
+          c.error("tuple has no element with index " & $idx)
+          result = errorType() + {Lvalue, Mutable}
       else:
-        c.error("tuple has no element with index " & $idx)
+        c.error("field selector must be an immediate integer")
+        result = errorType() + {Lvalue, Mutable}
+    of tkRecord:
+      if t[b].kind == SourceKind.Ident:
+        let idx = find(tup.typ, t.getString(b))
+        if idx >= 0:
+          result = tup.typ.fields[idx].typ + tup.attribs
+          expr = newFieldExpr(inlineLvalue(c, tup, stmts), idx.int)
+        else:
+          c.error("record has no field with name '$1'" % [t.getString(b)])
+          result = errorType() + {Lvalue, Mutable}
+      else:
+        c.error("field selector must be an identifier")
         result = errorType() + {Lvalue, Mutable}
     of tkError:
       result = tup.typ + {}

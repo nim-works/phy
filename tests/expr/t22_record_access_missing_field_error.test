@@ -1,0 +1,6 @@
+discard """
+  reject: true
+"""
+(FieldAccess
+  (RecordCons (Field x 1))
+  y)

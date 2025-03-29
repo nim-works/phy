@@ -1,0 +1,11 @@
+discard """
+  description: "A nested record field's value can be modified with assignments"
+  output: "(RecordCons (Field x (RecordCons (Field y 3)))) : (RecordTy (Field x (RecordTy (Field y (IntTy)))))"
+"""
+(Exprs
+  (Decl rec
+    (RecordCons
+      (Field x
+        (RecordCons (Field y 2)))))
+  (Asgn (FieldAccess (FieldAccess rec x) y) 3)
+  rec)

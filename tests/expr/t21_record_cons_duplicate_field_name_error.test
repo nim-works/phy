@@ -1,0 +1,5 @@
+discard """
+  description: "Record fields cannot be of void type"
+  reject: true
+"""
+(RecordCons (Field x 1) (Field x 2))

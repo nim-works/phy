@@ -1,0 +1,7 @@
+discard """
+  description: "The index used to access the record must be an identifier"
+  reject: true
+"""
+(FieldAccess
+  (RecordCons (Field x 1))
+  0)

@@ -30,6 +30,7 @@ type
     tkInt
     tkFloat
     tkTuple ## an anonymous product type
+    tkRecord
     tkUnion ## an anonymous sum type
     tkProc
     tkSeq
@@ -42,9 +43,12 @@ type
       discard
     of tkTuple, tkUnion, tkProc, tkSeq:
       elems*: seq[SemType]
+    of tkRecord:
+      fields*: seq[tuple[name: string, typ: SemType]]
+        ## the fields are always ordered lexicographically by name
 
 const
-  AggregateTypes* = {tkTuple, tkUnion, tkSeq}
+  AggregateTypes* = {tkTuple, tkRecord, tkUnion, tkSeq}
   ComplexTypes*   = AggregateTypes + {tkProc}
     ## non-primitive types
 
@@ -71,6 +75,19 @@ proc cmp*(a, b: SemType): int =
         return
 
     result = 0 # the types are equal
+  of tkRecord:
+    result = a.fields.len - b.fields.len
+    if result != 0:
+      return
+    for i in 0..<a.fields.len:
+      result = cmp(a.fields[i].name, b.fields[i].name)
+      if result != 0:
+        return
+      result = cmp(a.fields[i].typ, b.fields[i].typ)
+      if result != 0:
+        return
+
+    result = 0 # the types are equal
 
 proc errorType*(): SemType {.inline.} =
   SemType(kind: tkError)
@@ -93,6 +110,8 @@ proc `==`*(a, b: SemType): bool =
     result = true
   of tkTuple, tkUnion, tkProc, tkSeq:
     result = a.elems == b.elems
+  of tkRecord:
+    result = a.fields == b.fields
 
 proc isSubtypeOf*(a, b: SemType): bool =
   ## Computes whether `a` is a subtype of `b`.
@@ -106,8 +125,10 @@ proc isSubtypeOf*(a, b: SemType): bool =
   else:
     false
 
+proc alignment*(t: SemType): SizeUnit
+
 proc size*(t: SemType): SizeUnit =
-  ## Computes the size without padding of a location of type `t`.
+  ## Computes the size without trailing padding of a location of type `t`.
   case t.kind
   of tkVoid: unreachable()
   of tkError: 8 # TODO: return a value indicating "unknown"
@@ -118,6 +139,13 @@ proc size*(t: SemType): SizeUnit =
     var s = 0
     for it in t.elems.items:
       s += size(it)
+    s
+  of tkRecord:
+    var s = 0
+    for it in t.fields.items:
+      let mask = alignment(it.typ) - 1
+      s = (s + mask) and not mask
+      s += size(it.typ)
     s
   of tkUnion:
     var s = 0
@@ -139,6 +167,11 @@ proc alignment*(t: SemType): SizeUnit =
     var a = 0
     for it in t.elems.items:
       a = max(a, alignment(it))
+    a
+  of tkRecord:
+    var a = 0
+    for it in t.fields.items:
+      a = max(a, alignment(it.typ))
     a
   of tkUnion:
     var a = 0
@@ -191,5 +224,18 @@ proc isTriviallyCopyable*(typ: SemType): bool =
       if not isTriviallyCopyable(it):
         return false
     true
+  of tkRecord:
+    for it in typ.fields.items:
+      if not isTriviallyCopyable(it.typ):
+        return false
+    true
   of tkVoid:
     unreachable()
+
+proc find*(typ: SemType, field: string): int =
+  ## Returns the index of the field with the given name in record type `typ`,
+  ## or -1 if there's no such field.
+  for i, it in typ.fields.pairs:
+    if it.name == field:
+      return i
+  result = -1

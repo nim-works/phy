@@ -1,0 +1,6 @@
+discard """
+  output: "1 : (IntTy)"
+"""
+(Exprs
+  (Decl rec (RecordCons (Field x 1)))
+  (FieldAccess rec x))

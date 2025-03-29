@@ -1,0 +1,4 @@
+discard """
+  output: "(RecordCons (Field x (array 1 2 3))) : (RecordTy (Field x (SeqTy (IntTy))))"
+"""
+(RecordCons (Field x (Seq (IntTy) 1 2 3)))
