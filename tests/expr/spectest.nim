@@ -98,6 +98,11 @@ const
     "t19_writeErr.test",
     "t20_readFile.test",
     "t20_readFile_missing.test",
+    "t21_record_type_cons_1.test",
+    "t21_record_type_cons_2.test",
+    "t21_record_type_cons_duplicate_field_error.test",
+    "t21_record_type_cons_no_void_error.test",
+    "t22_record_type_equality_1.test"
   ]
 
 var typesRel, cstepRel, desugarFnc = -1
@@ -172,6 +177,8 @@ proc add(res: var string, n: Node) =
         res.add ".0"
     elif n[0].sym == "proc":
       res.add "(proc ...)"
+    elif n[0].sym == "Ident":
+      res.add n[^1].sym
     else:
       res.add "("
       for i, it in n.children.pairs:

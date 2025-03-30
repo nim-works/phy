@@ -1,0 +1,5 @@
+discard """
+  description: "Records may be part of other records"
+  output: "(RecordCons (Field x (RecordCons (Field x 1)))) : (RecordTy (Field x (RecordTy (Field x (IntTy)))))"
+"""
+(RecordCons (Field x (RecordCons (Field x 1))))
