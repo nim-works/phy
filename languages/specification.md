@@ -15,10 +15,12 @@ expr     ::= <ident>
           |  <intVal>
           |  <floatVal>
           |  (TupleCons <expr>*)
+          |  (RecordCons (Field <ident> <expr>)+)
           |  (Seq <texpr> <expr>*)
           |  (Seq <strVal>)
           |  (Call <expr>+)
           |  (FieldAccess <expr> <intVal>)
+          |  (FieldAccess <expr> <ident>)
           |  (At <expr> <expr>)
           |  (As <expr> <texpr>)
           |  (And <expr> <expr>)
@@ -38,6 +40,7 @@ texpr    ::= <ident>
           |  (IntTy)
           |  (FloatTy)
           |  (TupleTy <texpr>*)
+          |  (RecordTy (Field <ident> <texpr>)+)
           |  (UnionTy <texpr>+)
           |  (ProcTy <texpr>+)
           |  (SeqTy <texpr>)

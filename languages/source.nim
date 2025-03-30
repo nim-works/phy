@@ -23,15 +23,21 @@ const lang* = language:
     # TODO: automatically create an anonymous type for sub-constructors and
     #       then remove the `branch` type again
     As(x, texpr, expr)
+  typ eindex:
+    # element index
+    IntVal(z)
+    Ident(string)
+
   typ expr:
     Ident(string)
     IntVal(z)
     FloatVal(r)
     TupleCons(*expr)
+    RecordCons(+Field(ident, expr))
     Seq(texpr, *expr)
     Seq(StringVal(string))
     Call(+expr)
-    FieldAccess(expr, IntVal(z))
+    FieldAccess(expr, eindex)
     At(expr, expr)
     As(expr, texpr)
     And(expr, expr)
@@ -58,10 +64,12 @@ const lang* = language:
     `proc`(typ, *[x, typ], e)
 
     With(e, n, e) # return a tuple/array value with the n-th element replaced
+    With(e, string, e)
     Frame(typ, e) # a special expression for assisting with evaluation
 
   alias e, expr
 
+  typ fieldDecl: Field(ident, texpr)
   typ texpr:
     Ident(string)
     VoidTy()
@@ -74,6 +82,7 @@ const lang* = language:
     UnionTy(+texpr)
     ProcTy(+texpr)
     SeqTy(texpr)
+    RecordTy(+fieldDecl)
 
     # type expressions not available at the source level
     mut(texpr)
@@ -98,12 +107,13 @@ const lang* = language:
     char(z)
     `array`(*val)
     TupleCons(*val) # an empty tuple is also a valid value (i.e., unit)
+    RecordCons(+Field(x, val))
     `proc`(typ, *[x, typ], e)
 
   subtype le, e:
     # Lvalue expression with all non-lvalue operands already evaluated.
     loc(z)
-    FieldAccess(le, IntVal(n))
+    FieldAccess(le, eindex)
     At(le, IntVal(n))
 
   func update(a: expr, xfrm: e -> e) -> expr =
@@ -126,10 +136,12 @@ const lang* = language:
       Asgn(xfrm(e_1), xfrm(e_2))
     of TupleCons(*e_1):
       TupleCons(...xfrm(e_1))
+    of RecordCons(+Field(x_1, e_1)):
+      RecordCons(...Field(x_1, xfrm(e_1)))
     of Seq(texpr_1, *e_1):
       Seq(texpr_1, ...xfrm(e_1))
-    of FieldAccess(e_1, IntVal(z_1)):
-      FieldAccess(xfrm(e_1), IntVal(z_1))
+    of FieldAccess(e_1, eindex_1):
+      FieldAccess(xfrm(e_1), eindex_1)
     of At(e_1, e_2):
       At(xfrm(e_1), xfrm(e_2))
     of As(e_1, texpr_1):
@@ -199,10 +211,23 @@ const lang* = language:
       conclusion typ_1, UnionTy(+typ_2)
 
   func `==`(a, b: typ) -> bool =
-    ## Except for union types, all type equality uses *structural equality*.
+    ## Type equality.
     case (a, b)
     of UnionTy(+typ_1), UnionTy(+typ_2):
+      # equal set of types -> equivalent types
       identical(typ_1, typ_2)
+    of RecordTy(+Field(Ident(string_1), typ_1)),
+       RecordTy(+Field(Ident(string_2), typ_2)):
+      # equal fields -> equivalent type
+      let m_1 = zip(string_1, typ_1)
+      let m_2 = zip(string_2, typ_2)
+      if (for it in m_1: mapContains(m_2, it)):
+        if (for it in m_2: mapContains(m_1, it)):
+          true
+        else:
+          false
+      else:
+        false
     else:
       same(a, b) # same structure -> equivalent type
 
@@ -266,6 +291,13 @@ const lang* = language:
       condition ...(typ_1 != VoidTy())
       conclusion C_1, TupleTy(+texpr_1), TupleTy(...typ_1)
 
+    rule "S-record-type":
+      premise ...ttypes(C_1, texpr_1, typ_1)
+      condition ...(typ_1 != VoidTy())
+      condition unique(string_1)
+      conclusion C_1, RecordTy(+Field(Ident(string_1), texpr_1)),
+                      RecordTy(...Field(Ident(string_1), typ_1))
+
     rule "S-union-type":
       premise ...ttypes(C_1, texpr_1, typ_1)
       condition ...(typ_1 != VoidTy())
@@ -324,6 +356,13 @@ const lang* = language:
       condition ...(typ_1 != VoidTy())
       conclusion C_1, TupleCons(+e_1), TupleTy(...typ_1)
 
+    rule "S-record":
+      premise ...mtypes(C_1, e_1, typ_1)
+      condition ...(typ_1 != VoidTy())
+      condition unique(string_1)
+      conclusion C_1, RecordCons(+Field(Ident(string_1), e_1)),
+                      RecordTy(...Field(Ident(string_1), typ_1))
+
     rule "S-seq-cons":
       premise ttypes(C_1, texpr_1, typ_1)
       premise ...types(C_1, e_2, typ_2)
@@ -352,6 +391,18 @@ const lang* = language:
       where TupleTy(+typ_3), typ_1
       where typ_2, typ_3[n_1]
       conclusion C_1, FieldAccess(e_1, IntVal(n_1)), mut(typ_2)
+
+    rule "S-rec-field":
+      premise types(C_1, e_1, typ_1)
+      where RecordTy(+Field(Ident(string_2), typ_2)), typ_1
+      where typ_3, map(zip(string_2, typ_2))(string_1)
+      conclusion C_1, FieldAccess(e_1, Ident(string_1)), typ_3
+
+    rule "S-mut-rec-field":
+      premise types(C_1, e_1, mut(typ_1))
+      where RecordTy(+Field(Ident(string_2), typ_2)), typ_1
+      where typ_3, map(zip(string_2, typ_2))(string_1)
+      conclusion C_1, FieldAccess(e_1, Ident(string_1)), mut(typ_3)
 
     rule "S-at":
       premise types(C_1, e_1, typ_1)
@@ -605,10 +656,12 @@ const lang* = language:
       Asgn(substitute(e_1, with), substitute(e_2, with))
     of TupleCons(*e_1):
       TupleCons(...substitute(e_1, with))
+    of RecordCons(+Field(x_1, e_1)):
+      RecordCons(...Field(x_1, substitute(e_1, with)))
     of Seq(texpr_1, *e_1):
       Seq(texpr_1, ...substitute(e_1, with))
-    of FieldAccess(e_1, IntVal(z_1)):
-      FieldAccess(substitute(e_1, with), IntVal(z_1))
+    of FieldAccess(e_1, eindex_1):
+      FieldAccess(substitute(e_1, with), eindex_1)
     of At(e_1, e_2):
       At(substitute(e_1, with), substitute(e_2, with))
     of As(e_1, texpr_1):
@@ -721,13 +774,13 @@ const lang* = language:
   context L:
     # evaluation context for locs in lvalue expressions
     hole
-    FieldAccess(L, IntVal(n))
+    FieldAccess(L, eindex)
     At(L, IntVal(n))
 
   context E:
     hole
     Exprs(E, +e)
-    FieldAccess(E, IntVal(n))
+    FieldAccess(E, eindex)
     At(E, e)
     At(le, E)
     At(val, E)
@@ -736,7 +789,10 @@ const lang* = language:
     Asgn(le, E)
     With(E, n, e)
     With(val, n, E)
+    With(E, string, e)
+    With(val, string, E)
     TupleCons(*val, E, *e)
+    RecordCons(*Field(x, val), Field(x, E), *Field(x, e))
     Seq(typ, *val, E, *e)
     Call(*val, E, *e)
     Call(x, *val, E, *e)
@@ -756,7 +812,10 @@ const lang* = language:
     Asgn(le, hole)
     With(hole, n, e)
     With(val, n, hole)
+    With(hole, string, e)
+    With(val, string, hole)
     TupleCons(*val, hole, *e)
+    RecordCons(*Field(x, val), Field(x, hole), *Field(x, e))
     Seq(typ, *val, hole, *e)
     Call(*val, hole, *e)
     Call(x, *val, hole, *e)
@@ -804,8 +863,16 @@ const lang* = language:
       where val_2, val_3[n_1]
       conclusion FieldAccess(val_1, IntVal(n_1)), val_2
 
+    rule "E-rec-access":
+      let val_2 = map(zip(string_1, val_1))(string_2)
+      conclusion FieldAccess(RecordCons(+Field(Ident(string_1), val_1)), Ident(string_2)),
+                 val_2
+
     axiom "E-field-asgn", Asgn(FieldAccess(le_1, IntVal(n_1)), val_1), Asgn(le_1, With(le_1, n_1, val_1))
     axiom "E-elem-asgn", Asgn(At(le_1, IntVal(n_1)), val_1), Asgn(le_1, With(le_1, n_1, val_1))
+    axiom "E-rec-field-asgn",
+          Asgn(FieldAccess(le_1, Ident(string_1)), val_1),
+          Asgn(le_1, With(le_1, string_1, val_1))
 
     axiom "E-seq-cons", Seq(typ, *val_1), `array`(...val_1)
 
@@ -828,6 +895,10 @@ const lang* = language:
     rule "E-with-out-of-bounds":
       condition n_1 < 0 or len(val_1) <= n_1
       conclusion With(array(*val_1), n_1, val_2), Unreachable()
+    rule "E-with-record":
+      let val_3 = updated(val_1, indexOf(string_1, string_2, 0), val_2)
+      conclusion With(RecordCons(+Field(Ident(string_1), val_1)), string_2, val_2),
+                 RecordCons(...Field(Ident(string_1), val_3))
 
     axiom "E-not-false", Call(Ident("not"), False), True
     axiom "E-not-true",  Call(Ident("not"), True),  False
@@ -1020,6 +1091,11 @@ const lang* = language:
     else:
       false
 
+  func mapContains(list: *(string, typ), p: (string, typ)) -> bool =
+    let (s, t) = p
+    let m = map(list)
+    s in m and m(s) == t
+
   func uniqueTypes(list: *typ) -> bool =
     ## Computes whether all types in the list are unique.
     case list
@@ -1041,3 +1117,11 @@ const lang* = language:
         false
     of _:
       true
+
+  func indexOf(list: *string, it: string, i: n) -> n =
+    case list
+    of [string_1, *string_2]:
+      if same(string_1, it):
+        i
+      else:
+        indexOf(string_2, it, i + 1)
