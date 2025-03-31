@@ -1402,12 +1402,12 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
     # the dispatcher
     for it in t.items(n, 1):
       let
-        (nameNode, typNode, bodyNode) = t.triplet(it)
-        typ = c.expectNot(c.evalType(t, typNode), tkVoid)
+        (pat, bodyNode) = t.pair(it)
+        typ = c.expectNot(c.evalType(t, t.child(pat, 1)), tkVoid)
         at = lowerBound(got, typ, cmp)
 
       c.openScope()
-      let name {.cursor.} = t.getString(nameNode)
+      let name {.cursor.} = t.getString(t.child(pat, 0))
       if c.lookup(name).kind != ekNone:
         c.error("redeclaration of '$1'" % [name])
       let tmp = c.newTemp(typ)
