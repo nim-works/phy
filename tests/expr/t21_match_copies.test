@@ -9,9 +9,9 @@ discard """
   (Decl val (As 10 (UnionTy (IntTy) (UnitTy))))
   (Match
     val
-    (As x (IntTy)
+    (Rule (As x (IntTy))
       (Exprs
         (Asgn val 5)
         x))
-    (As x (UnitTy)
+    (Rule (As x (UnitTy))
       2)))

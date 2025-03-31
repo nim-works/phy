@@ -6,7 +6,7 @@ discard """
   (Decl val (As 10 (UnionTy (IntTy) (UnitTy))))
   (Match
     val
-    (As x (IntTy)
+    (Rule (As x (IntTy))
       (Asgn x 1))
-    (As x (UnitTy)
+    (Rule (As x (UnitTy))
       (Asgn x (TupleCons)))))

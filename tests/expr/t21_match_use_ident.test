@@ -3,7 +3,7 @@ discard """
 """
 (Match
   (As 10 (UnionTy (IntTy) (UnitTy)))
-  (As x (IntTy)
+  (Rule (As x (IntTy))
     x)
-  (As x (UnitTy)
+  (Rule (As x (UnitTy))
     2))

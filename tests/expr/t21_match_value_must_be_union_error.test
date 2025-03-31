@@ -4,5 +4,5 @@ discard """
 """
 (Match
   (IntVal 1)
-  (As x (IntTy)
+  (Rule (As x (IntTy))
     1))

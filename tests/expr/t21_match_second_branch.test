@@ -3,7 +3,7 @@ discard """
 """
 (Match
   (As (TupleCons) (UnionTy (IntTy) (UnitTy)))
-  (As x (IntTy)
+  (Rule (As x (IntTy))
     1)
-  (As x (UnitTy)
+  (Rule (As x (UnitTy))
     2))

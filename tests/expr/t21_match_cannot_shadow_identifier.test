@@ -6,7 +6,7 @@ discard """
   (Decl x (As 10 (UnionTy (IntTy) (UnitTy))))
   (Match
     x
-    (As x (IntTy)
+    (Rule (As x (IntTy))
       1)
-    (As x (UnitTy)
+    (Rule (As x (UnitTy))
       2)))

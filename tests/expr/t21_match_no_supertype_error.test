@@ -7,7 +7,7 @@ discard """
 """
 (Match
   (As 10 (UnionTy (IntTy) (UnitTy)))
-  (As x (UnionTy (IntTy) (FloatTy))
+  (Rule (As x (UnionTy (IntTy) (FloatTy)))
     1)
-  (As x (UnitTy)
+  (Rule (As x (UnitTy))
     2))

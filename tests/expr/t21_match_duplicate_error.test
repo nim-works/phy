@@ -4,9 +4,9 @@ discard """
 """
 (Match
   (As 10 (UnionTy (IntTy) (UnitTy)))
-  (As x (IntTy)
+  (Rule (As x (IntTy))
     1)
-  (As x (IntTy)
+  (Rule (As x (IntTy))
     2)
-  (As x (UnitTy)
+  (Rule (As x (UnitTy))
     3))
