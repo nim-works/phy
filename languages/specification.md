@@ -32,7 +32,7 @@ expr     ::= <ident>
           |  (Exprs <expr>+)
           |  (Asgn <expr> <expr>)
           |  (Decl <ident> <expr>)
-          |  (Match <expr> (As <ident> <texpr> <expr>)+)
+          |  (Match <expr> (Rule (As <ident> <texpr>) <expr>)+)
 texpr    ::= <ident>
           |  (VoidTy)
           |  (UnitTy)

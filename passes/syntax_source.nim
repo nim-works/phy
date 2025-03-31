@@ -22,12 +22,13 @@ type
     Seq
     FieldAccess, At
     As
+    Match
     Exprs
     Asgn
     Return
     Unreachable
-    Match
     Field
+    Rule
     Params
     ProcDecl, ParamDecl
     Decl
