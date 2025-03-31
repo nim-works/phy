@@ -19,10 +19,10 @@ const lang* = language:
   #       numbers, not *integer* numbers
   typ ident: Ident(string)
   alias x, ident
-  typ branch:
-    # TODO: automatically create an anonymous type for sub-constructors and
-    #       then remove the `branch` type again
-    As(x, texpr, expr)
+  typ pattern:
+    As(x, texpr)
+  typ rule:
+    Rule(pattern, expr)
   typ eindex:
     # element index
     IntVal(z)
@@ -44,7 +44,7 @@ const lang* = language:
     Or(expr, expr)
     If(expr, expr, expr)
     If(expr, expr)
-    Match(expr, +branch)
+    Match(expr, +rule)
     While(expr, expr)
     Return(expr)
     Return()
@@ -128,8 +128,8 @@ const lang* = language:
       Decl(ident_1, xfrm(e_1))
     of If(e_1, e_2, e_3):
       If(xfrm(e_1), xfrm(e_2), xfrm(e_3))
-    of Match(e_1, +As(x_1, texpr_1, e_2)):
-      Match(xfrm(e_1), ...As(x_1, texpr_1, xfrm(e_2)))
+    of Match(e_1, +Rule(As(x_1, texpr_1), e_2)):
+      Match(xfrm(e_1), ...Rule(As(x_1, texpr_1), xfrm(e_2)))
     of Call(+e_1):
       Call(...xfrm(e_1))
     of Asgn(e_1, e_2):
@@ -467,7 +467,7 @@ const lang* = language:
       let C_2 = ...(C_1 + C(symbols: {string_1 : typ_3}))
       premise ...mtypes(C_2, e_2, typ_4)
       let typ_5 = commonAll(typ_4)
-      conclusion C_1, Match(e_1, +As(Ident(string_1), texpr_1, e_2)), typ_5
+      conclusion C_1, Match(e_1, +Rule(As(Ident(string_1), texpr_1), e_2)), typ_5
 
     rule "S-while":
       premise mtypes(C_1, e_1, BoolTy())
@@ -648,8 +648,8 @@ const lang* = language:
       Let(ident_1, substitute(e_1, with), substitute(e_2, with))
     of If(e_1, e_2, e_3):
       If(substitute(e_1, with), substitute(e_2, with), substitute(e_3, with))
-    of Match(e_1, +As(x_1, texpr_1, e_2)):
-      Match(substitute(e_1, with), ...As(x_1, texpr_1, substitute(e_2)))
+    of Match(e_1, +Rule(As(x_1, texpr_1), e_2)):
+      Match(substitute(e_1, with), ...Rule(As(x_1, texpr_1), substitute(e_2, with)))
     of Call(+e_1):
       Call(...substitute(e_1, with))
     of Asgn(e_1, e_2):
@@ -797,7 +797,7 @@ const lang* = language:
     Call(*val, E, *e)
     Call(x, *val, E, *e)
     If(E, e, e)
-    Match(E, +branch)
+    Match(E, +rule)
     Let(x, E, e)
     Return(E)
 
@@ -820,7 +820,7 @@ const lang* = language:
     Call(*val, hole, *e)
     Call(x, *val, hole, *e)
     If(hole, e, e)
-    Match(hole, +branch)
+    Match(hole, +rule)
     Let(x, hole, e)
     Return(hole)
 
@@ -849,14 +849,14 @@ const lang* = language:
     rule "E-match-success":
       premise types(C(ret: VoidTy), val_1, typ_1)
       condition typ_1 == texpr_1
-      conclusion Match(val_1, As(Ident(string_1), texpr_1, e_1), *any),
+      conclusion Match(val_1, Rule(As(Ident(string_1), texpr_1), e_1), *any),
                  substitute(e_1, {string_1 : val_1})
 
     rule "E-match-next":
       premise types(C(ret: VoidTy), val_1, typ_1)
       condition typ_1 != texpr_1
-      conclusion Match(val_1, As(x, texpr_1, e), +branch_1),
-                 Match(val_1, ...branch_1)
+      conclusion Match(val_1, Rule(As(x, texpr_1), e), +rule_1),
+                 Match(val_1, ...rule_1)
 
     rule "E-tuple-access":
       where TupleCons(+val_3), val_1
