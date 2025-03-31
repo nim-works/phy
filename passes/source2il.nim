@@ -31,6 +31,7 @@ type
     ekType
     ekLocal
     ekParam
+    ekValue       ## a value bound to an identifier via a match pattern
 
   Entity = object
     kind: EntityKind
@@ -1053,6 +1054,9 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
     of ekParam:
       expr = newLocal(c.params[ent.id].local)
       result = c.params[ent.id].typ + {Lvalue}
+    of ekValue:
+      expr = newLocal(ent.id.uint32)
+      result = c.locals[ent.id] + {}
     of ekProc:
       # expand to a procedure address (`ProcVal`), which is always correct;
       # the callsite can turn it into a static reference (`Proc`) as needed
@@ -1411,7 +1415,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       if c.lookup(name).kind != ekNone:
         c.error("redeclaration of '$1'" % [name])
       let tmp = c.newTemp(typ)
-      c.addDecl(name, Entity(kind: ekLocal, id: tmp.id.int))
+      c.addDecl(name, Entity(kind: ekValue, id: tmp.id.int))
       let body = c.exprToIL(t, bodyNode)
       c.closeScope()
 
