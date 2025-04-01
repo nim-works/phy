@@ -11,13 +11,14 @@ type
   NodeKind* {.pure.} = enum
     IntVal, FloatVal, StringVal
     Ident,
-    VoidTy, UnitTy, BoolTy, CharTy, IntTy, FloatTy, TupleTy, UnionTy, ProcTy,
-    SeqTy
+    VoidTy, UnitTy, BoolTy, CharTy, IntTy, FloatTy, TupleTy, RecordTy, UnionTy,
+    ProcTy, SeqTy
     And, Or
     If
     While
     Call
     TupleCons
+    RecordCons
     Seq
     FieldAccess, At
     As
@@ -25,6 +26,7 @@ type
     Asgn
     Return
     Unreachable
+    Field
     Params
     ProcDecl, ParamDecl
     Decl
@@ -35,8 +37,8 @@ type
 
 const
   ExprNodes* = {IntVal, FloatVal, Ident, And, Or, If, While, Call, TupleCons,
-                Seq, FieldAccess, At, As, Asgn, Return, Unreachable, Exprs,
-                Decl}
+                RecordCons, Seq, FieldAccess, At, As, Asgn, Return,
+                Unreachable, Exprs, Decl}
   DeclNodes* = {ProcDecl, TypeDecl}
   AllNodes* = {low(NodeKind) .. high(NodeKind)}
 
