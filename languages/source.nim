@@ -787,18 +787,16 @@ const lang* = language:
         if f < 0.5:    Inexact(Lt)
         else:          Inexact(Gt)
 
-  func `shr`(mx: n, ex, by: z) -> (n, z, location) =
-    if 0 < by:
-      let shifted = mx / (2 ^ by)
-      let i = trunc(shifted) # integer part of `r`
-      (i, ex + by, toLocation(shifted - i))
+  func fnormalize(mx: n, ex: z) -> (n, z, location) =
+    ## Right-shifts `mx` such that the most significant bit is at `prec`, if
+    ## possible. The resulting exponent stays in the [3-emax-prec, inf) range.
+    let shift = fexp(digit2(mx) + ex) - ex
+    if 0 < shift:
+      let shifted = mx / (2 ^ shift)
+      let i = trunc(shifted) # integer part of `shifted`
+      (i, ex + shift, toLocation(shifted - i))
     else:
       (mx, ex, Exact)
-
-  func shrFexp(mx: n, ex: z) -> (n, z, location) =
-    ## Shifts `mx` such that the most significant bit is at `prec`, if
-    ## possible. The resulting exponent stays in the [3-emax-prec, inf) range.
-    `shr`(mx, ex, fexp(digit2(mx) + ex) - ex)
 
   func roundNearestEven(mx: n, lx: location) -> n =
     ## Implements the floating-point to-nearest, tie-to-even rounding
@@ -812,9 +810,9 @@ const lang* = language:
       mx + 1 # round up
 
   func binaryRoundAux(sx: bool, mx: n, ex: z) -> float =
-    let (m_1, e_1, lx) = shrFexp(mx, ex) # normalize
+    let (m_1, e_1, lx) = fnormalize(mx, ex) # normalize
     let rnd = roundNearestEven(m_1, lx) # round
-    let (m_2, e_2, _) = shrFexp(rnd, e_1) # normalize `rnd`
+    let (m_2, e_2, _) = fnormalize(rnd, e_1) # normalize `rnd`
     case m_2
     of 0: Zero(sx)
     of z_1:
@@ -824,6 +822,7 @@ const lang* = language:
         else: Inf(sx)
 
   func binaryRound(s: bool, m: n, exp: z) -> float =
+    # if less, left-shift `m` such that its MSB is at `prec` before rounding
     let exp_2 = fexp(digit2(m) + exp)
     let m_2 = align(m, exp, exp_2)
     let exp_3 = min(exp, exp_2)
