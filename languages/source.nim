@@ -678,35 +678,32 @@ const lang* = language:
     of false: v
 
   typ location:
-    locExact
-    locInexact(equality)
+    Exact
+    Inexact(equality)
 
   # TODO: make the floating-point operators generic over formats by
   #       making the below two defs parameters of the operators
   def emax, 1024
   def prec, 53
 
-  func align(m: n, ex_1, ex_2: z) -> n =
-    ## Returns m' such that `m'*(2^ex_2) = m*2(2^ex_1)`, when ex_2 < ex_1.
-    if ex_2 < ex_1:
-      m * (2 ^ (ex_1 - ex_2))
+  func align(mx: n, ex, ey: z) -> n =
+    ## Returns `my` such that `my*(2^ey) = mx*(2^ex)`, when ey < ex.
+    if ey < ex:
+      mx * (2 ^ (ex - ey))
     else:
-      m
+      mx
 
   func min(a, b: z) -> z =
     if a < b: a else: b
   func max(a, b: z) -> z =
     if a < b: b else: a
 
-  func abs(a: z) -> z =
-    if a < 0: neg(a) else: a
-
   func fexp(exp: z) -> z =
     max(exp - prec, 3 - emax - prec)
 
   func even(a: n) -> bool = same(a mod 2, 0)
 
-  func digit2(a : n) -> n =
+  func digit2(a: n) -> n =
     ## Computes the 1-based position of the most-significant bit.
     case a
     of 0: 0
@@ -729,40 +726,36 @@ const lang* = language:
               # shift right by 1
               digit2(trunc(a / 2)) + 1
 
-  func orb(a, b: bool) -> bool =
-    ## Boolean or operator.
-    if a: true else: b
-
   func toLocation(f: r) -> location =
-    if same(f, 0.0):   locExact
+    if same(f, 0.0):   Exact
     else:
-      if same(f, 0.5): locInexact(Eq)
+      if same(f, 0.5): Inexact(Eq)
       else:
-        if f < 0.5:    locInexact(Lt)
-        else:          locInexact(Gt)
+        if f < 0.5:    Inexact(Lt)
+        else:          Inexact(Gt)
 
-  func `shr`(m: n, exp, by: z) -> (n, z, location) =
+  func `shr`(mx: n, ex, by: z) -> (n, z, location) =
     if 0 < by:
-      let shifted = m / (2 ^ by)
+      let shifted = mx / (2 ^ by)
       let i = trunc(shifted) # integer part of `r`
-      (i, exp + by, toLocation(shifted - i))
+      (i, ex + by, toLocation(shifted - i))
     else:
-      (m, exp, locExact)
+      (mx, ex, Exact)
 
-  func shrFexp(m, exp: z) -> (n, z, location) =
-    ## Shifts `m` such that the most significant bit is at `prec`, if
+  func shrFexp(mx: n, ex: z) -> (n, z, location) =
+    ## Shifts `mx` such that the most significant bit is at `prec`, if
     ## possible. The resulting exponent stays in the [3-emax-prec, inf) range.
-    `shr`(m, exp, fexp(digit2(m) + exp) - exp)
+    `shr`(mx, ex, fexp(digit2(mx) + ex) - ex)
 
   func roundNearestEven(mx: n, lx: location) -> n =
     ## Implements the floating-point to-nearest, tie-to-even rounding
     ## mode.
     case lx
-    of locExact: mx
-    of locInexact(Lt): mx # round down
-    of locInexact(Eq):
+    of Exact: mx
+    of Inexact(Lt): mx # round down
+    of Inexact(Eq):
       if even(mx): mx else: (mx + 1) # tie; round to even
-    of locInexact(Gt):
+    of Inexact(Gt):
       mx + 1 # round up
 
   func binaryRoundAux(sx: bool, mx: n, ex: z) -> float =
@@ -778,10 +771,10 @@ const lang* = language:
         else: Inf(sx)
 
   func binaryRound(s: bool, m: n, exp: z) -> float =
-    let z_3 = fexp(digit2(m) + exp)
-    let z_1 = align(m, exp, z_3)
-    let exp_1 = min(exp, z_3)
-    binaryRoundAux(s, abs(z_1), exp_1)
+    let exp_2 = fexp(digit2(m) + exp)
+    let m_2 = align(m, exp, exp_2)
+    let exp_3 = min(exp, exp_2)
+    binaryRoundAux(s, m_2, exp_3)
 
   func normalize(m, exp: z, szero: bool) -> float =
     ## Yields the closest possible floating point representation
@@ -809,11 +802,11 @@ const lang* = language:
         Zero(false) # negative + positive = positive
     of Zero(bool), float_1: float_1
     of float_1, Zero(bool): float_1
-    of Finite(bool_1, z_1, z_2), Finite(bool_2, z_3, z_4):
+    of Finite(bool_1, n_1, z_1), Finite(bool_2, n_2, z_2):
       # align the exponents, then add, then normalize the result
-      let exp = min(z_2, z_4)
+      let exp = min(z_1, z_2)
       normalize(
-        opp(bool_1, align(z_1, z_2, exp)) + opp(bool_2, align(z_3, z_4, exp)),
+        opp(bool_1, align(n_1, z_1, exp)) + opp(bool_2, align(n_2, z_2, exp)),
         exp, false)
 
   func floatSub(a, b: float) -> float =
@@ -836,12 +829,11 @@ const lang* = language:
       # 0 - f inverts the sign of f
       Finite(not bool_1, n_1, z_1)
     of float_1, Zero(bool): float_1
-    of Finite(bool_1, z_1, z_2), Finite(bool_2, z_3, z_4):
+    of Finite(bool_1, n_1, z_1), Finite(bool_2, n_2, z_2):
       # align the exponents, then subtract, then normalize the result
-      let exp = min(z_2, z_4)
+      let exp = min(z_1, z_2)
       normalize(
-        opp(bool_1, align(z_1, z_2, exp)) -
-          opp(bool_2, align(z_3, z_4, exp)),
+        opp(bool_1, align(n_1, z_1, exp)) - opp(bool_2, align(n_2, z_2, exp)),
         exp, false)
 
   func floatCmp(a, b: float) -> option =
