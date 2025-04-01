@@ -20,13 +20,38 @@ proc eat(p: var SexpParser, tok: TTokKind) =
   if p.isTok(tok): p.next()
   else:            p.raiseError("expected " & $tok)
 
+proc fixup(p: var SexpParser): (TTokKind, string) =
+  ## The sexp tokenizer tokenizes '-' as an int... This procedure makes sure
+  ## the correct token is lexed.
+  if p.currToken == tkInt and (p.currString == "-" or p.currString == "+"):
+    # could be an identifier or float (like -inf or +inf)
+    var str = captureCurrString(p)
+    p.next()
+    case p.currToken
+    of tkSymbol:
+      # treat as a float
+      str.add p.currString
+      (tkFloat, str)
+    of tkSpace:
+      # treat as a symbol
+      (tkSymbol, str)
+    else:
+      p.raiseError("")
+  else:
+    (p.currToken, captureCurrString(p))
+
 proc parseLeaf[T](p: var SexpParser, lit: var Literals, kind: T): TreeNode[T] =
   mixin fromSexp
   case p.currToken
   of tkParensRi:
     result = fromSexp(kind)
   of tkInt:
-    result = fromSexp(kind, parseBiggestInt(p.currString), lit)
+    let (tok, str) = p.fixup()
+    if tok == tkFloat:
+      result = fromSexp(kind, parseFloat(str), lit)
+    else:
+      # try to parse as an int otherwise (even if it's not an int)
+      result = fromSexp(kind, parseBiggestInt(str), lit)
     p.next()
   of tkFloat, tkSymbol:
     # symbols are also treated as floats (so that "nan" and "inf" are
@@ -61,22 +86,23 @@ proc parseSexp*[T](str: string, lit: var Literals): seq[TreeNode[T]] =
   while true:
     p.space()
 
-    case p.currToken
+    let (tok, str) = p.fixup()
+    case tok
     of tkInt:
       incLen()
-      result.add fromSexp(T, parseBiggestInt(p.currString), lit)
+      result.add fromSexp(T, parseBiggestInt(str), lit)
       p.next()
     of tkFloat:
       incLen()
-      result.add fromSexp(T, parseFloat(p.currString), lit)
+      result.add fromSexp(T, parseFloat(str), lit)
       p.next()
     of tkString:
       incLen()
-      result.add fromSexp(T, captureCurrString(p), lit)
+      result.add fromSexp(T, str, lit)
       p.next()
     of tkSymbol:
       incLen()
-      result.add fromSexpSym(T, captureCurrString(p), lit)
+      result.add fromSexpSym(T, str, lit)
       p.next()
     of tkParensLe:
       if p.getTok() != tkSymbol:
