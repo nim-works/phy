@@ -764,7 +764,7 @@ const lang* = language:
         if e_2 <= (emax - prec): Finite(sx, z_1, e_2)
         else: Inf(sx)
 
-  func binaryRound(s: bool, m, exp: z) -> float =
+  func binaryRound(s: bool, m: n, exp: z) -> float =
     let z_3 = fexp(digit2(m) + exp)
     let z_1 = align(m, exp, z_3)
     let exp_1 = min(exp, z_3)
@@ -776,7 +776,7 @@ const lang* = language:
     case m
     of 0: Zero(szero)
     else:
-      if m < 0: binaryRound(true, m, exp)
+      if m < 0: binaryRound(true, neg(m), exp)
       else:     binaryRound(false, m, exp)
 
   func floatAdd(a, b: float) -> float =
