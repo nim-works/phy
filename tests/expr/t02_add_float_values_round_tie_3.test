@@ -1,0 +1,5 @@
+discard """
+  description: "Addition rounds towards the nearest value, to even on a tie"
+  output: "-9007199254740992.0 : (FloatTy)"
+"""
+(Call (Ident "+") (FloatVal -9007199254740992.0) (FloatVal -1.0))
