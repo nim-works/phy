@@ -706,15 +706,28 @@ const lang* = language:
 
   func even(a: n) -> bool = same(a mod 2, 0)
 
-  func shr1Int(a: z) -> z =
-    trunc(a / 2) # shifting right by 1 is the same as dividing by two
-
   func digit2(a : n) -> n =
     ## Computes the 1-based position of the most-significant bit.
     case a
     of 0: 0
     of 1: 1
-    else: digit2(shr1Int(a)) + 1
+    else:
+      # note: only the shift-by-1 branch is needed for correct operation -- the
+      # others are only an optimization
+      if 2^32 <= a:
+        digit2(trunc(a / (2^32))) + 32
+      else:
+        if 2^16 <= a:
+          digit2(trunc(a / (2^16))) + 16
+        else:
+          if 2^8 <= a:
+            digit2(trunc(a / (2^8))) + 8
+          else:
+            if 2^4 <= a:
+              digit2(trunc(a / (2^4))) + 4
+            else:
+              # shift right by 1
+              digit2(trunc(a / 2)) + 1
 
   func orb(a, b: bool) -> bool =
     ## Boolean or operator.
