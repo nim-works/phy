@@ -677,29 +677,10 @@ const lang* = language:
     of true:  neg(v)
     of false: v
 
-  typ location:
-    Exact
-    Inexact(equality)
-
-  # TODO: make the floating-point operators generic over formats by
-  #       making the below two defs parameters of the operators
-  def emax, 1024
-  def prec, 53
-
-  func align(mx: n, ex, ey: z) -> n =
-    ## Returns `my` such that `my*(2^ey) = mx*(2^ex)`, when ey < ex.
-    if ey < ex:
-      mx * (2 ^ (ex - ey))
-    else:
-      mx
-
   func min(a, b: z) -> z =
     if a < b: a else: b
   func max(a, b: z) -> z =
     if a < b: b else: a
-
-  func fexp(exp: z) -> z =
-    max(exp - prec, 3 - emax - prec)
 
   func even(a: n) -> bool = same(a mod 2, 0)
 
@@ -725,6 +706,25 @@ const lang* = language:
             else:
               # shift right by 1
               digit2(trunc(a / 2)) + 1
+
+  # TODO: make the floating-point operators generic over formats by
+  #       making the below two defs parameters of the operators
+  def emax, 1024
+  def prec, 53
+
+  func fexp(exp: z) -> z =
+    max(exp - prec, 3 - emax - prec)
+
+  func align(mx: n, ex, ey: z) -> n =
+    ## Returns `my` such that `my*(2^ey) = mx*(2^ex)`, when ey < ex.
+    if ey < ex:
+      mx * (2 ^ (ex - ey))
+    else:
+      mx
+
+  typ location:
+    Exact
+    Inexact(equality)
 
   func toLocation(f: r) -> location =
     if same(f, 0.0):   Exact
