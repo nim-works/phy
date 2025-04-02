@@ -296,7 +296,7 @@ const lang* = language:
     # of types
     case list
     of [typ_1, *typ_2]:
-      if typ_1 in typ_2:
+      if contains(typ_2, typ_1):
         # it's a duplicate; skip
         unionOfAux(typ_2, accum)
       else:
