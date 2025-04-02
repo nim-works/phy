@@ -3,11 +3,11 @@
 ## makes sure the reference implementation works as expected.
 
 import
-  std/[os, strutils, strscans, streams, parsecfg, options],
+  std/[os, strutils, strscans, streams, parsecfg, options, math],
   languages/source,
   passes/[syntax_source, trees],
   phy/tree_parser,
-  spec/[interpreter, langdefs, rationals]
+  spec/[bignums, interpreter, langdefs, rationals]
 
 import spec/types except Node
 
@@ -31,8 +31,6 @@ const
        files: {:}))
     ## the initial dynamic context to pass to `cstep`
   issues = [ # tests that are currently expected to fail
-    "t02_add_float_values.test",
-    "t02_sub_float_values.test",
     "t04_empty_module.test",
     "t04_proc_declaration.test",
     "t04_type_declaration.test",
@@ -137,28 +135,63 @@ proc parseSpec(spec: sink string, path: string): TestSpec =
 
   parser.close()
 
+template sym(s: string): Node = Node(kind: nkSymbol, sym: s)
+
+proc convertFloat(f: float): Node =
+  ## Converts a floating-point value to the representation used by the
+  ## specification (refer to to the `float` type in ``source.nim``).
+  # 1-bit sign, 11-bit biased exponent, 52-bit mantissa
+  const Bias = 1022 + 53
+  case classify(f)
+  of fcNormal:
+    let
+      bits = cast[uint64](f)
+      exp = int((bits shr 52) and 0x7FF) - Bias # unbias the exponent
+      m = (bits and 0xF_FFFF_FFFF_FFFF'u64) + (1 shl 52) # add the implied bit
+      s = if f < 0.0: Node(kind: nkTrue) else: Node(kind: nkFalse)
+    tree(nkConstr, sym("Finite"), s,
+      Node(kind: nkNumber, num: rational(m)),
+      Node(kind: nkNumber, num: rational(exp)))
+  of fcSubnormal:
+    let
+      bits = cast[uint64](f)
+      exp = -1074
+      m = (bits and 0xF_FFFF_FFFF_FFFF'u64) # no implied bit
+      s = if f < 0.0: Node(kind: nkTrue) else: Node(kind: nkFalse)
+    tree(nkConstr, sym("Finite"), s,
+      Node(kind: nkNumber, num: rational(m)),
+      Node(kind: nkNumber, num: rational(exp)))
+  of fcZero:
+    tree(nkConstr, sym("Zero"), Node(kind: nkFalse))
+  of fcNegZero:
+    tree(nkConstr, sym("Zero"), Node(kind: nkTrue))
+  of fcNan:
+    tree(nkConstr, sym("Nan"))
+  of fcInf:
+    tree(nkConstr, sym("Inf"), Node(kind: nkFalse))
+  of fcNegInf:
+    tree(nkConstr, sym("Inf"), Node(kind: nkTrue))
+
 proc convert(tree: PackedTree[syntax_source.NodeKind], n: NodeIndex): Node =
   ## Converts the packed-tree representation to the semantically equivalent
   ## meta-language representation.
   case tree[n].kind
   of IntVal:
     tree(nkConstr,
-      Node(kind: nkSymbol, sym: "IntVal"),
+      sym("IntVal"),
       Node(kind: nkNumber, num: rational(tree.getInt(n))))
   of FloatVal:
-    # TODO: +/-inf and +/-nan need to be handled properly. This first requires
-    #       proper support for both in the reference implementation
     tree(nkConstr,
-      Node(kind: nkSymbol, sym: "FloatVal"),
-      Node(kind: nkNumber, num: rational(tree.getFloat(n))))
+      sym("FloatVal"),
+      convertFloat(tree.getFloat(n)))
   of Ident:
     tree(nkConstr,
-      Node(kind: nkSymbol, sym: "Ident"),
+      sym("Ident"),
       Node(kind: nkString, sym: tree.getString(n)))
   elif tree[n].kind.isAtom:
-    tree(nkConstr, Node(kind: nkSymbol, sym: $tree[n].kind))
+    tree(nkConstr, sym($tree[n].kind))
   else:
-    var r = tree(nkConstr, Node(kind: nkSymbol, sym: $tree[n].kind))
+    var r = tree(nkConstr, sym($tree[n].kind))
     for it in tree.items(n):
       r.add convert(tree, it)
     r
@@ -170,11 +203,24 @@ proc add(res: var string, n: Node) =
     if n[0].sym == "IntVal":
       res.add n[^1]
     elif n[0].sym == "FloatVal":
-      let tmp = $n[^1].num
-      res.add tmp
-      if '.' notin tmp:
-        # rendered float values must always contain a dot
-        res.add ".0"
+      res.add n[^1]
+    elif n[0].sym == "Inf":
+      if n[1].kind == nkTrue:
+        res.add "-inf"
+      else:
+        res.add "inf"
+    elif n[0].sym == "Nan":
+      res.add "nan"
+    elif n[0].sym == "Zero":
+      if n[1].kind == nkTrue:
+        res.add "-"
+      res.add "0.0"
+    elif n[0].sym == "Finite":
+      var tmp = float(n[2].num.toInt.toInt) *
+                pow(2, float(n[3].num.toInt.toInt))
+      if n[1].kind == nkTrue:
+        tmp = -tmp
+      res.addFloat tmp
     elif n[0].sym == "proc":
       res.add "(proc ...)"
     elif n[0].sym == "Ident":

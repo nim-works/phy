@@ -17,6 +17,24 @@ const lang* = language:
   alias n, z
   # TODO: remove `n` and use `z` directly. `n` usually refers to *natural*
   #       numbers, not *integer* numbers
+
+  typ equality:
+    Gt
+    Lt
+    Eq
+
+  typ option:
+    None
+    Some(equality)
+
+  typ float:
+    # IEEE-754.2008 binary64 float representation (without signed nans and nan
+    # payloads)
+    Nan
+    Inf(bool)
+    Zero(bool)
+    Finite(bool, n, z) # sign, significand, exponent
+
   typ ident: Ident(string)
   alias x, ident
   typ pattern:
@@ -31,7 +49,7 @@ const lang* = language:
   typ expr:
     Ident(string)
     IntVal(z)
-    FloatVal(r)
+    FloatVal(float)
     TupleCons(*expr)
     RecordCons(+Field(ident, expr))
     Seq(texpr, *expr)
@@ -101,7 +119,7 @@ const lang* = language:
   subtype val, e:
     # A value is an irreducible expression.
     IntVal(n)
-    FloatVal(r)
+    FloatVal(float)
     True
     False
     char(z)
@@ -337,7 +355,7 @@ const lang* = language:
 
   inductive types(inp C, inp e, out typ):
     axiom "S-int",   C, IntVal(n), IntTy()
-    axiom "S-float", C, FloatVal(r), FloatTy()
+    axiom "S-float", C, FloatVal(float), FloatTy()
     axiom "S-false", C, Ident("false"), BoolTy()
     axiom "S-true",  C, Ident("true"), BoolTy()
     axiom "S-unit",  C, TupleCons(), UnitTy()
@@ -726,34 +744,255 @@ const lang* = language:
     of n_1, 0: fail
     of n_1, n_2: n_1 - (n_2 * trunc(n_1 / n_2))
 
-  func floatAdd(a, b: r) -> r
-    ## XXX: not defined
-  func floatSub(a, b: r) -> r
-    ## XXX: not defined
-
-  func valEq(a, b: val) -> val =
-    if same(a, b):
-      True
+  func intCmp(a, b: z) -> equality =
+    ## Integer comparison.
+    if a < b: Lt
     else:
+      if same(a, b): Eq
+      else:          Gt
+
+  func opp(s: bool, v: z) -> z =
+    case s
+    of true:  neg(v)
+    of false: v
+
+  func min(a, b: z) -> z =
+    if a < b: a else: b
+  func max(a, b: z) -> z =
+    if a < b: b else: a
+
+  func even(a: n) -> bool = same(a mod 2, 0)
+
+  func digit2(a: n) -> n =
+    ## Computes the 1-based position of the most-significant bit.
+    case a
+    of 0: 0
+    of 1: 1
+    else:
+      # note: only the shift-by-1 branch is needed for correct operation -- the
+      # others are only an optimization
+      if 2^32 <= a:
+        digit2(trunc(a / (2^32))) + 32
+      else:
+        if 2^16 <= a:
+          digit2(trunc(a / (2^16))) + 16
+        else:
+          if 2^8 <= a:
+            digit2(trunc(a / (2^8))) + 8
+          else:
+            if 2^4 <= a:
+              digit2(trunc(a / (2^4))) + 4
+            else:
+              # shift right by 1
+              digit2(trunc(a / 2)) + 1
+
+  # TODO: make the floating-point operators generic over formats by
+  #       making the below two defs parameters of the operators
+  def emax, 1024
+  def prec, 53
+
+  func fexp(exp: z) -> z =
+    max(exp - prec, 3 - emax - prec)
+
+  func align(mx: n, ex, ey: z) -> n =
+    ## Returns `my` such that `my*(2^ey) = mx*(2^ex)`, when ey < ex.
+    if ey < ex:
+      mx * (2 ^ (ex - ey))
+    else:
+      mx
+
+  typ location:
+    Exact
+    Inexact(equality)
+
+  func toLocation(f: r) -> location =
+    if same(f, 0.0):   Exact
+    else:
+      if same(f, 0.5): Inexact(Eq)
+      else:
+        if f < 0.5:    Inexact(Lt)
+        else:          Inexact(Gt)
+
+  func fnormalize(mx: n, ex: z) -> (n, z, location) =
+    ## Right-shifts `mx` such that the most significant bit is at `prec`, if
+    ## possible. The resulting exponent stays in the [3-emax-prec, inf) range.
+    let shift = fexp(digit2(mx) + ex) - ex
+    if 0 < shift:
+      let shifted = mx / (2 ^ shift)
+      let i = trunc(shifted) # integer part of `shifted`
+      (i, ex + shift, toLocation(shifted - i))
+    else:
+      (mx, ex, Exact)
+
+  func roundNearestEven(mx: n, lx: location) -> n =
+    ## Implements the floating-point to-nearest, tie-to-even rounding
+    ## mode.
+    case lx
+    of Exact: mx
+    of Inexact(Lt): mx # round down
+    of Inexact(Eq):
+      if even(mx): mx else: (mx + 1) # tie; round to even
+    of Inexact(Gt):
+      mx + 1 # round up
+
+  func binaryRoundAux(sx: bool, mx: n, ex: z) -> float =
+    let (m_1, e_1, lx) = fnormalize(mx, ex) # normalize
+    let rnd = roundNearestEven(m_1, lx) # round
+    let (m_2, e_2, _) = fnormalize(rnd, e_1) # normalize `rnd`
+    case m_2
+    of 0: Zero(sx)
+    of z_1:
+      if z_1 < 0: Nan
+      else:
+        if e_2 <= (emax - prec): Finite(sx, z_1, e_2)
+        else: Inf(sx)
+
+  func binaryRound(s: bool, m: n, exp: z) -> float =
+    # if less, left-shift `m` such that its MSB is at `prec` before rounding
+    let exp_2 = fexp(digit2(m) + exp)
+    let m_2 = align(m, exp, exp_2)
+    let exp_3 = min(exp, exp_2)
+    binaryRoundAux(s, m_2, exp_3)
+
+  func normalize(m, exp: z, szero: bool) -> float =
+    ## Yields the closest possible floating point representation
+    ## for `m` and `exp` such that `f ~= m*(2^exp)`.
+    case m
+    of 0: Zero(szero)
+    else:
+      if m < 0: binaryRound(true, neg(m), exp)
+      else:     binaryRound(false, m, exp)
+
+  func floatAdd(a, b: float) -> float =
+    ## IEEE-754.2008 binary64 addition (with simplified nans).
+    case (a, b)
+    of Nan, _: Nan
+    of _, Nan: Nan
+    of Inf(bool_1), Inf(bool_2):
+      if same(bool_1, bool_2): Inf(bool_1)
+      else:                    Nan
+    of Inf(bool), _: a
+    of _, Inf(bool): b
+    of Zero(bool_1), Zero(bool_2):
+      if same(bool_1, bool_2):
+        a
+      else:
+        Zero(false) # negative + positive = positive
+    of Zero(bool), float_1: float_1
+    of float_1, Zero(bool): float_1
+    of Finite(bool_1, n_1, z_1), Finite(bool_2, n_2, z_2):
+      # align the exponents, then add, then normalize the result
+      let exp = min(z_1, z_2)
+      normalize(
+        opp(bool_1, align(n_1, z_1, exp)) + opp(bool_2, align(n_2, z_2, exp)),
+        exp, false)
+
+  func floatSub(a, b: float) -> float =
+    ## IEEE-754.2008 binary64 subtraction (with simplified nans).
+    case (a, b)
+    of Nan, _: Nan
+    of _, Nan: Nan
+    of Inf(bool_1), Inf(bool_2):
+      # -inf - inf = -inf
+      if same(bool_1, not bool_2): Inf(bool_1)
+      else:                        Nan
+    of Inf(bool), _: a
+    of _, Inf(bool): b
+    of Zero(bool_1), Zero(bool_2):
+      if same(bool_1, not bool_2):
+        a
+      else:
+        Zero(false)
+    of Zero(bool), Finite(bool_1, n_1, z_1):
+      # 0 - f inverts the sign of f
+      Finite(not bool_1, n_1, z_1)
+    of float_1, Zero(bool): float_1
+    of Finite(bool_1, n_1, z_1), Finite(bool_2, n_2, z_2):
+      # align the exponents, then subtract, then normalize the result
+      let exp = min(z_1, z_2)
+      normalize(
+        opp(bool_1, align(n_1, z_1, exp)) - opp(bool_2, align(n_2, z_2, exp)),
+        exp, false)
+
+  func floatCmp(a, b: float) -> option =
+    ## IEEE-754.2008 binary64 comparison.
+    case (a, b)
+    of Nan, _: None
+    of _, Nan: None
+    of Inf(bool_1), Inf(bool_2):
+      case (bool_1, bool_2)
+      of true, true:   Some(Eq)
+      of false, false: Some(Eq)
+      of true, false:  Some(Lt)
+      of false, true:  Some(Gt)
+    of Inf(bool_1), _:
+      if bool_1: Some(Lt) else: Some(Gt)
+    of _, Inf(bool_1):
+      if bool_1: Some(Gt) else: Some(Lt)
+    of Finite(bool_1, z, z), Zero(bool):
+      if bool_1: Some(Lt) else: Some(Gt)
+    of Zero(bool), Finite(bool_1, z, z):
+      if bool_1: Some(Lt) else: Some(Gt)
+    of Zero(bool), Zero(bool):
+      Some(Eq) # sign doesn't matter
+    of Finite(bool_1, n_1, z_1), Finite(bool_2, n_2, z_2):
+      case (bool_1, bool_2)
+      of true, false: Some(Lt)
+      of false, true: Some(Gt)
+      of false, false:
+        case intCmp(z_1, z_2)
+        of Lt: Some(Lt)
+        of Gt: Some(Gt)
+        of Eq: Some(intCmp(n_1, n_2))
+      of true, true:
+        case intCmp(z_1, z_2)
+        of Lt: Some(Gt)
+        of Gt: Some(Lt)
+        of Eq:
+          case intCmp(n_2, n_1)
+          of Lt: Some(Gt)
+          of Gt: Some(Lt)
+          of Eq: Some(Eq)
+
+  func asBool(b: bool) -> val =
+    case b
+    of true:  True
+    of false: False
+
+  func eq(a, b: val) -> val =
+    case (a, b)
+    of True, True:
+      True
+    of False, False:
+      True
+    of False, True:
       False
+    of True, False:
+      False
+    of IntVal(z_1), IntVal(z_2):
+      asBool same(intCmp(z_1, z_2), Eq)
+    of FloatVal(float_1), FloatVal(float_2):
+      asBool same(floatCmp(float_1, float_2), Some(Eq))
 
   func lt(a, b: val) -> val =
     case (a, b)
     of IntVal(n_1), IntVal(n_2):
-      if n_1 < n_2: True
-      else:         False
-    of FloatVal(r_1), FloatVal(r_2):
-      if r_1 < r_2: True
-      else:         False
+      asBool same(intCmp(n_1, n_2), Lt)
+    of FloatVal(float_1), FloatVal(float_2):
+      asBool same(floatCmp(float_1, float_2), Some(Lt))
 
-  func lessEqual(a, b: val) -> val =
-    if same(valEq(a, b), True):
-      True
-    else:
-      lt(a, b)
-
-  # TODO: the floating-point operations need to be defined according to the
-  #       IEEE 754.2008 standard
+  func leq(a, b: val) -> val =
+    case (a, b)
+    of IntVal(z_1), IntVal(z_2):
+      case intCmp(z_1, z_2)
+      of Lt: True
+      of Eq: True
+      of Gt: False
+    of FloatVal(float_1), FloatVal(float_2):
+      case floatCmp(float_1, float_2)
+      of Some(Lt): True
+      of Some(Eq): True
+      else:        False
 
   record DC, {locs: (z -> val),
               nloc: z,
@@ -939,17 +1178,17 @@ const lang* = language:
       conclusion Call(Ident("mod"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-add-float":
-      let r_3 = floatAdd(r_1, r_2)
-      conclusion Call(Ident("+"), FloatVal(r_1), FloatVal(r_2)), FloatVal(r_3)
+      let float_3 = floatAdd(float_1, float_2)
+      conclusion Call(Ident("+"), FloatVal(float_1), FloatVal(float_2)), FloatVal(float_3)
     rule "E-sub-float":
-      let r_3 = floatSub(r_1, r_2)
-      conclusion Call(Ident("-"), FloatVal(r_1), FloatVal(r_2)), FloatVal(r_3)
+      let float_3 = floatSub(float_1, float_2)
+      conclusion Call(Ident("-"), FloatVal(float_1), FloatVal(float_2)), FloatVal(float_3)
 
     rule "E-builtin-eq":
-      let val_3 = valEq(val_1, val_2)
+      let val_3 = eq(val_1, val_2)
       conclusion Call(Ident("=="), val_1, val_2), val_3
     rule "E-builtin-le":
-      let val_3 = lessEqual(val_1, val_2)
+      let val_3 = leq(val_1, val_2)
       conclusion Call(Ident("<="), val_1, val_2), val_3
     rule "E-builtin-lt":
       let val_3 = lt(val_1, val_2)

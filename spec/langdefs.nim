@@ -1753,6 +1753,7 @@ proc sem(body: NimNode): LangDef =
   c.builtin("<=", forall(1, fntype(tup(ratType, ratType), boolType)))
   c.builtin("<", forall(1, fntype(tup(ratType, ratType), boolType)))
   c.builtin("/", forall(1, fntype(tup(ratType, ratType), ratType)))
+  c.builtin("mod", fntype(tup(ratType, ratType), ratType))
   c.builtin("trunc", fntype(ratType, intType))
   c.builtin("^", forall(1, fntype(tup(tvar(0), intType), tvar(0))))
   c.builtin("*", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
