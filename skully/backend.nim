@@ -2806,8 +2806,12 @@ proc generateCode*(graph: ModuleGraph): PackedTree[NodeKind] =
 
   # --- run the MIR processing and translate the MIR code
   let config =
-    BackendConfig(noImported: true, # prefer not using FFI procedures
-                  tconfig: TranslationConfig(magicsToKeep: MagicsToKeep))
+    BackendConfig(
+      noImported: true, # prefer not using FFI procedures
+      tconfig: TranslationConfig(
+        magicsToKeep: MagicsToKeep,
+        options: {goTailCallElim}
+      ))
 
   var
     discovery: DiscoveryData

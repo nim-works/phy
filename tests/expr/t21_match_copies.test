@@ -1,0 +1,17 @@
+discard """
+  description: "
+    Modifications on the matched location don't reflect on the value bound
+    by the pattern.
+  "
+  output: "10 : (IntTy)"
+"""
+(Exprs
+  (Decl val (As 10 (UnionTy (IntTy) (UnitTy))))
+  (Match
+    val
+    (Rule (As x (IntTy))
+      (Exprs
+        (Asgn val 5)
+        x))
+    (Rule (As x (UnitTy))
+      2)))

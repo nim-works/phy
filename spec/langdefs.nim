@@ -873,7 +873,7 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
       call = Node(kind: nkCall)
       call.add callee
       let expect = numParams(sig)
-      if n.len - 1 > expect:
+      if n.len - 1 != expect:
         error(fmt"expected {expect} arguments, but got {n.len - 1}", n)
     else:
       error(fmt"expected something callable, got '{sig}'", n)
