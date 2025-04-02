@@ -34,7 +34,7 @@ jobs:
       matrix:
         target:
           - name: Linux
-            runner: ubuntu-20.04
+            runner: ubuntu-22.04
           - name: MacOS (M1)
             runner: macos-14
           - name: MacOS
