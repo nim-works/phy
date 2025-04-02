@@ -1,0 +1,13 @@
+discard """
+  description: "
+    A pattern's type must exactly match one of the union's types; it cannot be
+    a super-type.
+  "
+  reject: true
+"""
+(Match
+  (As 10 (UnionTy (IntTy) (UnitTy)))
+  (Rule (As x (UnionTy (IntTy) (FloatTy)))
+    1)
+  (Rule (As x (UnitTy))
+    2))

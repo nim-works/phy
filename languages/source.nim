@@ -19,6 +19,10 @@ const lang* = language:
   #       numbers, not *integer* numbers
   typ ident: Ident(string)
   alias x, ident
+  typ pattern:
+    As(x, texpr)
+  typ rule:
+    Rule(pattern, expr)
   typ eindex:
     # element index
     IntVal(z)
@@ -40,6 +44,7 @@ const lang* = language:
     Or(expr, expr)
     If(expr, expr, expr)
     If(expr, expr)
+    Match(expr, +rule)
     While(expr, expr)
     Return(expr)
     Return()
@@ -123,6 +128,8 @@ const lang* = language:
       Decl(ident_1, xfrm(e_1))
     of If(e_1, e_2, e_3):
       If(xfrm(e_1), xfrm(e_2), xfrm(e_3))
+    of Match(e_1, +Rule(As(x_1, texpr_1), e_2)):
+      Match(xfrm(e_1), ...Rule(As(x_1, texpr_1), xfrm(e_2)))
     of Call(+e_1):
       Call(...xfrm(e_1))
     of Asgn(e_1, e_2):
@@ -208,13 +215,7 @@ const lang* = language:
     case (a, b)
     of UnionTy(+typ_1), UnionTy(+typ_2):
       # equal set of types -> equivalent types
-      if (for typ_3 in typ_1: contains(typ_2, typ_3)):
-        if (for typ_3 in typ_2: contains(typ_1, typ_3)):
-          true
-        else:
-          false
-      else:
-        false
+      identical(typ_1, typ_2)
     of RecordTy(+Field(Ident(string_1), typ_1)),
        RecordTy(+Field(Ident(string_2), typ_2)):
       # equal fields -> equivalent type
@@ -259,6 +260,17 @@ const lang* = language:
       else:
         if b <: a: a
         else:      fail # no common type
+
+  func commonAll(list: *typ) -> typ =
+    ## Computes the closest common ancestor of all types in the list, or
+    ## fails, if there's no such type.
+    case list
+    of [typ_1, typ_2, +typ_3]:
+      common(common(typ_1, typ_2), commonAll(typ_3))
+    of [typ_1, typ_2]:
+      common(typ_1, typ_2)
+    of [typ_1]:
+      typ_1
 
   inductive ttypes(inp C, inp texpr, out typ):
     axiom "S-void-type",        C, VoidTy(),  VoidTy()
@@ -445,6 +457,18 @@ const lang* = language:
       let typ_3 = common(typ_1, typ_2)
       conclusion C_1, If(e_1, e_2, e_3), typ_3
 
+    rule "S-match":
+      premise mtypes(C_1, e_1, typ_1)
+      where UnionTy(+typ_2), typ_1
+      premise ...ttypes(C_1, texpr_1, typ_3)
+      condition uniqueTypes(typ_3)
+      condition identical(typ_2, typ_3)
+      condition ...(string_1 notin C_1.symbols)
+      let C_2 = ...(C_1 + C(symbols: {string_1 : typ_3}))
+      premise ...mtypes(C_2, e_2, typ_4)
+      let typ_5 = commonAll(typ_4)
+      conclusion C_1, Match(e_1, +Rule(As(Ident(string_1), texpr_1), e_2)), typ_5
+
     rule "S-while":
       premise mtypes(C_1, e_1, BoolTy())
       premise mtypes(C_1, e_2, typ_1)
@@ -624,6 +648,8 @@ const lang* = language:
       Let(ident_1, substitute(e_1, with), substitute(e_2, with))
     of If(e_1, e_2, e_3):
       If(substitute(e_1, with), substitute(e_2, with), substitute(e_3, with))
+    of Match(e_1, +Rule(As(x_1, texpr_1), e_2)):
+      Match(substitute(e_1, with), ...Rule(As(x_1, texpr_1), substitute(e_2, with)))
     of Call(+e_1):
       Call(...substitute(e_1, with))
     of Asgn(e_1, e_2):
@@ -771,6 +797,7 @@ const lang* = language:
     Call(*val, E, *e)
     Call(x, *val, E, *e)
     If(E, e, e)
+    Match(E, +rule)
     Let(x, E, e)
     Return(E)
 
@@ -793,6 +820,7 @@ const lang* = language:
     Call(*val, hole, *e)
     Call(x, *val, hole, *e)
     If(hole, e, e)
+    Match(hole, +rule)
     Let(x, hole, e)
     Return(hole)
 
@@ -817,6 +845,18 @@ const lang* = language:
     axiom "E-as", As(val_1, texpr), val_1 # a no-op
 
     axiom "E-while", While(e_1, e_2), If(e_1, Exprs(e_2, While(e_1, e_2)), TupleCons())
+
+    rule "E-match-success":
+      premise types(C(ret: VoidTy), val_1, typ_1)
+      condition typ_1 == texpr_1
+      conclusion Match(val_1, Rule(As(Ident(string_1), texpr_1), e_1), *any),
+                 substitute(e_1, {string_1 : val_1})
+
+    rule "E-match-next":
+      premise types(C(ret: VoidTy), val_1, typ_1)
+      condition typ_1 != texpr_1
+      conclusion Match(val_1, Rule(As(x, texpr_1), e), +rule_1),
+                 Match(val_1, ...rule_1)
 
     rule "E-tuple-access":
       where TupleCons(+val_3), val_1
@@ -1039,6 +1079,16 @@ const lang* = language:
       else:
         contains(typ_2, t)
     of _:
+      false
+
+  func identical(set_1, set_2: *typ) -> bool =
+    ## Treats the lists as sets and computes whether they're equal.
+    if (for a in set_1: contains(set_2, a)):
+      if (for a in set_2: contains(set_1, a)):
+        true
+      else:
+        false
+    else:
       false
 
   func mapContains(list: *(string, typ), p: (string, typ)) -> bool =
