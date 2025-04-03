@@ -1,0 +1,5 @@
+discard """
+  description: "Record fields cannot have type void"
+  reject: true
+"""
+(RecordCons (Field x (Unreachable)))

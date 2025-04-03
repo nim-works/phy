@@ -31,6 +31,7 @@ type
     ekType
     ekLocal
     ekParam
+    ekValue       ## a value bound to an identifier via a match pattern
 
   Entity = object
     kind: EntityKind
@@ -277,6 +278,20 @@ proc evalType(c; t; n: NodeIndex): SemType =
           discard "all good"
 
       tup
+  of RecordTy:
+    var rec = SemType(kind: tkRecord)
+    for it in t.items(n):
+      let
+        name = t.getString(t.child(it, 0))
+        elem = c.expectNot(evalType(c, t, t.child(it, 1)), tkVoid)
+        i = lowerBound(rec.fields, name,
+          proc(a, b: auto): int = cmp(a.name, b))
+      # important: keep the lexicographic order of the fields intact
+      if i >= rec.fields.len or rec.fields[i].name != name:
+        rec.fields.insert((name, elem), i)
+      else:
+        c.error("record type has a field with name '$1'" % [name])
+    rec
   of UnionTy:
     var list = newSeq[SemType]()
     for i, it in t.pairs(n):
@@ -343,6 +358,9 @@ proc typeToIL(c; typ: SemType): uint32 =
           c.types.add Node(kind: Immediate, val: off.uint32)
           c.types.add Node(kind: Type, val: it)
         off += paddedSize(typ.elems[i])
+  of tkRecord:
+    # records and tuples share the same translation logic
+    c.typeToIL(SemType(kind: tkTuple, elems: mapIt(typ.fields, it.typ)))
   of tkUnion:
     let args = mapIt(typ.elems, c.typeToIL(it))
     let inner = c.addType Union:
@@ -1104,6 +1122,9 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
     of ekParam:
       expr = newLocal(c.params[ent.id].local)
       result = c.params[ent.id].typ + {Lvalue}
+    of ekValue:
+      expr = newLocal(ent.id.uint32)
+      result = c.locals[ent.id] + {}
     of ekProc:
       # expand to a procedure address (`ProcVal`), which is always correct;
       # the callsite can turn it into a static reference (`Proc`) as needed
@@ -1221,6 +1242,38 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       # it's the unit value
       expr = UnitNode
       result = prim(tkUnit) + {}
+  of SourceKind.RecordCons:
+    var
+      typ = SemType(kind: tkRecord)
+      elems = newSeq[(string, Expr)]()
+
+    for it in t.items(n):
+      let
+        (nameN, elemN) = t.pair(it)
+        name = t.getString(nameN)
+
+      var e = c.exprToIL(t, elemN)
+      if e.typ.kind == tkVoid:
+        c.error("field type cannot be void")
+        # turn into an error expression:
+        e.typ = errorType()
+        e.expr = IrNode(kind: None)
+
+      if find(typ, name) != -1:
+        c.error("record already has field with name " & name)
+      else:
+        # make sure to keep the lexicographic order
+        typ.fields.insert((name, e.typ), lowerBound(typ.fields, name,
+          proc(a: auto, b: auto): int = cmp(a.name, b)))
+
+      elems.add (name, e)
+
+    expr = c.newTemp(typ)
+
+    for (name, elem) in elems.items:
+      stmts.add newAsgn(newFieldExpr(expr, find(typ, name)), c.use(elem, stmts))
+
+    result = typ + {}
   of SourceKind.Seq:
     if t[n, 0].kind == SourceKind.StringVal:
       # it's a string constructor
@@ -1306,12 +1359,28 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       tup = c.exprToIL(t, a)
     case tup.typ.kind
     of tkTuple:
-      let idx = t.getInt(b)
-      if idx >= 0 and idx < tup.typ.elems.len:
-        result = tup.typ.elems[idx] + tup.attribs
-        expr = newFieldExpr(inlineLvalue(c, tup, stmts), idx.int)
+      if t[b].kind == SourceKind.IntVal:
+        let idx = t.getInt(b)
+        if idx >= 0 and idx < tup.typ.elems.len:
+          result = tup.typ.elems[idx] + tup.attribs
+          expr = newFieldExpr(inlineLvalue(c, tup, stmts), idx.int)
+        else:
+          c.error("tuple has no element with index " & $idx)
+          result = errorType() + {Lvalue, Mutable}
       else:
-        c.error("tuple has no element with index " & $idx)
+        c.error("field selector must be an immediate integer")
+        result = errorType() + {Lvalue, Mutable}
+    of tkRecord:
+      if t[b].kind == SourceKind.Ident:
+        let idx = find(tup.typ, t.getString(b))
+        if idx >= 0:
+          result = tup.typ.fields[idx].typ + tup.attribs
+          expr = newFieldExpr(inlineLvalue(c, tup, stmts), idx.int)
+        else:
+          c.error("record has no field with name '$1'" % [t.getString(b)])
+          result = errorType() + {Lvalue, Mutable}
+      else:
+        c.error("field selector must be an identifier")
         result = errorType() + {Lvalue, Mutable}
     of tkError:
       result = tup.typ + {}
@@ -1411,6 +1480,82 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
   of SourceKind.Unreachable:
     stmts.add newUnreachable()
     result = prim(tkVoid) + {}
+  of SourceKind.Match:
+    var e = c.exprToIL(t, t.child(n, 0))
+    if e.typ.kind notin {tkUnion, tkError}:
+      c.error("expression must be of union type")
+      e.typ = errorType()
+
+    var
+      got = newSeq[SemType]() ## the handled types
+      handlers = newSeq[tuple[local: IrNode, body: Expr]]()
+      res = prim(tkVoid) # start with the bottom type
+
+    # the type of the Match expression is the least upper bound between all
+    # handlers. Thus, analysis has to happen in two passes: the first one
+    # analyses all handlers, and the second one does the fitting and generates
+    # the dispatcher
+    for it in t.items(n, 1):
+      let
+        (pat, bodyNode) = t.pair(it)
+        typ = c.expectNot(c.evalType(t, t.child(pat, 1)), tkVoid)
+        at = lowerBound(got, typ, cmp)
+
+      c.openScope()
+      let name {.cursor.} = t.getString(t.child(pat, 0))
+      if c.lookup(name).kind != ekNone:
+        c.error("redeclaration of '$1'" % [name])
+      let tmp = c.newTemp(typ)
+      c.addDecl(name, Entity(kind: ekValue, id: tmp.id.int))
+      let body = c.exprToIL(t, bodyNode)
+      c.closeScope()
+
+      let newResult = commonType(res, body.typ)
+      if tkError notin {res.kind, body.typ.kind} and
+         newResult.kind == tkError:
+        c.error("'$1' and '$2' cannot be unified into a single type" %
+                [$res, $body.typ])
+      res = newResult
+
+      if at >= got.len or got[at] != typ:
+        got.insert typ, at
+        handlers.add (tmp, body)
+      else:
+        c.error("duplicate handler for '$1'" % [$typ])
+
+    expr = c.newTemp(res)
+
+    # second pass:
+    if e.typ.kind == tkUnion:
+      let target = capture(c, e, stmts) ## the union to match against
+      var handled: int
+      # XXX: the IL require the selector expression for a case statement to
+      #      be a simple expression (which a field expression is not), hence
+      #      the intermediate temporary
+      let sel = c.newTemp(prim(tkInt))
+      stmts.add newAsgn(sel, newFieldExpr(target, 0))
+      var caseStmt = newCase(c.typeToIL(prim(tkInt)), sel)
+      for i, it in handlers.pairs:
+        let idx = e.typ.elems.find(c.locals[it.local.id])
+        if idx != -1:
+          var body = IrNode(kind: Stmts)
+          body.add newAsgn(it.local, newFieldExpr(newFieldExpr(target, 1), idx))
+          body.add wrap(c, c.fitExpr(it.body, res), expr).children
+          caseStmt.add newChoice(newIntVal(idx), body)
+          inc handled
+        else:
+          c.error("'$1' is not part of '$2'" %
+                  [$c.locals[it.local.id], $e.typ])
+
+      if handled != e.typ.elems.len:
+        # not all types in the union have a matching handler
+        for it in e.typ.elems.items:
+          if find(got, it) == -1:
+            c.error("a matcher for '$1' is missing" % [$it])
+
+      stmts.add caseStmt
+
+    result = res + {}
   of SourceKind.Exprs:
     let last = t.len(n) - 1
     var seenVoidExpr = false

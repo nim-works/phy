@@ -1,0 +1,7 @@
+discard """
+  description: "Identifiers used for field name don't conflict with decl names"
+  output: "(RecordCons (Field x 1)) : (RecordTy (Field x (IntTy)))"
+"""
+(Exprs
+  (Decl x 1)
+  (RecordCons (Field x x)))

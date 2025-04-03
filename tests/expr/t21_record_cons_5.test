@@ -1,0 +1,4 @@
+discard """
+  output: "(RecordCons (Field x 1) (Field y 2)) : (RecordTy (Field x (IntTy)) (Field y (IntTy)))"
+"""
+(RecordCons (Field x 1) (Field y 2))

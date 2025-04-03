@@ -1,0 +1,4 @@
+discard """
+  output: "-inf : (FloatTy)"
+"""
+(Call (Ident "+") (FloatVal 1.0) (FloatVal -inf))

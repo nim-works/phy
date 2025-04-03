@@ -17,23 +17,52 @@ const lang* = language:
   alias n, z
   # TODO: remove `n` and use `z` directly. `n` usually refers to *natural*
   #       numbers, not *integer* numbers
+
+  typ equality:
+    Gt
+    Lt
+    Eq
+
+  typ option:
+    None
+    Some(equality)
+
+  typ float:
+    # IEEE-754.2008 binary64 float representation (without signed nans and nan
+    # payloads)
+    Nan
+    Inf(bool)
+    Zero(bool)
+    Finite(bool, n, z) # sign, significand, exponent
+
   typ ident: Ident(string)
   alias x, ident
+  typ pattern:
+    As(x, texpr)
+  typ rule:
+    Rule(pattern, expr)
+  typ eindex:
+    # element index
+    IntVal(z)
+    Ident(string)
+
   typ expr:
     Ident(string)
     IntVal(z)
-    FloatVal(r)
+    FloatVal(float)
     TupleCons(*expr)
+    RecordCons(+Field(ident, expr))
     Seq(texpr, *expr)
     Seq(StringVal(string))
     Call(+expr)
-    FieldAccess(expr, IntVal(z))
+    FieldAccess(expr, eindex)
     At(expr, expr)
     As(expr, texpr)
     And(expr, expr)
     Or(expr, expr)
     If(expr, expr, expr)
     If(expr, expr)
+    Match(expr, +rule)
     While(expr, expr)
     Return(expr)
     Return()
@@ -53,10 +82,12 @@ const lang* = language:
     `proc`(typ, *[x, typ], e)
 
     With(e, n, e) # return a tuple/array value with the n-th element replaced
+    With(e, string, e)
     Frame(typ, e) # a special expression for assisting with evaluation
 
   alias e, expr
 
+  typ fieldDecl: Field(ident, texpr)
   typ texpr:
     Ident(string)
     VoidTy()
@@ -69,6 +100,7 @@ const lang* = language:
     UnionTy(+texpr)
     ProcTy(+texpr)
     SeqTy(texpr)
+    RecordTy(+fieldDecl)
 
     # type expressions not available at the source level
     mut(texpr)
@@ -87,18 +119,19 @@ const lang* = language:
   subtype val, e:
     # A value is an irreducible expression.
     IntVal(n)
-    FloatVal(r)
+    FloatVal(float)
     True
     False
     char(z)
     `array`(*val)
     TupleCons(*val) # an empty tuple is also a valid value (i.e., unit)
+    RecordCons(+Field(x, val))
     `proc`(typ, *[x, typ], e)
 
   subtype le, e:
     # Lvalue expression with all non-lvalue operands already evaluated.
     loc(z)
-    FieldAccess(le, IntVal(n))
+    FieldAccess(le, eindex)
     At(le, IntVal(n))
 
   func update(a: expr, xfrm: e -> e) -> expr =
@@ -113,16 +146,20 @@ const lang* = language:
       Decl(ident_1, xfrm(e_1))
     of If(e_1, e_2, e_3):
       If(xfrm(e_1), xfrm(e_2), xfrm(e_3))
+    of Match(e_1, +Rule(As(x_1, texpr_1), e_2)):
+      Match(xfrm(e_1), ...Rule(As(x_1, texpr_1), xfrm(e_2)))
     of Call(+e_1):
       Call(...xfrm(e_1))
     of Asgn(e_1, e_2):
       Asgn(xfrm(e_1), xfrm(e_2))
     of TupleCons(*e_1):
       TupleCons(...xfrm(e_1))
+    of RecordCons(+Field(x_1, e_1)):
+      RecordCons(...Field(x_1, xfrm(e_1)))
     of Seq(texpr_1, *e_1):
       Seq(texpr_1, ...xfrm(e_1))
-    of FieldAccess(e_1, IntVal(z_1)):
-      FieldAccess(xfrm(e_1), IntVal(z_1))
+    of FieldAccess(e_1, eindex_1):
+      FieldAccess(xfrm(e_1), eindex_1)
     of At(e_1, e_2):
       At(xfrm(e_1), xfrm(e_2))
     of As(e_1, texpr_1):
@@ -192,11 +229,18 @@ const lang* = language:
       conclusion typ_1, UnionTy(+typ_2)
 
   func `==`(a, b: typ) -> bool =
-    ## Except for union types, all type equality uses *structural equality*.
+    ## Type equality.
     case (a, b)
     of UnionTy(+typ_1), UnionTy(+typ_2):
-      if (for typ_3 in typ_1: contains(typ_2, typ_3)):
-        if (for typ_3 in typ_2: contains(typ_1, typ_3)):
+      # equal set of types -> equivalent types
+      identical(typ_1, typ_2)
+    of RecordTy(+Field(Ident(string_1), typ_1)),
+       RecordTy(+Field(Ident(string_2), typ_2)):
+      # equal fields -> equivalent type
+      let m_1 = zip(string_1, typ_1)
+      let m_2 = zip(string_2, typ_2)
+      if (for it in m_1: mapContains(m_2, it)):
+        if (for it in m_2: mapContains(m_1, it)):
           true
         else:
           false
@@ -235,6 +279,17 @@ const lang* = language:
         if b <: a: a
         else:      fail # no common type
 
+  func commonAll(list: *typ) -> typ =
+    ## Computes the closest common ancestor of all types in the list, or
+    ## fails, if there's no such type.
+    case list
+    of [typ_1, typ_2, +typ_3]:
+      common(common(typ_1, typ_2), commonAll(typ_3))
+    of [typ_1, typ_2]:
+      common(typ_1, typ_2)
+    of [typ_1]:
+      typ_1
+
   inductive ttypes(inp C, inp texpr, out typ):
     axiom "S-void-type",        C, VoidTy(),  VoidTy()
     axiom "S-unit-type",        C, UnitTy(),  UnitTy()
@@ -253,6 +308,13 @@ const lang* = language:
       premise ...ttypes(C_1, texpr_1, typ_1)
       condition ...(typ_1 != VoidTy())
       conclusion C_1, TupleTy(+texpr_1), TupleTy(...typ_1)
+
+    rule "S-record-type":
+      premise ...ttypes(C_1, texpr_1, typ_1)
+      condition ...(typ_1 != VoidTy())
+      condition unique(string_1)
+      conclusion C_1, RecordTy(+Field(Ident(string_1), texpr_1)),
+                      RecordTy(...Field(Ident(string_1), typ_1))
 
     rule "S-union-type":
       premise ...ttypes(C_1, texpr_1, typ_1)
@@ -315,7 +377,7 @@ const lang* = language:
 
   inductive types(inp C, inp e, out typ):
     axiom "S-int",   C, IntVal(n), IntTy()
-    axiom "S-float", C, FloatVal(r), FloatTy()
+    axiom "S-float", C, FloatVal(float), FloatTy()
     axiom "S-false", C, Ident("false"), BoolTy()
     axiom "S-true",  C, Ident("true"), BoolTy()
     axiom "S-unit",  C, TupleCons(), UnitTy()
@@ -333,6 +395,13 @@ const lang* = language:
       premise ...mtypes(C_1, e_1, typ_1)
       condition ...(typ_1 != VoidTy())
       conclusion C_1, TupleCons(+e_1), TupleTy(...typ_1)
+
+    rule "S-record":
+      premise ...mtypes(C_1, e_1, typ_1)
+      condition ...(typ_1 != VoidTy())
+      condition unique(string_1)
+      conclusion C_1, RecordCons(+Field(Ident(string_1), e_1)),
+                      RecordTy(...Field(Ident(string_1), typ_1))
 
     rule "S-seq-cons":
       premise ttypes(C_1, texpr_1, typ_1)
@@ -362,6 +431,18 @@ const lang* = language:
       where TupleTy(+typ_3), typ_1
       where typ_2, typ_3[n_1]
       conclusion C_1, FieldAccess(e_1, IntVal(n_1)), mut(typ_2)
+
+    rule "S-rec-field":
+      premise types(C_1, e_1, typ_1)
+      where RecordTy(+Field(Ident(string_2), typ_2)), typ_1
+      where typ_3, map(zip(string_2, typ_2))(string_1)
+      conclusion C_1, FieldAccess(e_1, Ident(string_1)), typ_3
+
+    rule "S-mut-rec-field":
+      premise types(C_1, e_1, mut(typ_1))
+      where RecordTy(+Field(Ident(string_2), typ_2)), typ_1
+      where typ_3, map(zip(string_2, typ_2))(string_1)
+      conclusion C_1, FieldAccess(e_1, Ident(string_1)), mut(typ_3)
 
     rule "S-at":
       premise types(C_1, e_1, typ_1)
@@ -420,6 +501,18 @@ const lang* = language:
       premise mtypes(C_1, e_3, typ_2)
       let typ_3 = common(typ_1, typ_2)
       conclusion C_1, If(e_1, e_2, e_3), typ_3
+
+    rule "S-match":
+      premise mtypes(C_1, e_1, typ_1)
+      where UnionTy(+typ_2), typ_1
+      premise ...ttypes(C_1, texpr_1, typ_3)
+      condition uniqueTypes(typ_3)
+      condition identical(typ_2, typ_3)
+      condition ...(string_1 notin C_1.symbols)
+      let C_2 = ...(C_1 + C(symbols: {string_1 : typ_3}))
+      premise ...mtypes(C_2, e_2, typ_4)
+      let typ_5 = commonAll(typ_4)
+      conclusion C_1, Match(e_1, +Rule(As(Ident(string_1), texpr_1), e_2)), typ_5
 
     rule "S-while":
       premise mtypes(C_1, e_1, BoolTy())
@@ -600,16 +693,20 @@ const lang* = language:
       Let(ident_1, substitute(e_1, with), substitute(e_2, with))
     of If(e_1, e_2, e_3):
       If(substitute(e_1, with), substitute(e_2, with), substitute(e_3, with))
+    of Match(e_1, +Rule(As(x_1, texpr_1), e_2)):
+      Match(substitute(e_1, with), ...Rule(As(x_1, texpr_1), substitute(e_2, with)))
     of Call(+e_1):
       Call(...substitute(e_1, with))
     of Asgn(e_1, e_2):
       Asgn(substitute(e_1, with), substitute(e_2, with))
     of TupleCons(*e_1):
       TupleCons(...substitute(e_1, with))
+    of RecordCons(+Field(x_1, e_1)):
+      RecordCons(...Field(x_1, substitute(e_1, with)))
     of Seq(texpr_1, *e_1):
       Seq(texpr_1, ...substitute(e_1, with))
-    of FieldAccess(e_1, IntVal(z_1)):
-      FieldAccess(substitute(e_1, with), IntVal(z_1))
+    of FieldAccess(e_1, eindex_1):
+      FieldAccess(substitute(e_1, with), eindex_1)
     of At(e_1, e_2):
       At(substitute(e_1, with), substitute(e_2, with))
     of As(e_1, texpr_1):
@@ -674,34 +771,255 @@ const lang* = language:
     of n_1, 0: fail
     of n_1, n_2: n_1 - (n_2 * trunc(n_1 / n_2))
 
-  func floatAdd(a, b: r) -> r
-    ## XXX: not defined
-  func floatSub(a, b: r) -> r
-    ## XXX: not defined
-
-  func valEq(a, b: val) -> val =
-    if same(a, b):
-      True
+  func intCmp(a, b: z) -> equality =
+    ## Integer comparison.
+    if a < b: Lt
     else:
+      if same(a, b): Eq
+      else:          Gt
+
+  func opp(s: bool, v: z) -> z =
+    case s
+    of true:  neg(v)
+    of false: v
+
+  func min(a, b: z) -> z =
+    if a < b: a else: b
+  func max(a, b: z) -> z =
+    if a < b: b else: a
+
+  func even(a: n) -> bool = same(a mod 2, 0)
+
+  func digit2(a: n) -> n =
+    ## Computes the 1-based position of the most-significant bit.
+    case a
+    of 0: 0
+    of 1: 1
+    else:
+      # note: only the shift-by-1 branch is needed for correct operation -- the
+      # others are only an optimization
+      if 2^32 <= a:
+        digit2(trunc(a / (2^32))) + 32
+      else:
+        if 2^16 <= a:
+          digit2(trunc(a / (2^16))) + 16
+        else:
+          if 2^8 <= a:
+            digit2(trunc(a / (2^8))) + 8
+          else:
+            if 2^4 <= a:
+              digit2(trunc(a / (2^4))) + 4
+            else:
+              # shift right by 1
+              digit2(trunc(a / 2)) + 1
+
+  # TODO: make the floating-point operators generic over formats by
+  #       making the below two defs parameters of the operators
+  def emax, 1024
+  def prec, 53
+
+  func fexp(exp: z) -> z =
+    max(exp - prec, 3 - emax - prec)
+
+  func align(mx: n, ex, ey: z) -> n =
+    ## Returns `my` such that `my*(2^ey) = mx*(2^ex)`, when ey < ex.
+    if ey < ex:
+      mx * (2 ^ (ex - ey))
+    else:
+      mx
+
+  typ location:
+    Exact
+    Inexact(equality)
+
+  func toLocation(f: r) -> location =
+    if same(f, 0.0):   Exact
+    else:
+      if same(f, 0.5): Inexact(Eq)
+      else:
+        if f < 0.5:    Inexact(Lt)
+        else:          Inexact(Gt)
+
+  func fnormalize(mx: n, ex: z) -> (n, z, location) =
+    ## Right-shifts `mx` such that the most significant bit is at `prec`, if
+    ## possible. The resulting exponent stays in the [3-emax-prec, inf) range.
+    let shift = fexp(digit2(mx) + ex) - ex
+    if 0 < shift:
+      let shifted = mx / (2 ^ shift)
+      let i = trunc(shifted) # integer part of `shifted`
+      (i, ex + shift, toLocation(shifted - i))
+    else:
+      (mx, ex, Exact)
+
+  func roundNearestEven(mx: n, lx: location) -> n =
+    ## Implements the floating-point to-nearest, tie-to-even rounding
+    ## mode.
+    case lx
+    of Exact: mx
+    of Inexact(Lt): mx # round down
+    of Inexact(Eq):
+      if even(mx): mx else: (mx + 1) # tie; round to even
+    of Inexact(Gt):
+      mx + 1 # round up
+
+  func binaryRoundAux(sx: bool, mx: n, ex: z) -> float =
+    let (m_1, e_1, lx) = fnormalize(mx, ex) # normalize
+    let rnd = roundNearestEven(m_1, lx) # round
+    let (m_2, e_2, _) = fnormalize(rnd, e_1) # normalize `rnd`
+    case m_2
+    of 0: Zero(sx)
+    of z_1:
+      if z_1 < 0: Nan
+      else:
+        if e_2 <= (emax - prec): Finite(sx, z_1, e_2)
+        else: Inf(sx)
+
+  func binaryRound(s: bool, m: n, exp: z) -> float =
+    # if less, left-shift `m` such that its MSB is at `prec` before rounding
+    let exp_2 = fexp(digit2(m) + exp)
+    let m_2 = align(m, exp, exp_2)
+    let exp_3 = min(exp, exp_2)
+    binaryRoundAux(s, m_2, exp_3)
+
+  func normalize(m, exp: z, szero: bool) -> float =
+    ## Yields the closest possible floating point representation
+    ## for `m` and `exp` such that `f ~= m*(2^exp)`.
+    case m
+    of 0: Zero(szero)
+    else:
+      if m < 0: binaryRound(true, neg(m), exp)
+      else:     binaryRound(false, m, exp)
+
+  func floatAdd(a, b: float) -> float =
+    ## IEEE-754.2008 binary64 addition (with simplified nans).
+    case (a, b)
+    of Nan, _: Nan
+    of _, Nan: Nan
+    of Inf(bool_1), Inf(bool_2):
+      if same(bool_1, bool_2): Inf(bool_1)
+      else:                    Nan
+    of Inf(bool), _: a
+    of _, Inf(bool): b
+    of Zero(bool_1), Zero(bool_2):
+      if same(bool_1, bool_2):
+        a
+      else:
+        Zero(false) # negative + positive = positive
+    of Zero(bool), float_1: float_1
+    of float_1, Zero(bool): float_1
+    of Finite(bool_1, n_1, z_1), Finite(bool_2, n_2, z_2):
+      # align the exponents, then add, then normalize the result
+      let exp = min(z_1, z_2)
+      normalize(
+        opp(bool_1, align(n_1, z_1, exp)) + opp(bool_2, align(n_2, z_2, exp)),
+        exp, false)
+
+  func floatSub(a, b: float) -> float =
+    ## IEEE-754.2008 binary64 subtraction (with simplified nans).
+    case (a, b)
+    of Nan, _: Nan
+    of _, Nan: Nan
+    of Inf(bool_1), Inf(bool_2):
+      # -inf - inf = -inf
+      if same(bool_1, not bool_2): Inf(bool_1)
+      else:                        Nan
+    of Inf(bool), _: a
+    of _, Inf(bool): b
+    of Zero(bool_1), Zero(bool_2):
+      if same(bool_1, not bool_2):
+        a
+      else:
+        Zero(false)
+    of Zero(bool), Finite(bool_1, n_1, z_1):
+      # 0 - f inverts the sign of f
+      Finite(not bool_1, n_1, z_1)
+    of float_1, Zero(bool): float_1
+    of Finite(bool_1, n_1, z_1), Finite(bool_2, n_2, z_2):
+      # align the exponents, then subtract, then normalize the result
+      let exp = min(z_1, z_2)
+      normalize(
+        opp(bool_1, align(n_1, z_1, exp)) - opp(bool_2, align(n_2, z_2, exp)),
+        exp, false)
+
+  func floatCmp(a, b: float) -> option =
+    ## IEEE-754.2008 binary64 comparison.
+    case (a, b)
+    of Nan, _: None
+    of _, Nan: None
+    of Inf(bool_1), Inf(bool_2):
+      case (bool_1, bool_2)
+      of true, true:   Some(Eq)
+      of false, false: Some(Eq)
+      of true, false:  Some(Lt)
+      of false, true:  Some(Gt)
+    of Inf(bool_1), _:
+      if bool_1: Some(Lt) else: Some(Gt)
+    of _, Inf(bool_1):
+      if bool_1: Some(Gt) else: Some(Lt)
+    of Finite(bool_1, z, z), Zero(bool):
+      if bool_1: Some(Lt) else: Some(Gt)
+    of Zero(bool), Finite(bool_1, z, z):
+      if bool_1: Some(Lt) else: Some(Gt)
+    of Zero(bool), Zero(bool):
+      Some(Eq) # sign doesn't matter
+    of Finite(bool_1, n_1, z_1), Finite(bool_2, n_2, z_2):
+      case (bool_1, bool_2)
+      of true, false: Some(Lt)
+      of false, true: Some(Gt)
+      of false, false:
+        case intCmp(z_1, z_2)
+        of Lt: Some(Lt)
+        of Gt: Some(Gt)
+        of Eq: Some(intCmp(n_1, n_2))
+      of true, true:
+        case intCmp(z_1, z_2)
+        of Lt: Some(Gt)
+        of Gt: Some(Lt)
+        of Eq:
+          case intCmp(n_2, n_1)
+          of Lt: Some(Gt)
+          of Gt: Some(Lt)
+          of Eq: Some(Eq)
+
+  func asBool(b: bool) -> val =
+    case b
+    of true:  True
+    of false: False
+
+  func eq(a, b: val) -> val =
+    case (a, b)
+    of True, True:
+      True
+    of False, False:
+      True
+    of False, True:
       False
+    of True, False:
+      False
+    of IntVal(z_1), IntVal(z_2):
+      asBool same(intCmp(z_1, z_2), Eq)
+    of FloatVal(float_1), FloatVal(float_2):
+      asBool same(floatCmp(float_1, float_2), Some(Eq))
 
   func lt(a, b: val) -> val =
     case (a, b)
     of IntVal(n_1), IntVal(n_2):
-      if n_1 < n_2: True
-      else:         False
-    of FloatVal(r_1), FloatVal(r_2):
-      if r_1 < r_2: True
-      else:         False
+      asBool same(intCmp(n_1, n_2), Lt)
+    of FloatVal(float_1), FloatVal(float_2):
+      asBool same(floatCmp(float_1, float_2), Some(Lt))
 
-  func lessEqual(a, b: val) -> val =
-    if same(valEq(a, b), True):
-      True
-    else:
-      lt(a, b)
-
-  # TODO: the floating-point operations need to be defined according to the
-  #       IEEE 754.2008 standard
+  func leq(a, b: val) -> val =
+    case (a, b)
+    of IntVal(z_1), IntVal(z_2):
+      case intCmp(z_1, z_2)
+      of Lt: True
+      of Eq: True
+      of Gt: False
+    of FloatVal(float_1), FloatVal(float_2):
+      case floatCmp(float_1, float_2)
+      of Some(Lt): True
+      of Some(Eq): True
+      else:        False
 
   record DC, {locs: (z -> val),
               nloc: z,
@@ -722,13 +1040,13 @@ const lang* = language:
   context L:
     # evaluation context for locs in lvalue expressions
     hole
-    FieldAccess(L, IntVal(n))
+    FieldAccess(L, eindex)
     At(L, IntVal(n))
 
   context E:
     hole
     Exprs(E, +e)
-    FieldAccess(E, IntVal(n))
+    FieldAccess(E, eindex)
     At(E, e)
     At(le, E)
     At(val, E)
@@ -737,11 +1055,15 @@ const lang* = language:
     Asgn(le, E)
     With(E, n, e)
     With(val, n, E)
+    With(E, string, e)
+    With(val, string, E)
     TupleCons(*val, E, *e)
+    RecordCons(*Field(x, val), Field(x, E), *Field(x, e))
     Seq(typ, *val, E, *e)
     Call(*val, E, *e)
     Call(x, *val, E, *e)
     If(E, e, e)
+    Match(E, +rule)
     Let(x, E, e)
     Return(E)
 
@@ -756,11 +1078,15 @@ const lang* = language:
     Asgn(le, hole)
     With(hole, n, e)
     With(val, n, hole)
+    With(hole, string, e)
+    With(val, string, hole)
     TupleCons(*val, hole, *e)
+    RecordCons(*Field(x, val), Field(x, hole), *Field(x, e))
     Seq(typ, *val, hole, *e)
     Call(*val, hole, *e)
     Call(x, *val, hole, *e)
     If(hole, e, e)
+    Match(hole, +rule)
     Let(x, hole, e)
     Return(hole)
 
@@ -786,13 +1112,33 @@ const lang* = language:
 
     axiom "E-while", While(e_1, e_2), If(e_1, Exprs(e_2, While(e_1, e_2)), TupleCons())
 
+    rule "E-match-success":
+      premise types(C(ret: VoidTy), val_1, typ_1)
+      condition typ_1 == texpr_1
+      conclusion Match(val_1, Rule(As(Ident(string_1), texpr_1), e_1), *any),
+                 substitute(e_1, {string_1 : val_1})
+
+    rule "E-match-next":
+      premise types(C(ret: VoidTy), val_1, typ_1)
+      condition typ_1 != texpr_1
+      conclusion Match(val_1, Rule(As(x, texpr_1), e), +rule_1),
+                 Match(val_1, ...rule_1)
+
     rule "E-tuple-access":
       where TupleCons(+val_3), val_1
       where val_2, val_3[n_1]
       conclusion FieldAccess(val_1, IntVal(n_1)), val_2
 
+    rule "E-rec-access":
+      let val_2 = map(zip(string_1, val_1))(string_2)
+      conclusion FieldAccess(RecordCons(+Field(Ident(string_1), val_1)), Ident(string_2)),
+                 val_2
+
     axiom "E-field-asgn", Asgn(FieldAccess(le_1, IntVal(n_1)), val_1), Asgn(le_1, With(le_1, n_1, val_1))
     axiom "E-elem-asgn", Asgn(At(le_1, IntVal(n_1)), val_1), Asgn(le_1, With(le_1, n_1, val_1))
+    axiom "E-rec-field-asgn",
+          Asgn(FieldAccess(le_1, Ident(string_1)), val_1),
+          Asgn(le_1, With(le_1, string_1, val_1))
 
     axiom "E-seq-cons", Seq(typ, *val_1), `array`(...val_1)
 
@@ -825,6 +1171,10 @@ const lang* = language:
     rule "E-with-out-of-bounds":
       condition n_1 < 0 or len(val_1) <= n_1
       conclusion With(array(*val_1), n_1, val_2), Unreachable()
+    rule "E-with-record":
+      let val_3 = updated(val_1, indexOf(string_1, string_2, 0), val_2)
+      conclusion With(RecordCons(+Field(Ident(string_1), val_1)), string_2, val_2),
+                 RecordCons(...Field(Ident(string_1), val_3))
 
     rule "E-with-tuple-out-of-bounds":
       condition n_1 < 0 or len(val_1) <= n_1
@@ -869,17 +1219,17 @@ const lang* = language:
       conclusion Call(Ident("mod"), IntVal(n_1), IntVal(n_2)), Unreachable()
 
     rule "E-add-float":
-      let r_3 = floatAdd(r_1, r_2)
-      conclusion Call(Ident("+"), FloatVal(r_1), FloatVal(r_2)), FloatVal(r_3)
+      let float_3 = floatAdd(float_1, float_2)
+      conclusion Call(Ident("+"), FloatVal(float_1), FloatVal(float_2)), FloatVal(float_3)
     rule "E-sub-float":
-      let r_3 = floatSub(r_1, r_2)
-      conclusion Call(Ident("-"), FloatVal(r_1), FloatVal(r_2)), FloatVal(r_3)
+      let float_3 = floatSub(float_1, float_2)
+      conclusion Call(Ident("-"), FloatVal(float_1), FloatVal(float_2)), FloatVal(float_3)
 
     rule "E-builtin-eq":
-      let val_3 = valEq(val_1, val_2)
+      let val_3 = eq(val_1, val_2)
       conclusion Call(Ident("=="), val_1, val_2), val_3
     rule "E-builtin-le":
-      let val_3 = lessEqual(val_1, val_2)
+      let val_3 = leq(val_1, val_2)
       conclusion Call(Ident("<="), val_1, val_2), val_3
     rule "E-builtin-lt":
       let val_3 = lt(val_1, val_2)
@@ -1011,6 +1361,21 @@ const lang* = language:
     of _:
       false
 
+  func identical(set_1, set_2: *typ) -> bool =
+    ## Treats the lists as sets and computes whether they're equal.
+    if (for a in set_1: contains(set_2, a)):
+      if (for a in set_2: contains(set_1, a)):
+        true
+      else:
+        false
+    else:
+      false
+
+  func mapContains(list: *(string, typ), p: (string, typ)) -> bool =
+    let (s, t) = p
+    let m = map(list)
+    s in m and m(s) == t
+
   func uniqueTypes(list: *typ) -> bool =
     ## Computes whether all types in the list are unique.
     case list
@@ -1032,3 +1397,11 @@ const lang* = language:
         false
     of _:
       true
+
+  func indexOf(list: *string, it: string, i: n) -> n =
+    case list
+    of [string_1, *string_2]:
+      if same(string_1, it):
+        i
+      else:
+        indexOf(string_2, it, i + 1)

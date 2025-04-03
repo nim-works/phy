@@ -1,0 +1,7 @@
+discard """
+  description: "
+    Addition rounds towards the nearest absolute value (round up test).
+  "
+  output: "9007199254740994.0 : (FloatTy)"
+"""
+(Call (Ident "+") (FloatVal 9007199254740992.0) (FloatVal 1.5))

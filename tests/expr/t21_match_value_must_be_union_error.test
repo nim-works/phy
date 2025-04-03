@@ -1,0 +1,8 @@
+discard """
+  description: "The target expression must be of union type"
+  reject: true
+"""
+(Match
+  (IntVal 1)
+  (Rule (As x (IntTy))
+    1))

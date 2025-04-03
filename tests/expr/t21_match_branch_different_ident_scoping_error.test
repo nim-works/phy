@@ -1,0 +1,13 @@
+discard """
+  description: "
+    The pattern's identifier is part of the branch's scope; it cannot be used
+    outside.
+  "
+  reject: true
+"""
+(Match
+  (As 10 (UnionTy (IntTy) (UnitTy)))
+  (Rule (As x (IntTy))
+    1)
+  (Rule (As y (UnitTy))
+    x))

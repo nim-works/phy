@@ -1,0 +1,9 @@
+discard """
+  output: "(True) : (UnionTy (IntTy) (BoolTy))"
+"""
+(Match
+  (As 10 (UnionTy (IntTy) (UnitTy)))
+  (Rule (As x (IntTy))
+    (Ident "true"))
+  (Rule (As x (UnitTy))
+    (As 2 (UnionTy (IntTy) (BoolTy)))))

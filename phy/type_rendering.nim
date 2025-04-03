@@ -30,6 +30,16 @@ proc typeToString*(typ: SemType): string =
       res.add ","
     res.add ")"
     res
+  of tkRecord:
+    var res = "{"
+    for i, it in typ.fields.pairs:
+      if i > 0:
+        res.add ", "
+      res.add it.name
+      res.add " : "
+      res.add typeToString(it.typ)
+    res.add "}"
+    res
   of tkUnion:
     var res = "union("
     for i, it in typ.elems.pairs:
@@ -73,6 +83,13 @@ proc typeToSexp*(typ: SemType): SexpNode =
     var res = newSList(newSSymbol("TupleTy"))
     for it in typ.elems.items:
       res.add typeToSexp(it)
+    res
+  of tkRecord:
+    var res = newSList(newSSymbol("RecordTy"))
+    for it in typ.fields.items:
+      res.add newSList(newSSymbol("Field"),
+                       newSSymbol(it.name),
+                       typeToSexp(it.typ))
     res
   of tkUnion:
     var res = newSList(newSSymbol("UnionTy"))
