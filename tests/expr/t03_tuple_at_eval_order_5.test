@@ -1,0 +1,18 @@
+discard """
+  description: "
+    The non-lvalue parts of the tuple operand are also evaluated strictly from
+    left to right.
+  "
+  output: "1 : (IntTy)"
+"""
+(Exprs
+  (Decl tup
+    (TupleCons (TupleCons 1 2)))
+  (Decl i 10)
+  (At
+    (At
+      (Exprs
+        (Asgn i 0)
+        tup)
+      i)
+    0)))

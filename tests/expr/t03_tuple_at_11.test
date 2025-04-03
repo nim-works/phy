@@ -1,0 +1,6 @@
+discard """
+  output: "2 : (UnionTy (IntTy) (UnionTy (IntTy) (FloatTy)))"
+"""
+(At
+  (TupleCons 1 (As 2 (UnionTy (IntTy) (FloatTy))))
+  1)
