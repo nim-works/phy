@@ -1,0 +1,4 @@
+discard """
+  output: "8.75 : (FloatTy)"
+"""
+(Call (Ident "*") (FloatVal 3.5) (FloatVal 2.5))

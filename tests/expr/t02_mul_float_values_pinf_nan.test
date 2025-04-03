@@ -1,0 +1,4 @@
+discard """
+  output: "nan : (FloatTy)"
+"""
+(Call (Ident "*") (FloatVal inf) (FloatVal nan))

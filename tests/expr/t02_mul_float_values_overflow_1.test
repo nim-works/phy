@@ -1,0 +1,4 @@
+discard """
+  output: "inf : (FloatTy)"
+"""
+(Call (Ident "*") (FloatVal 1.7976931348623157e+308) (FloatVal 2.0))
