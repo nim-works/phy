@@ -548,7 +548,7 @@ const lang* = language:
       premise mtypes(C_1, e_1, typ_1)
       premise mtypes(C_1, e_2, typ_2)
       condition typ_1 == typ_2
-      condition typ_1 == IntTy()
+      condition typ_1 in {IntTy(), FloatTy()}
       conclusion C_1, Call(Ident("*"), e_1, e_2), typ_1
 
     rule "S-builtin-div":
@@ -790,6 +790,8 @@ const lang* = language:
 
   func even(a: n) -> bool = same(a mod 2, 0)
 
+  func `xor`(a, b: bool) -> bool = not same(a, b)
+
   func digit2(a: n) -> n =
     ## Computes the 1-based position of the most-significant bit.
     case a
@@ -940,6 +942,31 @@ const lang* = language:
       normalize(
         opp(bool_1, align(n_1, z_1, exp)) - opp(bool_2, align(n_2, z_2, exp)),
         exp, false)
+
+  func floatMul(a, b: float) -> float =
+    ## IEEE-754.2008 binary64 multiplication (with simplified nans).
+    case (a, b)
+    of Nan, _: Nan
+    of _, Nan: Nan
+    of Inf(bool), Zero(bool): Nan
+    of Zero(bool), Inf(bool): Nan
+    of Inf(bool_1), Inf(bool_2):
+      Inf(bool_1 xor bool_2)
+    of Inf(bool_1), Finite(bool_2, n, z):
+      Inf(bool_1 xor bool_2)
+    of Finite(bool_2, n, z), Inf(bool_1):
+      Inf(bool_1 xor bool_2)
+    of Finite(bool_1, n, z), Zero(bool_2):
+      Zero(bool_1 xor bool_2)
+    of Zero(bool_1), Finite(bool_2, n, z):
+      Zero(bool_1 xor bool_2)
+    of Zero(bool_1), Zero(bool_2):
+      Zero(bool_1 xor bool_2)
+    of Finite(bool_1, n_1, z_1), Finite(bool_2, n_2, z_2):
+      # x*(2^e_1) * y*(2^e_2) = x*y*(2^(e_1 + e_2))
+      # no need to go through `normalize`, because we know that the signficand
+      # doesn't need to / cannot be left-shifted
+      binaryRoundAux(bool_1 xor bool_2, n_1 * n_2, z_1 + z_2)
 
   func floatCmp(a, b: float) -> option =
     ## IEEE-754.2008 binary64 comparison.
@@ -1224,6 +1251,9 @@ const lang* = language:
     rule "E-sub-float":
       let float_3 = floatSub(float_1, float_2)
       conclusion Call(Ident("-"), FloatVal(float_1), FloatVal(float_2)), FloatVal(float_3)
+    rule "E-mul-float":
+      let float_3 = floatMul(float_1, float_2)
+      conclusion Call(Ident("*"), FloatVal(float_1), FloatVal(float_2)), FloatVal(float_3)
 
     rule "E-builtin-eq":
       let val_3 = eq(val_1, val_2)
