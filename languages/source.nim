@@ -334,8 +334,8 @@ const lang* = language:
       conclusion C_1, SeqTy(texpr_1), SeqTy(typ_1)
 
   def builtIn,
-    {"==", "<=", "<", "+", "-", "*", "div", "mod", "true", "false", "write",
-     "writeErr", "readFile"}
+    {"==", "<=", "<", "+", "-", "*", "/", "div", "mod", "true", "false",
+     "write", "writeErr", "readFile"}
 
   func stripMut(t: typ) -> typ =
     case t
@@ -550,6 +550,13 @@ const lang* = language:
       condition typ_1 == typ_2
       condition typ_1 in {IntTy(), FloatTy()}
       conclusion C_1, Call(Ident("*"), e_1, e_2), typ_1
+
+    rule "S-builtin-float-div":
+      premise mtypes(C_1, e_1, typ_1)
+      premise mtypes(C_1, e_2, typ_2)
+      condition typ_1 == typ_2
+      condition typ_1 == FloatTy()
+      conclusion C_1, Call(Ident("/"), e_1, e_2), typ_1
 
     rule "S-builtin-div":
       premise mtypes(C_1, e_1, typ_1)
@@ -853,6 +860,14 @@ const lang* = language:
     else:
       (mx, ex, Exact)
 
+  func reshift(mx: n, ex: z, lx: location) -> (n, z) =
+    ## Adds `lx` as roundings bits to `mx*(2^ex)`.
+    case lx
+    of Exact:       (mx, ex)
+    of Inexact(Lt): (mx * 4 + 1, ex - 2)
+    of Inexact(Eq): (mx * 2 + 1, ex - 1)
+    of Inexact(Gt): (mx * 4 + 3, ex - 2)
+
   func roundNearestEven(mx: n, lx: location) -> n =
     ## Implements the floating-point to-nearest, tie-to-even rounding
     ## mode.
@@ -891,6 +906,17 @@ const lang* = language:
     else:
       if m < 0: binaryRound(true, neg(m), exp)
       else:     binaryRound(false, m, exp)
+
+  func toFloat(s: bool, fac: r, exp: n) -> float =
+    ## Turns the rational value `val*(2^exp)` with sign `s` (`fac` must be
+    ## positive) into a float value.
+    let v = fac * (2^prec) # left-shift the base-2 radix point by `prec`
+    let i = trunc(v)
+    # turn the fractional part into rounding bits (only two bits of precision
+    # are needed)
+    let (m, exp_2) = reshift(i, exp - prec, toLocation(v - i))
+    # round the result
+    binaryRoundAux(s, m, exp_2)
 
   func floatAdd(a, b: float) -> float =
     ## IEEE-754.2008 binary64 addition (with simplified nans).
@@ -967,6 +993,31 @@ const lang* = language:
       # no need to go through `normalize`, because we know that the signficand
       # doesn't need to / cannot be left-shifted
       binaryRoundAux(bool_1 xor bool_2, n_1 * n_2, z_1 + z_2)
+
+  func floatDiv(a, b: float) -> float =
+    ## IEEE-754.2008 binary64 division (with simplified nans).
+    case (a, b)
+    of Nan, _: Nan
+    of _, Nan: Nan
+    of Inf(bool), Inf(bool):
+      Nan
+    of Zero(bool), Zero(bool):
+      Nan
+    of Inf(bool_1), Finite(bool_2, n, z):
+      Inf(bool_1 xor bool_2)
+    of Finite(bool_1, n, z), Inf(bool_2):
+      Zero(bool_1 xor bool_2)
+    of Inf(bool_1), Zero(bool_2):
+      Inf(bool_1 xor bool_2)
+    of Zero(bool_1), Inf(bool_2):
+      Zero(bool_1 xor bool_2)
+    of Finite(bool_1, n, z), Zero(bool_2):
+      Inf(bool_1 xor bool_2)
+    of Zero(bool_1), Finite(bool_2, n, z):
+      Zero(bool_1 xor bool_2)
+    of Finite(bool_1, n_1, z_1), Finite(bool_2, n_2, z_2):
+      # x*(2^e_1) / y*(2^e_2) = (x/y) * 2^(e_1-e_2)
+      toFloat(bool_1 xor bool_2, n_1 / n_2, z_1 - z_2)
 
   func floatCmp(a, b: float) -> option =
     ## IEEE-754.2008 binary64 comparison.
@@ -1254,6 +1305,9 @@ const lang* = language:
     rule "E-mul-float":
       let float_3 = floatMul(float_1, float_2)
       conclusion Call(Ident("*"), FloatVal(float_1), FloatVal(float_2)), FloatVal(float_3)
+    rule "E-mul-float":
+      let float_3 = floatDiv(float_1, float_2)
+      conclusion Call(Ident("/"), FloatVal(float_1), FloatVal(float_2)), FloatVal(float_3)
 
     rule "E-builtin-eq":
       let val_3 = eq(val_1, val_2)
