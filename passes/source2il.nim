@@ -116,6 +116,7 @@ const
     "+": ekBuiltinProc,
     "-": ekBuiltinProc,
     "*": ekBuiltinProc,
+    "/": ekBuiltinProc,
     "div": ekBuiltinProc,
     "mod": ekBuiltinProc,
     "==": ekBuiltinProc,
@@ -892,6 +893,9 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, expr, stmts): SemType =
       else:
         c.error("arguments must be of 'int' or 'float' type")
         result = errorType()
+    of "/":
+      wantType {tkFloat}, "arguments must of type 'float'"
+      expr = newBinaryOp(Div, c.typeToIL(result), valA, valB)
     of "div":
       wantType {tkInt}, "arguments must be of 'int' type"
       # emit a division-by-zero guard:
@@ -1027,7 +1031,7 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
 
     if ent.kind == ekBuiltinProc:
       case name
-      of "+", "-", "*", "div", "mod":
+      of "+", "-", "*", "/", "div", "mod":
         result = binaryArithToIL(c, t, n, name, expr, stmts)
       of "==", "<", "<=":
         result = relToIL(c, t, n, name, expr, stmts)
