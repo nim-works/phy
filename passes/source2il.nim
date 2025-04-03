@@ -884,8 +884,14 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, expr, stmts): SemType =
         c.error("arguments must be of 'int' or 'float' type")
         result = errorType()
     of "*":
-      wantType {tkInt}, "arguments must be of 'int' type"
-      expr = check(c, MulChck, valA, valB, stmts)
+      case result.kind
+      of tkInt:
+        expr = check(c, MulChck, valA, valB, stmts)
+      of tkFloat:
+        expr = newBinaryOp(Mul, c.typeToIL(result), valA, valB)
+      else:
+        c.error("arguments must be of 'int' or 'float' type")
+        result = errorType()
     of "div":
       wantType {tkInt}, "arguments must be of 'int' type"
       # emit a division-by-zero guard:
