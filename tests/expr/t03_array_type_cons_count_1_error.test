@@ -1,0 +1,4 @@
+discard """
+  reject: true
+"""
+(TypeDecl x (ArrayTy -1 (VoidTy)))
