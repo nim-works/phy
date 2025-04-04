@@ -50,6 +50,7 @@ const lang* = language:
     Ident(string)
     IntVal(z)
     FloatVal(float)
+    ArrayCons(+expr)
     TupleCons(*expr)
     RecordCons(+Field(ident, expr))
     Seq(texpr, *expr)
@@ -79,6 +80,7 @@ const lang* = language:
     char(z) # UTF-8 byte
     loc(z) # first-class location
     `array`(*val)
+    # TODO: ^^ use the `Seq` constructor instead; it also preserves the type
     `proc`(typ, *[x, typ], e)
 
     With(e, n, e) # return a tuple/array value with the n-th element replaced
@@ -96,6 +98,7 @@ const lang* = language:
     CharTy()
     IntTy()
     FloatTy()
+    ArrayTy(IntVal(z), texpr)
     TupleTy(*texpr)
     UnionTy(+texpr)
     ProcTy(+texpr)
@@ -123,7 +126,8 @@ const lang* = language:
     True
     False
     char(z)
-    `array`(*val)
+    `array`(*val) # TODO: make this a seq
+    ArrayCons(+val)
     TupleCons(*val) # an empty tuple is also a valid value (i.e., unit)
     RecordCons(+Field(x, val))
     `proc`(typ, *[x, typ], e)
@@ -152,6 +156,8 @@ const lang* = language:
       Call(...xfrm(e_1))
     of Asgn(e_1, e_2):
       Asgn(xfrm(e_1), xfrm(e_2))
+    of ArrayCons(+e_1):
+      ArrayCons(...e_1)
     of TupleCons(*e_1):
       TupleCons(...xfrm(e_1))
     of RecordCons(+Field(x_1, e_1)):
@@ -246,6 +252,8 @@ const lang* = language:
           false
       else:
         false
+    of ArrayTy(IntVal(z_1), typ_1), ArrayTy(IntVal(z_2), typ_2):
+      same(z_1, z_2) and typ_1 == typ_2
     else:
       same(a, b) # same structure -> equivalent type
 
@@ -303,6 +311,12 @@ const lang* = language:
       condition string_1 in C_1.symbols
       where type(typ_1), C_1.symbols(string_1)
       conclusion C_1, Ident(string_1), typ_1
+
+    rule "S-array-type":
+      premise ttypes(C_1, texpr_1, typ_1)
+      condition typ_1 != VoidTy()
+      condition 0 <= z_1 and z_1 <= (2 ^ 32) - 1
+      conclusion C_1, ArrayTy(IntVal(z_1), texpr_1), ArrayTy(IntVal(z_1), typ_1)
 
     rule "S-tuple-type":
       premise ...ttypes(C_1, texpr_1, typ_1)
@@ -391,6 +405,13 @@ const lang* = language:
       condition not isType(typ_1) # normal identifiers don't bind types
       conclusion C_1, Ident(string_1), typ_1
 
+    rule "S-array":
+      premise ...mtypes(C_1, e_1, typ_1)
+      condition ...(typ_1 != VoidTy())
+      condition len(e_1) <= (2 ^ 32) - 1
+      let typ_2 = commonAll(typ_1)
+      conclusion C_1, ArrayCons(+e_1), ArrayTy(IntVal(len(e_1)), typ_2)
+
     rule "S-tuple":
       premise ...mtypes(C_1, e_1, typ_1)
       condition ...(typ_1 != VoidTy())
@@ -455,6 +476,16 @@ const lang* = language:
       premise mtypes(C_1, e_2, IntTy())
       where SeqTy(typ_2), typ_1
       conclusion C_1, At(e_1, e_2), mut(typ_2)
+
+    rule "S-at-array":
+      premise types(C_1, e_1, ArrayTy(IntVal(z), typ_1))
+      premise mtypes(C_1, e_2, IntTy())
+      conclusion C_1, At(e_1, e_2), typ_1
+
+    rule "S-mut-at-array":
+      premise types(C_1, e_1, mut(ArrayTy(IntVal(z), typ_1)))
+      premise mtypes(C_1, e_2, IntTy())
+      conclusion C_1, At(e_1, e_2), mut(typ_1)
 
     rule "S-at-tuple":
       premise mtypes(C_1, e_1, TupleTy(+typ_2))
@@ -699,6 +730,8 @@ const lang* = language:
       Call(...substitute(e_1, with))
     of Asgn(e_1, e_2):
       Asgn(substitute(e_1, with), substitute(e_2, with))
+    of ArrayCons(+e_1):
+      ArrayCons(...substitute(e_1, with))
     of TupleCons(*e_1):
       TupleCons(...substitute(e_1, with))
     of RecordCons(+Field(x_1, e_1)):
@@ -1057,6 +1090,7 @@ const lang* = language:
     With(val, n, E)
     With(E, string, e)
     With(val, string, E)
+    ArrayCons(*val, E, *e)
     TupleCons(*val, E, *e)
     RecordCons(*Field(x, val), Field(x, E), *Field(x, e))
     Seq(typ, *val, E, *e)
@@ -1080,6 +1114,7 @@ const lang* = language:
     With(val, n, hole)
     With(hole, string, e)
     With(val, string, hole)
+    ArrayCons(*val, hole, *e)
     TupleCons(*val, hole, *e)
     RecordCons(*Field(x, val), Field(x, hole), *Field(x, e))
     Seq(typ, *val, hole, *e)
@@ -1148,6 +1183,9 @@ const lang* = language:
       let val_2 = val_1[n_1]
       conclusion At(array(*val_1), IntVal(n_1)), val_2
 
+    rule "E-at-array":
+      condition 0 <= n_1 and n_1 < len(val_1)
+      conclusion At(ArrayCons(+val_1), IntVal(n_1)), val_1[n_1]
     rule "E-at-tuple":
       condition 0 <= n_1
       condition n_1 < len(val_1)
@@ -1158,13 +1196,20 @@ const lang* = language:
       condition n_1 < 0 or len(val_1) <= n_1
       conclusion At(array(*val_1), IntVal(n_1)), Unreachable()
 
+    rule "E-at-array-out-of-bounds":
+      condition n_1 < 0 or len(val_1) <= n_1
+      conclusion At(ArrayCons(+val_1), IntVal(n_1)), Unreachable()
     rule "E-at-tuple-out-of-bounds":
       condition n_1 < 0 or len(val_1) <= n_1
       conclusion At(TupleCons(*val_1), IntVal(n_1)), Unreachable()
 
     rule "E-with-array":
+      # TODO: rename to E-with-seq
       where val_3, array(for y in updated(val_1, n_1, val_2): y)
       conclusion With(array(*val_1), n_1, val_2), val_3
+    rule "E-with-array-2":
+      where val_3, ArrayCons(for y in updated(val_1, n_1, val_2): y)
+      conclusion With(ArrayCons(+val_1), n_1, val_2), val_3
     rule "E-with-tuple":
       where val_3, TupleCons(for y in updated(val_1, n_1, val_2): y)
       conclusion With(TupleCons(+val_1), n_1, val_2), val_3
@@ -1176,6 +1221,9 @@ const lang* = language:
       conclusion With(RecordCons(+Field(Ident(string_1), val_1)), string_2, val_2),
                  RecordCons(...Field(Ident(string_1), val_3))
 
+    rule "E-with-array-out-of-bounds":
+      condition n_1 < 0 or len(val_1) <= n_1
+      conclusion With(ArrayCons(+val_1), n_1, val_2), Unreachable()
     rule "E-with-tuple-out-of-bounds":
       condition n_1 < 0 or len(val_1) <= n_1
       conclusion With(TupleCons(*val_1), n_1, val_2), Unreachable()
