@@ -585,6 +585,21 @@ proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
       els.add IrNode(kind: Loop, children: @[loopBody])
       els.add newReturn(dst)
       body = newIf(c.newIntOp(Eq, srcLen, newIntVal(0)), then, els)
+    of tkArray:
+      # set up the loop counter:
+      let counter = newLocal(2)
+      locals.add prim(tkInt)
+      body.add newAsgn(counter, newIntVal(0))
+
+      var loopBody = IrNode(kind: Stmts)
+      loopBody.add newIf(c.newIntOp(Eq, counter, newIntVal(typ.length)),
+                         newBreak(1))
+      loopBody.add newAsgn(newAt(dst, counter),
+        newCall(c.getTypeBoundOp(opCopy, typ.elems[0]), newAt(src, counter)))
+      loopBody.add newAsgn(counter, c.newIntOp(Add, counter, newIntVal(1)))
+
+      body.add IrNode(kind: Loop, children: @[loopBody])
+      body.add newReturn(dst)
     of tkTuple:
       body = IrNode(kind: Stmts)
       # copy each tuple element from the source to the destination:
