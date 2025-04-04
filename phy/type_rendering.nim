@@ -19,6 +19,13 @@ proc typeToString*(typ: SemType): string =
   of tkChar:  "char"
   of tkInt:   "int"
   of tkFloat: "float"
+  of tkArray:
+    var res = "array("
+    res.addInt typ.length
+    res.add ", "
+    res.add typeToString(typ.elem[0])
+    res.add ")"
+    res
   of tkTuple:
     var res = "("
     for i, it in typ.elems.pairs:
@@ -79,6 +86,8 @@ proc typeToSexp*(typ: SemType): SexpNode =
   of tkChar:  newSList(newSSymbol("CharTy"))
   of tkInt:   newSList(newSSymbol("IntTy"))
   of tkFloat: newSList(newSSymbol("FloatTy"))
+  of tkArray: newSList(newSSymbol("ArrayTy"), newSInt(typ.length),
+                       typeToSexp(typ.elem[0]))
   of tkTuple:
     var res = newSList(newSSymbol("TupleTy"))
     for it in typ.elems.items:

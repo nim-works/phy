@@ -31,6 +31,12 @@ const
        files: {:}))
     ## the initial dynamic context to pass to `cstep`
   issues = [ # tests that are currently expected to fail
+    "t03_array_at_eval_order_1.test",
+    "t03_array_at_eval_order_2.test",
+    "t03_array_type_cons.test",
+    "t03_array_type_cons_count_1_error.test",
+    "t03_array_type_cons_count_2_error.test",
+    "t03_array_type_cons_no_void_error.test",
     "t03_tuple_at_eval_order_1.test",
     "t03_tuple_at_eval_order_2.test",
     "t04_empty_module.test",

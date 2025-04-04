@@ -1,0 +1,8 @@
+discard """
+  description: "
+    The element type of a construct array is the common type of all supplied
+    elements.
+  "
+  output: "(ArrayCons 1 (TupleCons)) : (ArrayTy 2 (UnionTy (UnitTy) (IntTy)))"
+"""
+(ArrayCons 1 (As (TupleCons) (UnionTy (UnitTy) (IntTy))))

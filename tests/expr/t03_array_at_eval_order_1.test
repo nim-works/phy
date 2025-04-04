@@ -1,0 +1,14 @@
+discard """
+  description: "
+    The index check for non-lvalue operands takes place immediately once
+    the index value is available.
+  "
+  output: "(Unreachable) : (IntTy)"
+"""
+(ProcDecl test (IntTy) (Params)
+  (At
+    (At
+      (ArrayCons
+        (ArrayCons 1 2))
+      2)
+    (If true (Return 3) 0)))

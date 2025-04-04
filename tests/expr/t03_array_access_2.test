@@ -1,0 +1,4 @@
+discard """
+  output: "2 : (IntTy)"
+"""
+(At (ArrayCons 1 2) (IntVal 1))

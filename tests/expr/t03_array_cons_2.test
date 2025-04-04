@@ -1,0 +1,4 @@
+discard """
+  output: "(ArrayCons 1 2) : (ArrayTy 2 (IntTy))"
+"""
+(ArrayCons 1 2)

@@ -1,0 +1,13 @@
+discard """
+  description: "The index expressions are evaluated strictly from left to right"
+  output: "1 : (IntTy)"
+"""
+(Exprs
+  (Decl arr
+    (ArrayCons (ArrayCons 1 2)))
+  (Decl i 0)
+  (At
+    (At arr i)
+    (Exprs
+      (Asgn i 100)
+      0)))

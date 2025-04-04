@@ -1,0 +1,4 @@
+discard """
+  arguments: "c"
+"""
+(TypeDecl x (ArrayTy 1 (IntTy)))

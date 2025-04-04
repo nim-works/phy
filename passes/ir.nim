@@ -47,8 +47,11 @@ template add*(n: var IrNode, elems: seq[IrNode]) =
   let tmp = elems
   n.children.add tmp
 
-proc newIntVal*(v: BiggestInt): IrNode =
-  IrNode(kind: IntVal, intVal: v.int)
+proc newIntVal*(v: SomeInteger): IrNode =
+  when v is SomeUnsignedInt:
+    IrNode(kind: IntVal, intVal: cast[int](v))
+  else:
+    IrNode(kind: IntVal, intVal: v.int)
 
 proc newFloatVal*(val: float): IrNode =
   IrNode(kind: FloatVal, floatVal: val)
@@ -70,6 +73,9 @@ proc newChoice*(val, then: sink IrNode): IrNode =
 
 proc newCase*(typ: uint32, sel: sink IrNode): IrNode =
   IrNode(kind: Case, children: @[newTypeUse(typ), sel])
+
+proc newLoop*(body: sink IrNode): IrNode =
+  IrNode(kind: Loop, children: @[body])
 
 proc newAsgn*(dest, src: sink IrNode): IrNode =
   # allow none for the sake of error correction

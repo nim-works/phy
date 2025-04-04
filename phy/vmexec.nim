@@ -77,6 +77,12 @@ proc valueToSexp(env: var VmEnv, a: VirtualAddr, typ: SemType): SexpNode =
     result = primToSexp(Value(readInt(p, 8)), typ)
   of tkFloat:
     result = primToSexp(cast[Value](readFloat64(p)), typ)
+  of tkArray:
+    result = newCons("ArrayCons")
+    let stride = size(typ.elem[0])
+    for i in 0..<typ.length:
+      result.add valueToSexp(env, VirtualAddr(a.uint64 + uint64(stride * i)),
+                             typ.elem[0])
   of tkTuple:
     result = newCons("TupleCons")
     var offset = 0
