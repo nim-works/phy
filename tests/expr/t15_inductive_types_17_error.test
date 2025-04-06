@@ -1,0 +1,7 @@
+discard """
+  description: "Data types cannot be recursive"
+  reject: true
+"""
+(DataTypeDecl typ
+  (Constr a)
+  (Constr b typ))

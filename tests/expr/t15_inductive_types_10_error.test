@@ -1,0 +1,16 @@
+discard """
+  description: "
+    Inductive data types are nominal types: two data types with an identical
+    structure are not equal in the type system.
+  "
+  reject: true
+"""
+(Module
+  (DataTypeDecl typ1
+    (Constr a)
+    (Constr b))
+  (DataTypeDecl typ2
+    (Constr a)
+    (Constr b))
+  (ProcDecl test typ2 (Params)
+    a))

@@ -1,0 +1,6 @@
+discard """
+  reject: true
+"""
+(DataTypeDecl typ
+  (Constr val (IntTy))
+  (Constr val (FloatTy)))

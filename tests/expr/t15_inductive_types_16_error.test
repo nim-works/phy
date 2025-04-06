@@ -1,0 +1,16 @@
+discard """
+  description: "`Constr` patterns don't introduce variables"
+  reject: true
+"""
+(Module
+  (DataTypeDecl typ
+    (Constr a (IntTy))
+    (Constr b (IntTy)))
+  (ProcDecl test (IntTy) (Params)
+    (Exprs
+      (Decl x (Call a 100))
+      (Match x
+        (Rule (Constr a val)
+          (Asgn val 1))
+        (Rule (Constr b val)
+          (Asgn val 1))))))
