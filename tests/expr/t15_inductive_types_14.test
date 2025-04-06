@@ -1,0 +1,17 @@
+discard """
+  description: "
+    The `As` pattern syntax is used for binding whole data type subtypes to
+    identifiers.
+  "
+  output: "(Constr a 100) : (IntTy)"
+"""
+(Module
+  (DataTypeDecl typ
+    (Constr a (IntTy))
+    (Constr b (IntTy)))
+  (ProcDecl test (IntTy) (Params)
+    (Exprs
+      (Decl x (Call a 100))
+      (Match x
+        (Rule (As y a) y)
+        (Rule (As y b) y)))))

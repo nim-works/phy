@@ -1,0 +1,15 @@
+discard """
+  description: "
+    The immediate subtypes of a data type share their ancestor type, but
+    they're not directly related.
+  "
+  reject: true
+"""
+(Module
+  (DataTypeDecl typ
+    (Constr a (IntTy))
+    (Constr b (IntTy)))
+  (ProcDecl receive (UnitTy) (Params (ParamDecl x a))
+    (Return))
+  (ProcDecl test (UnitTy) (Params)
+    (Call receive (Call b 1))))

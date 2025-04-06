@@ -1,0 +1,9 @@
+discard """
+  description: "Nullary constructors represent values"
+  output: "val : typ
+"""
+(Module
+  (DataTypeDecl typ
+    (Constr val))
+  (ProcDecl test typ (Params)
+    val))
