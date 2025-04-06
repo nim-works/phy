@@ -1,0 +1,6 @@
+discard """
+  output: "1 : (IntTy)"
+"""
+(Exprs
+  (Decl x (ArrayCons 1 2))
+  (At x (IntVal 0)))

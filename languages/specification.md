@@ -14,6 +14,7 @@ strVal   ::= (StringVal <string>)
 expr     ::= <ident>
           |  <intVal>
           |  <floatVal>
+          |  (ArrayCons <expr>+)
           |  (TupleCons <expr>*)
           |  (RecordCons (Field <ident> <expr>)+)
           |  (Seq <texpr> <expr>*)
@@ -39,6 +40,7 @@ texpr    ::= <ident>
           |  (BoolTy)
           |  (IntTy)
           |  (FloatTy)
+          |  (ArrayTy <intVal> <texpr>)
           |  (TupleTy <texpr>*)
           |  (RecordTy (Field <ident> <texpr>)+)
           |  (UnionTy <texpr>+)

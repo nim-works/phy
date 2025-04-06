@@ -260,6 +260,17 @@ proc evalType(c; t; n: NodeIndex): SemType =
   of BoolTy:  prim(tkBool)
   of IntTy:   prim(tkInt)
   of FloatTy: prim(tkFloat)
+  of SourceKind.ArrayTy:
+    let length = t.getInt(t.child(n, 0))
+    let typ = c.expectNot(c.evalType(t, t.child(n, 1)), tkVoid)
+    if length < 0:
+      c.error("array length must not be negative")
+      errorType()
+    elif length > high(uint32).int:
+      c.error("arrays must not have more than 2^32 elements")
+      errorType()
+    else:
+      arrayType(SizeUnit(length), typ)
   of TupleTy:
     if t.len(n) == 0:
       prim(tkUnit)
@@ -347,6 +358,13 @@ proc typeToIL(c; typ: SemType): uint32 =
     c.addType Node(kind: Int, val: 8)
   of tkFloat:
     c.addType Node(kind: Float, val: 8)
+  of tkArray:
+    let elem = c.typeToIL(typ.elem[0])
+    c.addType Array:
+      c.types.add Node(kind: Immediate, val: paddedSize(typ).uint32)
+      c.types.add Node(kind: Immediate, val: alignment(typ).uint32)
+      c.types.add Node(kind: Immediate, val: uint32(typ.length)) # length
+      c.types.add Node(kind: Type, val: elem)
   of tkTuple:
     let args = mapIt(typ.elems, c.typeToIL(it))
     c.addType Record:
@@ -568,6 +586,21 @@ proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
       els.add IrNode(kind: Loop, children: @[loopBody])
       els.add newReturn(dst)
       body = newIf(c.newIntOp(Eq, srcLen, newIntVal(0)), then, els)
+    of tkArray:
+      # set up the loop counter:
+      let counter = newLocal(2)
+      locals.add prim(tkInt)
+      body.add newAsgn(counter, newIntVal(0))
+
+      var loopBody = IrNode(kind: Stmts)
+      loopBody.add newIf(c.newIntOp(Eq, counter, newIntVal(typ.length)),
+                         newBreak(1))
+      loopBody.add newAsgn(newAt(dst, counter),
+        newCall(c.getTypeBoundOp(opCopy, typ.elems[0]), newAt(src, counter)))
+      loopBody.add newAsgn(counter, c.newIntOp(Add, counter, newIntVal(1)))
+
+      body.add IrNode(kind: Loop, children: @[loopBody])
+      body.add newReturn(dst)
     of tkTuple:
       body = IrNode(kind: Stmts)
       # copy each tuple element from the source to the destination:
@@ -621,6 +654,26 @@ proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
         newIf(
           c.newIntOp(Lt, idx, newFieldExpr(s, 0)),
           newReturn(newAddr(c.genSeqAccess(s, idx, typ)))))
+      body.add newUnreachable()
+    of tkArray:
+      # at(arr: pointer, index: int) -> pointer
+      procTy = SemType(kind: tkProc,
+                       elems: @[pointerType, pointerType, prim(tkInt)])
+      params.add 0
+      params.add 1
+      locals.add pointerType
+      locals.add prim(tkInt)
+
+      let
+        arr = newLocal(0)
+        idx = newLocal(1)
+
+      body = IrNode(kind: Stmts)
+      body.add newIf(
+        c.newIntOp(Le, newIntVal(0), idx),
+        newIf(
+          c.newIntOp(Lt, idx, newIntVal(typ.length)),
+          newReturn(newAddr(newAt(newDeref(c.typeToIL(typ), arr), idx)))))
       body.add newUnreachable()
     of tkTuple:
       # at(s: tuple, index: int, tmp: pointer) -> pointer
@@ -1224,6 +1277,37 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       result = prim(tkUnit) + {}
   of SourceKind.Call:
     result = callToIL(c, t, n, expr, stmts) + {}
+  of SourceKind.ArrayCons:
+    let length = t.len(n)
+    if length < high(uint32).int:
+      var
+        elem = prim(tkVoid) # start with the bottom type
+        args = newSeq[Expr](length)
+
+      # analyze the elements and compute the common type:
+      for i, it in t.pairs(n):
+        args[i] = c.exprToIL(t, it)
+        if args[i].typ.kind == tkVoid:
+          c.error("element cannot be of type 'void'")
+          args[i].typ = errorType()
+
+        if elem.kind != tkError:
+          elem = commonType(elem, args[i].typ)
+          if elem.kind == tkError and args[i].typ.kind != tkError:
+            c.error("cannot unify types")
+
+      result = arrayType(length, elem) + {}
+      expr = c.newTemp(result.typ)
+
+      # emit the assignments:
+      for i, it in args.pairs:
+        stmts.add newAsgn(
+          newAt(expr, newIntVal(i)),
+          c.use(c.fitExpr(it, elem), stmts))
+    else:
+      # don't bother analyzing all those elements...
+      c.error("array must not exceed 2^32 elements")
+      result = errorType() + {}
   of SourceKind.TupleCons:
     if t.len(n) > 0:
       var elems = newSeq[SemType](t.len(n))
@@ -1403,8 +1487,8 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       arr = c.exprToIL(t, a)
       idx = c.exprToIL(t, b)
 
-    if arr.typ.kind notin {tkSeq, tkTuple, tkError}:
-      c.error("expected 'seq' or 'tuple' value")
+    if arr.typ.kind notin {tkSeq, tkArray, tkTuple, tkError}:
+      c.error("expected 'seq', 'array' or 'tuple' value")
     if idx.typ.kind notin {tkInt, tkError}:
       c.error("index expression must be of type 'int'")
 
@@ -1424,6 +1508,22 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       #   could render the array stale
       expr = newDeref(c.typeToIL(result.typ),
         newCall(at, @[c.inlineLvalue(arr, stmts), c.capture(idx, stmts)]))
+    of tkArray:
+      result = arr.typ.elem[0] + arr.attribs
+
+      # works the same as a seq access, just without the payload indirection
+      let
+        at = c.getTypeBoundOp(opAt, arr.typ)
+        res = newCall(at, @[newAddr(c.inlineLvalue(arr, stmts)),
+                            c.capture(idx, stmts)])
+      if Lvalue in arr.attribs:
+        # use deferred evaluation
+        expr = newDeref(c.typeToIL(result.typ), res)
+      else:
+        # evaluate the access eagerly
+        let tmp = c.newTemp(pointerType)
+        stmts.add newAsgn(tmp, res)
+        expr = newDeref(c.typeToIL(result.typ), tmp)
     of tkTuple:
       let (typ, _) = unionOf(arr.typ.elems)
       # the result is neither mutable nor is it an lvalue, but lvalue-ness
