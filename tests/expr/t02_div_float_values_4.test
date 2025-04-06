@@ -1,0 +1,7 @@
+discard """
+  description: "
+    Division with subnormal dividend that requires tie-to-even rounding
+  "
+  output: "1e-323 : (FloatTy)"
+"""
+(Call (Ident "/") (FloatVal 2.5e-323) (FloatVal 2.0))

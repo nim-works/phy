@@ -1,0 +1,4 @@
+discard """
+  output: "nan : (FloatTy)"
+"""
+(Call (Ident "/") (FloatVal nan) (FloatVal nan))
