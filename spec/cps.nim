@@ -47,7 +47,7 @@ macro cont*(captures, lambda: untyped): untyped =
   ## continuation construction, with all items in the `captures` list captured
   ## by value (or address).
   lambda.expectKind nnkLambda
-  lambda.pragma.add ident"nimcall"
+  lambda.pragma.add ident"tailcall"
 
   let
     unpack = nnkVarTuple.newTree() ## the capture tuple unpacking
@@ -57,7 +57,7 @@ macro cont*(captures, lambda: untyped): untyped =
   # create the adapter/thunk procedure. It's responsible for unpacking the
   # environment
   let wrapper = newProc(newEmptyNode())
-  wrapper.pragma = nnkPragma.newTree(ident"nimcall")
+  wrapper.pragma = nnkPragma.newTree(ident"tailcall")
   wrapper.body = newStmtList()
   wrapper.params = lambda.params.copyNimTree()
   wrapper.params.add newIdentDefs(ident"env", paramType())
@@ -112,7 +112,7 @@ macro cont*(lambda: untyped): untyped =
   ## continuation construction.
   lambda.expectKind nnkLambda
   lambda.params.add newIdentDefs(ident"env", paramType())
-  lambda.pragma.add ident"nimcall"
+  lambda.pragma.add ident"tailcall"
   result = nnkTupleConstr.newTree(
     lambda,
     nnkObjConstr.newTree(bindSym"CellRef"))
@@ -123,7 +123,7 @@ macro contcc*(typ: untyped): typedesc =
   typ.expectKind nnkProcTy
 
   let ntyp = copyNimTree(typ)
-  ntyp.pragma.add ident"nimcall"
+  ntyp.pragma.add ident"tailcall"
   ntyp[0].add newIdentDefs(ident"env", paramType())
 
   result = nnkTupleConstr.newTree(ntyp, bindSym"CellRef")
