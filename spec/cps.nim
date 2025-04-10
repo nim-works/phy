@@ -27,6 +27,8 @@ proc `=copy`(dst: var CellRef, src: CellRef) =
       dst.p = src.p.copy(src.p)
 
 proc take[T](c: sink CellRef): T {.inline.} =
+  ## Returns the value from the given cell, `c`, which has to have dynamic
+  ## type `T`.
   move (Cell[T])(c.p).val
 
 proc copyImpl[T](x: CellBase): CellBase =
