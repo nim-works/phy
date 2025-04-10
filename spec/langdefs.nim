@@ -982,7 +982,7 @@ proc semPatternIdent(c; n: NimNode, accept: set[NodeKind]): Node =
   of nnkIdent:
     var name = n.strVal
     if name == "_":
-      return Node(kind: nkType, typ: Type(kind: tkAll))
+      return Node(kind: nkType, typ: Type(kind: tkVoid))
 
     let sub = name.find('_')
     if sub != -1:
@@ -1194,11 +1194,15 @@ proc semPredicate(c; n: NimNode): Node =
     n.expectLen 2
     semPremise(c, n[1])
   elif n[0].eqIdent("where"):
-    # it'd be much nicer if `where x, y` could be written as `let x = y`,
-    # but that syntax doesn't work for more complex pattern matching
     n.expectLen 3
-    let pat = semPattern(c, n[1], AllPat)
-    tree(nkMatches, pat, receive(c, n[2], pat.typ))
+    let
+      pat = semPattern(c, n[1], AllPat)
+      e = semExpr(c, n[2])
+    # XXX: this is overly strict. `where` is effectively a dynamic type check,
+    #      so we only need to make sure that the two types (i.e., sets) have
+    #      *some* overlap
+    check(c, e.typ, pat.typ, n[1])
+    tree(nkMatches, pat, e)
   elif n[0].eqIdent("condition"):
     n.expectLen 2
     let term = semExpr(c, n[1])
@@ -1538,7 +1542,9 @@ proc semCase(c; n: NimNode, typ: Type): Node =
             else:
               check(c, it.typ, dest[0], b[i])
         else:
-          check(c, p.typ, dest, b[i])
+          # the pattern must be a subtype of or equal to the matched
+          # expression's type
+          check(c, dest, p.typ, b[i])
         o.add p
     of nnkElse, nnkElseExpr:
       # turn into a "match all" branch

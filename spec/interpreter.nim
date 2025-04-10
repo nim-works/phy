@@ -240,7 +240,9 @@ proc matches(lang; pat, term: Node): Match =
       Match(has: false)
   of nkType:
     case lang[pat.typ].kind
-    of tkAll:
+    of tkVoid, tkAll:
+      # TODO: address the type-system issue(s) that results in 'void'
+      #       and 'all' being the same thing at this stage (they shouldn't be)
       Match(has: true)
     of tkBool:
       test term.kind in {nkTrue, nkFalse}
