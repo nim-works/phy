@@ -213,9 +213,25 @@ const lang* = language:
     of e_1:
       update(e_1, declToLet)
 
-  func desugar(a: expr) -> expr =
+  func desugarExpr(a: expr) -> expr =
     # first expand all sugar, then transform all decls
     declToLet(expand(a))
+
+  func desugarDecl(d: decl) -> decl =
+    case d
+    of ProcDecl(x_1, texpr_1, Params(*paramDecl_1), e_1):
+      ProcDecl(x_1, texpr_1, Params(...paramDecl_1), desugarExpr(e_1))
+    of TypeDecl(x_1, texpr_1):
+      TypeDecl(x_1, texpr_1)
+
+  func desugar(a: module+decl+expr) -> module+decl+expr =
+    case a
+    of e_1:
+      desugarExpr(e_1)
+    of decl_1:
+      Module(desugarDecl(decl_1))
+    of Module(*decl_1):
+      Module(...desugarDecl(decl_1))
 
   ## Type Relations
   ## --------------
