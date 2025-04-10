@@ -111,7 +111,7 @@ const
     "t22_record_type_equality_1.test"
   ]
 
-var typesRel, cstepRel, desugarFnc = -1
+var typesRel, cstepRel, toplevelRel, desugarFnc, reduceModFnc = -1
 
 proc parseSpec(spec: sink string, path: string): TestSpec =
   ## Parses the test specification from `spec`; at least the parts relevant
@@ -252,32 +252,66 @@ proc add(res: var string, n: Node) =
 proc `$`(n: Node): string =
   result.add(n)
 
-proc desugar(n: Node): Option[Node] =
-  ## Returns the desugared version of source language expression `n`.
-  let e = tree(nkCall, Node(kind: nkFunc, id: desugarFnc), n)
+proc applyFunc(id: int, n: sink Node): Option[Node] =
+  ## Generic function application.
+  let e = tree(nkCall, Node(kind: nkFunc, id: id), n)
   try:
     some(interpret(lang, e)[0])
   except Failure:
     none(Node)
 
-proc types(n: Node): Option[Node] =
-  ## Searches for the type the `types` relation relates `n` to. Returns none
-  ## if there there exists no corresponding type.
-  let e = tree(nkCall, Node(kind: nkRelation, id: typesRel),
-               tree(nkTuple, defaultCtx, n))
+proc applyRelation(id: int, n: sink Node): Option[Node] =
+  ## Generic relation application.
+  let e = tree(nkCall, Node(kind: nkRelation, id: id), n)
   try:
     some(interpret(lang, e)[0])
   except Failure, KeyError:
     none(Node)
 
-proc eval(n: Node): Option[Node] =
-  ## Searches for and returns the irreducible expression `n` reduces to.
-  let e = tree(nkCall, Node(kind: nkRelation, id: cstepRel),
-               tree(nkTuple, defaultDynCtx, n))
-  try:
-    some(interpret(lang, e)[0][1])
-  except Failure, KeyError:
-    none(Node)
+proc runTest(e: sink Node, spec: TestSpec): string =
+  ## Implements the main testing. Returns an empty string on success.
+  template unpack(res: Option[Node], msg: string): Node =
+    var tmp = res
+    if tmp.isSome: move tmp.get()
+    else:          return msg
+
+  e = applyFunc(desugarFnc, e).unpack("cannot desugar")
+
+  let
+    isModule = e.kind == nkConstr and e[0].sym == "Module"
+    typ =
+      if isModule:
+        applyRelation(toplevelRel, tree(nkTuple, defaultCtx, e)).
+          map(proc(it: auto): auto = it[1])
+      else:
+        applyRelation(typesRel, tree(nkTuple, defaultCtx, e))
+
+  if spec.reject:
+    if typ.isSome:
+      return "expected type check failure, but got: " & $typ.get
+    else:
+      return ""
+  elif typ.isNone:
+    return "cannot deduce type"
+
+  if spec.deduceOnly:
+    return "" # we're done
+
+  if isModule:
+    e = applyFunc(reduceModFnc, e).unpack("cannot reduce module")
+
+  let val = applyRelation(cstepRel, tree(nkTuple, defaultDynCtx, e)).
+              unpack("cannot reduce")[1]
+  let got = $val & " : " & $typ.get
+  if spec.outputs.len == 0:
+    if isModule and got == "(Unreachable) : (VoidTy)":
+      # XXX: a temporary solution until spectest gets integrated into the
+      #      real test runner
+      discard "ignored"
+    else:
+      result = "an output specification is missing for the test"
+  elif spec.outputs[^1] != got:
+    result = "expected '" & spec.outputs[^1] & "', but got '" & got & "'"
 
 # gather the indices of the relations we need later:
 for i, it in lang.relations.pairs:
@@ -287,18 +321,26 @@ for i, it in lang.relations.pairs:
     typesRel = i
   of "cstep":
     cstepRel = i
+  of "toplevel":
+    toplevelRel = i
 
 for i, it in lang.functions.pairs:
   case it.name
   of "desugar":
     desugarFnc = i
+  of "reduceModule":
+    reduceModFnc = i
 
 if typesRel == -1:
   quit "missing 'mtypes' relation"
 if cstepRel == -1:
   quit "missing 'cstep' relation"
+if toplevelRel == -1:
+  quit "missing 'toplevel' relation"
 if desugarFnc == -1:
   quit "missing 'desugar' function"
+if reduceModFnc == -1:
+  quit "missing 'reduceModule' function"
 
 var total, successful = 0
 
@@ -321,41 +363,12 @@ for (kind, path) in walkDir(getAppDir(), relative=true):
 
     let
       e = convert(fromSexp[syntax_source.NodeKind](s.readAll()), NodeIndex(0))
-      desugared = desugar(e)
+      err = runTest(e, spec)
 
-    var success = false
-    var msg = ""
-    if desugared.isSome:
-      let
-        e {.cursor.} = desugared.get
-        typ = types(e)
-      if spec.reject:
-        success = typ.isNone
-        if not success:
-          msg = "expected type check failure, but got: " & $typ.get
-      else:
-        if typ.isSome:
-          if spec.deduceOnly:
-            success = true
-          else:
-            let val = eval(e)
-            if val.isSome:
-              let got = ($val.get & " : " & $typ.get)
-              if spec.outputs[^1] == got:
-                success = true
-              else:
-                msg = "expected '" & spec.outputs[^1] & "', but got '" & got & "'"
-            else:
-              msg = "cannot reduce"
-        else:
-          msg = "cannot deduce type"
-    else:
-      msg = "cannot desugar"
-
-    if not success:
+    if err != "":
       if path notin issues:
         echo "test failed: ", path
-        echo msg
+        echo err
         programResult = 1
       # else: failure is expected
     else:
