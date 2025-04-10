@@ -692,11 +692,11 @@ const lang* = language:
       condition typ_2 <:= typ_3
       conclusion C_1, With(e_1, n_1, e_2), typ_3
 
-  inductive toplevel(inp C, inp (decl + module), out C):
+  inductive toplevel(inp C, inp (decl + module), out C, out typ):
     rule "S-type-decl":
       premise ttypes(C_1, texpr_1, typ_1)
       where C_2, C_1 + C(symbols: {string_1: type(typ_1)})
-      conclusion C_1, TypeDecl(Ident(string_1), texpr_1), C_2
+      conclusion C_1, TypeDecl(Ident(string_1), texpr_1), C_2, VoidTy()
 
     rule "S-proc-decl":
       condition string_1 notin C_1.symbols
@@ -710,14 +710,25 @@ const lang* = language:
       let C_3 = C_2 + C(ret: typ_1, symbols: map(zip(string_2, typ_2)))
       premise types(C_3, e_1, typ_4)
       condition typ_4 <:= typ_1
-      conclusion C_1, ProcDecl(Ident(string_1), texpr_1, Params(*ParamDecl(Ident(string_2), texpr_2)), e_1), C_2
+      conclusion C_1, ProcDecl(Ident(string_1), texpr_1, Params(*ParamDecl(Ident(string_2), texpr_2)), e_1), C_2, typ_3
 
-    axiom "S-empty-module", C_1, Module(), C_1
+    axiom "S-empty-module", C_1, Module(), C_1, VoidTy()
+
+    rule "S-module-single-proc":
+      # a trailing procedure must have no parameters
+      where ProcDecl(x, typ, Params(), e), decl_1
+      premise toplevel(C_1, decl_1, C_2, ProcTy(typ_1))
+      conclusion C_1, Module(decl_1), C_2, typ_1
+
+    rule "S-module-single-type":
+      where TypeDecl(x, texpr), decl_1
+      premise toplevel(C_1, decl_1, C_2, typ)
+      conclusion C_1, Module(decl_1), C_2, VoidTy()
 
     rule "S-module":
-      premise toplevel(C_1, decl_1, C_2)
-      premise toplevel(C_2, Module(...decl_2), C_3)
-      conclusion C_1, Module(decl_1, *decl_2), C_3
+      premise toplevel(C_1, decl_1, C_2, typ)
+      premise toplevel(C_2, Module(...decl_2), C_3, typ_1)
+      conclusion C_1, Module(decl_1, +decl_2), C_3, typ_1
 
   # TODO: the static semantics also needs to describe how a `(Module ...)` is
   #      reduced to a `(proc ...)` value, which is what a program is, in the
