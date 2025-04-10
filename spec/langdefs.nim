@@ -750,7 +750,9 @@ proc finishUnpack(body: Node, vars: HashSet[int], info: NimNode): Node =
     # order doesn't matter...
     result.add tree(nkBind, Node(kind: nkVar, id: it), Node(kind: nkVar, id: it))
   result.add body
-  result.typ = listT(body.typ)
+  # unpack expressions with no type are okay
+  if body.typ != nil:
+    result.typ = listT(body.typ)
 
 proc semBindingName(c; n: NimNode, typ: Type): Node =
   ## Makes sure `n` is a valid identifier for a binding and - if so -
@@ -863,12 +865,10 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
     else:
       sig = callee.typ
 
-    var isConstr = false
     if callee.kind == nkSymbol:
       # must be a construction expression, which is typed based on shape
       call = Node(kind: nkConstr)
       call.add callee
-      isConstr = true
     elif sig.kind == tkFunc:
       call = Node(kind: nkCall)
       call.add callee
@@ -883,21 +883,29 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
         if not it.input:
           error("relations that bind are only allowed in a 'premise'", n)
 
-    for i in 1..<n.len:
-      let x = recurse(n[i], isConstr)
-      # function applications are type-checked right away
-      if sig.kind == tkFunc:
+    if sig.kind == tkFunc:
+      for i in 1..<n.len:
+        let x = recurse(n[i], false)
         check(c, getParam(sig, i - 1), x.typ, n[i])
-      call.add x
+        call.add x
 
-    if callee.kind == nkSymbol:
-      if not inConstr:
-        typeConstr(c, call, n, isPattern=false)
-      # else: only start typing from the top-level construction expression
+      call.typ = sig[1]
       result = call
     else:
-      # typed directly
-      call.typ = sig[1]
+      # it's a value construction expressions
+      for i in 1..<n.len:
+        if n[i].kind == nnkPrefix and n[i][0].eqIdent("...") and
+           n[i][1].kind == nnkBracket:
+          # group unpacking is allowed in constructions
+          c.unpacked.add initHashSet[int](0) # push an unpack context
+          var body = Node(kind: nkGroup)
+          for it in n[i][1].items:
+            body.add recurse(it, true)
+          call.add finishUnpack(body, c.unpacked.pop(), n[i])
+        else:
+          call.add recurse(n[i], true)
+
+      typeConstr(c, call, n, isPattern=false)
       result = call
   of nnkBracketExpr:
     let a = recurse(n[0])
@@ -974,7 +982,7 @@ proc semPatternIdent(c; n: NimNode, accept: set[NodeKind]): Node =
   of nnkIdent:
     var name = n.strVal
     if name == "_":
-      return Node(kind: nkType, typ: Type(kind: tkAll))
+      return Node(kind: nkType, typ: Type(kind: tkVoid))
 
     let sub = name.find('_')
     if sub != -1:
@@ -1186,11 +1194,15 @@ proc semPredicate(c; n: NimNode): Node =
     n.expectLen 2
     semPremise(c, n[1])
   elif n[0].eqIdent("where"):
-    # it'd be much nicer if `where x, y` could be written as `let x = y`,
-    # but that syntax doesn't work for more complex pattern matching
     n.expectLen 3
-    let pat = semPattern(c, n[1], AllPat)
-    tree(nkMatches, pat, receive(c, n[2], pat.typ))
+    let
+      pat = semPattern(c, n[1], AllPat)
+      e = semExpr(c, n[2])
+    # XXX: this is overly strict. `where` is effectively a dynamic type check,
+    #      so we only need to make sure that the two types (i.e., sets) have
+    #      *some* overlap
+    check(c, e.typ, pat.typ, n[1])
+    tree(nkMatches, pat, e)
   elif n[0].eqIdent("condition"):
     n.expectLen 2
     let term = semExpr(c, n[1])
@@ -1530,7 +1542,9 @@ proc semCase(c; n: NimNode, typ: Type): Node =
             else:
               check(c, it.typ, dest[0], b[i])
         else:
-          check(c, p.typ, dest, b[i])
+          # the pattern must be a subtype of or equal to the matched
+          # expression's type
+          check(c, dest, p.typ, b[i])
         o.add p
     of nnkElse, nnkElseExpr:
       # turn into a "match all" branch
