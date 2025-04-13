@@ -38,6 +38,7 @@ import
     pass_stackAlloc,
     pass25,
     pass30,
+    passllvm,
     trees
   ],
   phy/[
@@ -64,6 +65,7 @@ import passes/syntax_source except NodeKind
 type
   Language = enum
     langBytecode = "vm"
+    langLLVM = "llvm"
     lang0 = "L0"
     lang1 = "L1"
     lang2 = "L2"
@@ -210,7 +212,7 @@ proc compile(tree: var PackedTree[syntax.NodeKind], source, target: Language) =
   var current = source
   while current != target:
     case current
-    of lang0, langBytecode, langSource:
+    of lang0, langBytecode, langSource, langLLVM:
       assert false, "cannot be handled here: " & $current
     of lang1:
       syntaxCheck(tree, lang1_checks, module)
@@ -354,6 +356,10 @@ proc main(args: openArray[string]) =
       syntaxCheck(code, lang0)
       module = pass0.translate(code)
       # the bytecode is verified later
+    elif target == langLLVM:
+      compile(code, newSource, lang3)
+      syntaxCheck(code, lang3)
+      writeFile("out.ll", passllvm.translate(code))
     else:
       compile(code, newSource, target)
       # make sure the output code is correct:
