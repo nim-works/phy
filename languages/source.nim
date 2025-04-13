@@ -73,6 +73,7 @@ const lang* = language:
     Decl(ident, expr)
 
     Let(ident, expr, expr)
+    Letrec(ident, expr, expr)
 
     # syntax not available at the source level:
     True
@@ -213,9 +214,25 @@ const lang* = language:
     of e_1:
       update(e_1, declToLet)
 
-  func desugar(a: expr) -> expr =
+  func desugarExpr(a: expr) -> expr =
     # first expand all sugar, then transform all decls
     declToLet(expand(a))
+
+  func desugarDecl(d: decl) -> decl =
+    case d
+    of ProcDecl(x_1, texpr_1, Params(*paramDecl_1), e_1):
+      ProcDecl(x_1, texpr_1, Params(...paramDecl_1), desugarExpr(e_1))
+    of TypeDecl(x_1, texpr_1):
+      TypeDecl(x_1, texpr_1)
+
+  func desugar(a: module+decl+expr) -> module+decl+expr =
+    case a
+    of e_1:
+      desugarExpr(e_1)
+    of decl_1:
+      Module(desugarDecl(decl_1))
+    of Module(*decl_1):
+      Module(...desugarDecl(decl_1))
 
   ## Type Relations
   ## --------------
@@ -513,6 +530,21 @@ const lang* = language:
       premise mtypes(C_2, e_2, typ_2)
       conclusion C_1, Let(Ident(string_1), e_1, e_2), typ_2
 
+    rule "S-letrec":
+      condition string_1 notin C_1.symbols
+      condition string_1 notin builtIn
+      condition ...(string_2 notin C_1.symbols)
+      condition ...(string_2 notin builtIn)
+      premise ttypes(C_1, texpr_1, typ_1)
+      premise ...ttypes(C_1, texpr_2, typ_2)
+      let typ_3 = ProcTy(typ_1, ...typ_2)
+      let C_2 = C_1 + C(symbols: {string_1: typ_3})
+      let C_3 = C_2 + C(symbols: map(zip(string_2, typ_2)), ret: typ_1)
+      # the procedure symbol is visible to the initializer expression
+      premise mtypes(C_3, e_1, typ)
+      premise mtypes(C_2, e_2, typ_4)
+      conclusion C_1, Letrec(Ident(string_1), `proc`(texpr_1, *[Ident(string_2), texpr_2], e_1), e_2), typ_4
+
     rule "S-exprs":
       premise ...mtypes(C_1, e_1, UnitTy())
       premise types(C_1, e_2, typ_2)
@@ -676,11 +708,11 @@ const lang* = language:
       condition typ_2 <:= typ_3
       conclusion C_1, With(e_1, n_1, e_2), typ_3
 
-  inductive toplevel(inp C, inp (decl + module), out C):
+  inductive toplevel(inp C, inp (decl + module), out C, out typ):
     rule "S-type-decl":
       premise ttypes(C_1, texpr_1, typ_1)
       where C_2, C_1 + C(symbols: {string_1: type(typ_1)})
-      conclusion C_1, TypeDecl(Ident(string_1), texpr_1), C_2
+      conclusion C_1, TypeDecl(Ident(string_1), texpr_1), C_2, VoidTy()
 
     rule "S-proc-decl":
       condition string_1 notin C_1.symbols
@@ -694,14 +726,25 @@ const lang* = language:
       let C_3 = C_2 + C(ret: typ_1, symbols: map(zip(string_2, typ_2)))
       premise types(C_3, e_1, typ_4)
       condition typ_4 <:= typ_1
-      conclusion C_1, ProcDecl(Ident(string_1), texpr_1, Params(*ParamDecl(Ident(string_2), texpr_2)), e_1), C_2
+      conclusion C_1, ProcDecl(Ident(string_1), texpr_1, Params(*ParamDecl(Ident(string_2), texpr_2)), e_1), C_2, typ_3
 
-    axiom "S-empty-module", C_1, Module(), C_1
+    axiom "S-empty-module", C_1, Module(), C_1, VoidTy()
+
+    rule "S-module-single-proc":
+      # a trailing procedure must have no parameters
+      where ProcDecl(x, typ, Params(), e), decl_1
+      premise toplevel(C_1, decl_1, C_2, ProcTy(typ_1))
+      conclusion C_1, Module(decl_1), C_2, typ_1
+
+    rule "S-module-single-type":
+      where TypeDecl(x, texpr), decl_1
+      premise toplevel(C_1, decl_1, C_2, typ)
+      conclusion C_1, Module(decl_1), C_2, VoidTy()
 
     rule "S-module":
-      premise toplevel(C_1, decl_1, C_2)
-      premise toplevel(C_2, Module(...decl_2), C_3)
-      conclusion C_1, Module(decl_1, *decl_2), C_3
+      premise toplevel(C_1, decl_1, C_2, typ)
+      premise toplevel(C_2, Module(...decl_2), C_3, typ_1)
+      conclusion C_1, Module(decl_1, +decl_2), C_3, typ_1
 
   # TODO: the static semantics also needs to describe how a `(Module ...)` is
   #      reduced to a `(proc ...)` value, which is what a program is, in the
@@ -711,12 +754,6 @@ const lang* = language:
   ## -----------------
   ##
   ## The semantics describing how expressions reduce to values.
-  ##
-  ## It is assumed that all identifiers referring to procedures were replaced
-  ## with `(proc r [x p]* body)` prior to evaluation, where `x` and `p` are
-  ## the names and types of the procedure's parameters, `r` is the procedure's
-  ## return type, and `body` is the procedure's body.
-  # TODO: ^^ this must be made explicit in the semantics
 
   ## Auxiliary Functions
   ## ~~~~~~~~~~~~~~~~~~~
@@ -729,6 +766,8 @@ const lang* = language:
       Exprs(...(substitute(e_1, with)))
     of Let(ident_1, e_1, e_2):
       Let(ident_1, substitute(e_1, with), substitute(e_2, with))
+    of Letrec(ident_1, e_1, e_2):
+      Letrec(ident_1, substitute(e_1, with), substitute(e_2, with))
     of If(e_1, e_2, e_3):
       If(substitute(e_1, with), substitute(e_2, with), substitute(e_3, with))
     of Match(e_1, +Rule(As(x_1, texpr_1), e_2)):
@@ -755,6 +794,8 @@ const lang* = language:
       While(substitute(e_1, with), substitute(e_2, with))
     of Return(e_1):
       Return(substitute(e_1, with))
+    of `proc`(typ_1, *[x_2, typ_2], e_1):
+      `proc`(typ_1, ...[x_2, typ_2], substitute(e_1, with))
     of Ident(string_1):
       # the actual substitution
       if string_1 in with:
@@ -1400,6 +1441,13 @@ const lang* = language:
     #       Removing the location from the store could be achieved via a new
     #       `(Pop x)` construct, where `(Let x val e)` reduces to `(Pop x e)`
 
+    rule "E-letrec":
+      let z_1 = DC_1.nloc
+      where val_2, substitute(val_1, {string_1: loc(z_1)})
+      let DC_2 = DC_1 + DC(locs: {z_1 : val_2}, nloc: z_1 + 1)
+      let e_2 = substitute(e_1, {string_1: loc(z_1)})
+      conclusion DC_1, Letrec(Ident(string_1), val_1, e_1), DC_2, e_2
+
     rule "E-asgn":
       let DC_2 = DC_1 + DC(locs: {z_1 : val_1})
       conclusion DC_1, Asgn(loc(z_1), val_1), DC_2, TupleCons()
@@ -1462,6 +1510,18 @@ const lang* = language:
     # ^^ progress. That is, a valid expression is either an irreducible value,
     # or it must be reducible
     ]#
+
+  func reduceModule(a: module) -> expr =
+    ## Describes how a module is reduced to an expression.
+    case a
+    of Module(ProcDecl(x_1, typ_1, Params(), e_1)):
+      # the trailing procedure declaration is the main procedure; it's called
+      # implicitly
+      Letrec(x_1, `proc`(typ_1, e_1), Call(x_1))
+    of Module(ProcDecl(x_1, typ_1, Params(*ParamDecl(x_2, typ_2)), e_1), *TypeDecl(x, texpr), +decl_1):
+      Letrec(x_1, `proc`(typ_1, ...[x_2, typ_2], e_1), reduceModule(Module(...decl_1)))
+    of Module(*TypeDecl(x, texpr)):
+      Unreachable()
 
   inductive cstep(inp DC, inp e, out DC, out e):
     ## Transitive closure of `step`. Relates an expression to the irreducible

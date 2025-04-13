@@ -240,7 +240,9 @@ proc matches(lang; pat, term: Node): Match =
       Match(has: false)
   of nkType:
     case lang[pat.typ].kind
-    of tkAll:
+    of tkVoid, tkAll:
+      # TODO: address the type-system issue(s) that results in 'void'
+      #       and 'all' being the same thing at this stage (they shouldn't be)
       Match(has: true)
     of tkBool:
       test term.kind in {nkTrue, nkFalse}
@@ -572,18 +574,26 @@ proc interpret(c; lang; n: Node, then: sink Next): Node {.tailcall.} =
   of nkTuple:
     then(c, lang,
       Node(kind: nkTuple, children: interpretAll(c, lang, n.children)))
+  of nkGroup:
+    then(c, lang,
+      Node(kind: nkGroup, children: interpretAll(c, lang, n.children)))
   of nkSet:
     then(c, lang,
       Node(kind: nkSet, children: interpretAll(c, lang, n.children)))
   of nkConstr:
+    proc append(to: var seq[Node], n: sink Node) {.nimcall.} =
+      # groups in this context can have a nesting depth of at most 2, so using
+      # recursion here is fine
+      case n.kind
+      of nkGroup:
+        for i in 0..<n.len:
+          append(to, move n[i])
+      else:
+        to.add n
+
     var elems: seq[Node]
     for it in n.children.items:
-      let elem = eval(c, lang, it)
-      if elem.kind == nkGroup:
-        # inline the items into the construction
-        elems.add elem.children
-      else:
-        elems.add elem
+      append(elems, eval(c, lang, it))
 
     then(c, lang, Node(kind: nkConstr, children: elems))
   of nkVar:
