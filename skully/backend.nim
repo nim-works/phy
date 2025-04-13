@@ -1389,14 +1389,19 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       bu.add typeRef(c, env, tree[n].typ)
       value(tree.argument(n, 0))
       value(tree.argument(n, 1))
-  of mOrd:
-    wrapAsgn:
-      value(tree.argument(n, 0))
-  of mChr:
-    wrapAsgn Conv:
-      bu.add typeRef(c, env, tree[n].typ)
-      bu.add typeRef(c, env, tree[tree.argument(n, 0)].typ)
-      value(tree.argument(n, 0))
+  of mOrd, mChr:
+    # converts the operand to an int or char
+    let dst = typeRef(c, env, tree[n].typ)
+    let src = typeRef(c, env, tree[tree.argument(n, 0)].typ)
+    if dst == src:
+      # copies, but otherwise a no-op
+      wrapAsgn:
+        value(tree.argument(n, 0))
+    else:
+      wrapAsgn Conv:
+        bu.add dst
+        bu.add src
+        value(tree.argument(n, 0))
   of mIncl, mExcl, mLtSet, mLeSet, mEqSet, mMinusSet, mPlusSet, mMulSet,
      mInSet:
     c.genSetOp(env, tree, n, dest, stmts)
