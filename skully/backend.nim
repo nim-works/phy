@@ -2283,40 +2283,39 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
           bu.add typeRef(c, env, dst)
           bu.add typeRef(c, env, src)
           value tree.child(n, 0)
-      elif isUnsigned(dst):
-        if isUnsigned(src):
-          # a simple conversion (i.e., a zero extension) is enough
-          wrapAsgn Conv:
-            bu.add typeRef(c, env, dst)
-            bu.add typeRef(c, env, src)
-            value tree.child(n, 0)
-        else:
-          wrapAsgn Conv:
-            bu.add typeRef(c, env, dst)
-            bu.add node(UInt, b.uint32)
-            bu.subTree Reinterp:
-              bu.add node(UInt, b.uint32)
-              bu.add typeRef(c, env, src)
-              value tree.child(n, 0)
-      elif isUnsigned(src):
-        wrapAsgn Reinterp:
-          bu.add typeRef(c, env, dst)
-          bu.add node(UInt, a.uint32)
-          bu.subTree Conv:
-            bu.add node(UInt, a.uint32)
-            bu.add typeRef(c, env, src)
-            value tree.child(n, 0)
       else:
-        wrapAsgn Reinterp:
-          bu.add typeRef(c, env, dst)
-          bu.add node(UInt, a.uint32)
-          bu.subTree Conv:
-            bu.add node(UInt, a.uint32)
-            bu.add node(UInt, b.uint32)
+        var tmp = makeExpr src:
+          value tree.child(n, 0)
+
+        const UInts = [1: UInt8Type, 2: UInt16Type, UInt32Type, 4: UInt32Type,
+                       UInt64Type, UInt64Type, UInt64Type, 8: UInt64Type]
+          ## byte-width to type map
+
+        if not isUnsigned(src):
+          # cast to uint first, as only uint values can be zero extended
+          # or truncated
+          tmp = makeExpr UInts[b]:
             bu.subTree Reinterp:
-              bu.add node(UInt, b.uint32)
+              bu.add typeRef(c, env, UInts[b])
               bu.add typeRef(c, env, src)
-              value tree.child(n, 0)
+              bu.use tmp
+
+        # truncate or zero extend (both done via Conv at the moment)
+        tmp = makeExpr UInts[b]:
+          bu.subTree Conv:
+            bu.add typeRef(c, env, UInts[a])
+            bu.add typeRef(c, env, UInts[b])
+            bu.use tmp
+
+        if isPointer(dst) or not isUnsigned(dst):
+          # cast to the destination type
+          tmp = makeExpr dst:
+            bu.subTree Reinterp:
+              bu.add typeRef(c, env, dst)
+              bu.add typeRef(c, env, UInts[a])
+              bu.use tmp
+
+        genAsgn(dest, tmp, stmts)
   else:
     unreachable()
 
