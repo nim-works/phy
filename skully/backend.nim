@@ -1946,10 +1946,18 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     wrapAsgn:
       value(n)
   of mnkConv, mnkStdConv:
-    wrapAsgn Conv:
-      bu.add typeRef(c, env, tree[n].typ)
-      bu.add typeRef(c, env, tree[n, 0].typ)
-      value(tree.child(n, 0))
+    let dstTyp = typeRef(c, env, tree[n].typ)
+    let srcTyp = typeRef(c, env, tree[n, 0].typ)
+    if dstTyp == srcTyp:
+      # happens for pointer <-> cstring and ptr <-> pointer conversions.
+      # These types are identical at the IL level, so no conversion is needed
+      wrapAsgn:
+        value tree.child(n, 0)
+    else:
+      wrapAsgn Conv:
+        bu.add dstTyp
+        bu.add srcTyp
+        value(tree.child(n, 0))
   of mnkCopy, mnkMove, mnkSink:
     wrapAsgn:
       value(tree.child(n, 0))
@@ -2267,8 +2275,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         bu.add node(IntVal, c.lit.pack(size))
     else:
       template isUnsigned(id: TypeId): bool =
-        env.types.headerFor(id, Lowered).kind in
-          {tkPtr, tkPointer, tkRef, tkUInt, tkChar, tkBool}
+        env.types.headerFor(id, Lowered).kind in {tkUInt, tkChar, tkBool}
 
       let a = env.types.headerFor(dst, Lowered).size(env.types)
       let b = env.types.headerFor(src, Lowered).size(env.types)
@@ -2307,7 +2314,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
             bu.add typeRef(c, env, UInts[b])
             bu.use tmp
 
-        if isPointer(dst) or not isUnsigned(dst):
+        if not isUnsigned(dst):
           # cast to the destination type
           tmp = makeExpr dst:
             bu.subTree Reinterp:
