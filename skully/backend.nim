@@ -385,7 +385,7 @@ proc translate(c; env: TypeEnv, id: TypeId, bu) =
   of tkUInt:
     bu.add node(UInt, desc.size(env).uint32)
   of tkPointer:
-    bu.add node(UInt, desc.size(env).uint32)
+    bu.add node(Ptr, 0)
   of tkBool, tkChar:
     bu.add node(UInt, 1)
   of tkArray:
@@ -560,6 +560,12 @@ proc genConst(c; env; tree; n; dest: Expr, stmts) =
   template putIntoDest(n: Node) =
     stmts.putInto dest, n
 
+  template addPtrLit(bu: var Builder[NodeKind], i: int64) =
+    bu.subTree Reinterp:
+      bu.add typeRef(c, env, PointerType)
+      bu.add typeRef(c, env, UInt64Type)
+      bu.add node(IntVal, c.lit.pack(i))
+
   iterator args(tree; n): (int, NodePosition) =
     var i = 0
     for it in tree.items(n, 0, ^1):
@@ -598,19 +604,19 @@ proc genConst(c; env; tree; n; dest: Expr, stmts) =
   of mnkStrLit:
     let str {.cursor.} = env[tree[n].strVal]
 
-    proc emitString(c; str: string, data: uint32, stmts) {.nimcall.} =
+    proc emitString(c; env; str: string, data: uint32, stmts) {.nimcall.} =
       # there's no built-in support for strings in the ILs/VM, requiring
       # the manual initialization of each character
       for i, it in pairs(str):
         stmts.addStmt NodeKind.Store:
           bu.add node(UInt, 1)
-          bu.add node(IntVal, c.lit.pack(int64(data) + i))
+          bu.addPtrLit int64(data) + i
           bu.add node(IntVal, c.lit.pack(ord it))
 
       # emit the NUL terminator:
       stmts.addStmt NodeKind.Store:
         bu.add node(UInt, 1)
-        bu.add node(IntVal, c.lit.pack(int64(data) + str.len))
+        bu.addPtrLit int64(data) + str.len
         bu.add node(IntVal, c.lit.pack(0))
 
     case env.types.headerFor(typ, Canonical).kind
@@ -619,9 +625,12 @@ proc genConst(c; env; tree; n; dest: Expr, stmts) =
       # terminator
       let data = c.globalsAddress + AddressBias
       c.globalsAddress += str.len.uint32 + 1
-      c.emitString(str, data, stmts)
+      c.emitString(env, str, data, stmts)
 
-      putIntoDest node(IntVal, c.lit.pack(data.int64))
+      stmts.putInto dest, Reinterp:
+        bu.add typeRef(c, env, PointerType)
+        bu.add typeRef(c, env, UInt64Type)
+        bu.add node(IntVal, c.lit.pack(data.int64))
     of tkString:
       # it's a NimSkull string (a length + payload pointer)
       let
@@ -633,10 +642,10 @@ proc genConst(c; env; tree; n; dest: Expr, stmts) =
       # emit the capacity initialization:
       stmts.addStmt NodeKind.Store:
         bu.add typeRef(c, env, env.types.sizeType)
-        bu.add node(IntVal, c.lit.pack(data.int64))
+        bu.addPtrLit data.int64
         bu.add node(IntVal, c.lit.pack(str.len or StrLitFlag))
 
-      c.emitString(str, data + 8, stmts)
+      c.emitString(env, str, data + 8, stmts)
 
       stmts.addStmt Asgn:
         bu.subTree Field:
@@ -647,7 +656,7 @@ proc genConst(c; env; tree; n; dest: Expr, stmts) =
         bu.subTree Field:
           bu.useLvalue dest
           bu.add node(Immediate, 1)
-        bu.add node(IntVal, c.lit.pack(data.int64))
+        bu.addPtrLit data.int64
     else:
       unreachable()
   of mnkSeqConstr:
@@ -678,12 +687,12 @@ proc genConst(c; env; tree; n; dest: Expr, stmts) =
       bu.subTree Field:
         bu.useLvalue dest
         bu.add node(Immediate, 1)
-      bu.add node(IntVal, c.lit.pack(payloadAddr.int64))
+      bu.addPtrLit payloadAddr.int64
 
     # emit the capacity initialization:
     stmts.addStmt NodeKind.Store:
       bu.add typeRef(c, env, env.types.sizeType)
-      bu.add node(IntVal, c.lit.pack(payloadAddr.int64))
+      bu.addPtrLit payloadAddr.int64
       bu.add node(IntVal, c.lit.pack(tree.len(n) or StrLitFlag))
 
     # emit the payload data initialization:
@@ -691,7 +700,7 @@ proc genConst(c; env; tree; n; dest: Expr, stmts) =
       let nDest = makeExpr elem:
         bu.subTree Deref:
           bu.add typeRef(c, env, elem)
-          bu.add node(IntVal, c.lit.pack(dataAddr.int64 + size * i))
+          bu.addPtrLit (dataAddr.int64 + size * i)
 
       c.genConst(env, tree, it, nDest, stmts)
   of mnkSetConstr:
@@ -766,6 +775,14 @@ proc genExit(c; tree; n; bu) =
   else:
     unreachable()
 
+proc loadGlobalAddr(c; env: MirEnv, id: uint32, bu) =
+  ## Emits a load of the address stored in the global with the given id.
+  bu.subTree Reinterp:
+    bu.add typeRef(c, env, PointerType)
+    bu.add typeRef(c, env, UInt64Type)
+    bu.subTree Copy:
+      bu.add Node(kind: Global, val: id)
+
 proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition,
                     wantValue: bool, bu) =
   ## `wantValue` tells translation an rvalue expression is expected.
@@ -785,12 +802,11 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition,
 
   case tree[n].kind
   of mnkGlobal:
-    # all globals are pointers (because the target IL doesn't support mutable
-    # global variables)
+    # all globals are offsets into static memory (because the target IL
+    # doesn't support mutable global variables)
     bu.subTree (if wantValue: Load else: Deref):
       bu.add typeRef(c, env, tree[n].typ)
-      bu.subTree Copy:
-        bu.add node(Global, c.globalsMap[tree[n].global])
+      c.loadGlobalAddr(env, c.globalsMap[tree[n].global], bu)
   of mnkNilLit:
     bu.add node(IntVal, 0)
   of mnkIntLit, mnkUIntLit:
@@ -826,13 +842,11 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition,
 
       bu.subTree (if wantValue: Load else: Deref):
         bu.add typeRef(c, env, tree[n].typ)
-        bu.subTree Copy:
-          bu.add node(Global, c.dataMap[extract(id)])
+        c.loadGlobalAddr(env, c.dataMap[extract(id)], bu)
     else:
       bu.subTree (if wantValue: Load else: Deref):
         bu.add typeRef(c, env, tree[n].typ)
-        bu.subTree Copy:
-          bu.add node(Global, c.constMap[tree[n].cnst])
+        c.loadGlobalAddr(env, c.constMap[tree[n].cnst], bu)
   of mnkProcVal:
     bu.add node(ProcVal, c.registerProc(tree[n].prc))
   of mnkDeref, mnkDerefView:
@@ -964,8 +978,7 @@ proc getTypeInfoV2(c; env: var MirEnv, typ: TypeId): Expr =
     c.rttiCache[typ] = global
 
   result = makeExpr PointerType:
-    bu.subTree Copy:
-      bu.add node(Global, global)
+    c.loadGlobalAddr(env, global, bu)
 
 proc genDefault(c; env: var MirEnv; dest: Expr, typ: TypeId, bu) =
   let typ = env.types.canonical(typ)
@@ -2764,8 +2777,7 @@ proc generateCodeForMain(c; env: var MirEnv; m: Module,
     let dest = makeExpr typ:
       bu.subTree Deref:
         bu.add typeRef(c, env, typ)
-        bu.subTree Copy:
-          bu.add node(Global, id)
+        c.loadGlobalAddr(env, id, bu)
 
     c.genConst(env, env[cnst], NodePosition(0), dest, bu)
 
@@ -2774,12 +2786,10 @@ proc generateCodeForMain(c; env: var MirEnv; m: Module,
   for cnst, id in c.constMap.pairs:
     bu.subTree NodeKind.Store:
       bu.add typeRef(c, env, env.types.add(env[cnst].typ))
-      bu.subTree Copy:
-        bu.add node(Global, id)
+      c.loadGlobalAddr(env, id, bu)
       bu.subTree Load:
         bu.add typeRef(c, env, env.types.add(env[cnst].typ))
-        bu.subTree Copy:
-          bu.add node(Global, c.dataMap[env.dataFor(cnst)])
+        c.loadGlobalAddr(env, c.dataMap[env.dataFor(cnst)], bu)
 
   c.prc.active = true
   genAll(env, body.code, bu, c)
