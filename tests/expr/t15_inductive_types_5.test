@@ -1,0 +1,9 @@
+discard """
+  description: "Non-nullary constructors are functions"
+  output: "(proc ...) : (ProcTy binary (IntTy) (FloatTy))"
+"""
+(Module
+  (DataTypeDecl typ
+    (Constr binary (IntTy) (FloatTy)))
+  (ProcDecl test (ProcTy val (IntTy) (FloatTy)) (Params)
+    val))
