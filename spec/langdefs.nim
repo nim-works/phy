@@ -1148,6 +1148,55 @@ proc checkRPattern(n: Node, info: NimNode) =
   if not foundHole:
     error("pattern is missing a hole", info)
 
+proc plugPattern(c: Context, into: int, n: Node): seq[Node] =
+  ## Tries to plug the hole of `into` with the or-pattern `hole` (which also
+  ## has a hole). This only works for purely self-recursive patterns.
+  # consider the following recursive pattern-with-a-hole:
+  #   E ::= . | A(E) | B(E)
+  # (the dot stands for a hole).
+  # Now there's second recursive pattern, looking like this:
+  #   E' ::= E[E'] | C(E')
+  # Plugging `E` with `E'` means replacing the hole in `E` with `E'`, which
+  # results in:
+  #   E[E'] = E' | A(E' | A(E[E']) | B(E[E'])) | B(E' | A(E[E']) | B(E[E']))
+  # (for demonstration purposes, E is inlined into the A and B patterns once).
+  # Inlining E' gets us:
+  #   E[E'] = E[E'] | C(E') | A(E[E']) | B(E[E'])
+  # `X ::= X | Y`` is equal to `X ::= Y`, so the simplified version is just:
+  #   E[E'] = C(E') | A(E[E']) | B(E[E'])
+  # putting this back into E' gets us:
+  #   E' ::= C(E') | A(E[E']) | B(E[E']) | C(E')
+  # `C(E')` appears twice, so the second appearance can be removed:
+  #   E' ::= C(E') | A(E[E']) | B(E[E'])
+  # `E'` is identical to `E[E']`! This allows for a final simplification:
+  #   E' ::= C(E') | A(E') | B(E')
+  # In other words, plugging a self-recursive pattern `x` with self-
+  # recursive pattern `y` can be achieved by just replacing all holes and
+  # self-references in `x` with `y` and merging the result into `y`.
+  proc plug(n: Node, id: int, with: Node): Node {.nimcall.} =
+    case n.kind
+    of nkContext:
+      if n.id == id:
+        with
+      else:
+        error("pattern is too complex")
+        unreachable()
+    of nkHole:
+      with
+    of withChildren:
+      var r = Node(kind: n.kind)
+      for it in n.children.items:
+        r.add plug(it, id, with)
+      r
+    else:
+      n
+
+  for it in c.matchers[into].patterns.items:
+    let x = plug(it, into, n)
+    # drop immediate self recursion
+    if x.kind != nkContext:
+      result.add x
+
 proc semPremise(c; n: NimNode): Node =
   var n = n
   # premises may be wrapped in an ellipsis, which designates them as being
@@ -1870,11 +1919,25 @@ proc sem(body: NimNode): LangDef =
         let id = c.lookup[name(it[1])].id
         it[2].expectKind nnkStmtList
         for x in it[2].items:
-          var pat = semPattern(c, x, {nkContext, nkHole, nkConstr})
-          checkRPattern(pat, x)
-          c.finalize(pat) # resolve type variables
-          c.flushVars()
-          c.matchers[id].patterns.add pat
+          # TODO: this special handling shouldn't be needed. A "context" is
+          #       just a named or-pattern, and it should therefore be allowed
+          #       to be made of arbitrary sub patterns (the restrictions w.r.t.
+          #       holes still apply)
+          if x.kind == nnkBracketExpr:
+            let pat = semPattern(c, x, {nkPlug, nkContext})
+            # only self recursion is allowed at the moment
+            if pat[1].kind == nkContext and pat[1].id == id:
+              let patterns =
+                plugPattern(c, pat[0].id, Node(kind: nkContext, id: id))
+              c.matchers[id].patterns.add patterns
+            else:
+              error(fmt"plugged-with pattern must be '{name(it[1])}'", x)
+          else:
+            var pat = semPattern(c, x, {nkContext, nkHole, nkConstr})
+            checkRPattern(pat, x)
+            c.finalize(pat) # resolve type variables
+            c.flushVars()
+            c.matchers[id].patterns.add pat
     of nnkFuncDef:
       c.lookup.withValue name(macros.name(it)), val:
         c.functions[val.id] = semFunction(c, it, val.typ)
