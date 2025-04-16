@@ -1245,9 +1245,8 @@ const lang* = language:
     Return(hole)
 
   context B:
-    E
-    #E[B]
-    # FIXME: not allowed according to the new rules. Needs a workaround...
+    hole
+    E[B]
     Frame(typ, B)
 
   ## Reductions and Steps
@@ -1475,27 +1474,32 @@ const lang* = language:
   inductive step(inp DC, inp e, out DC, out e):
     rule "E-reduce-pure":
       premise pReducesTo(e_1, e_2)
-      conclusion DC_1, E_1[e_1], DC_1, E_1[e_2]
+      conclusion DC_1, B_1[e_1], DC_1, B_1[e_2]
 
     rule "E-reduce-impure":
       premise reducesTo(DC_1, e_1, DC_2, e_2)
-      conclusion DC_1, E_1[e_1], DC_2, E_1[e_2]
+      conclusion DC_1, B_1[e_1], DC_2, B_1[e_2]
 
     rule "E-load":
       # an automatic load only takes place:
       # * outside of lvalue positions
       # * in the root of otherwise fully evaluated lvalue expressions
-      conclusion DC_1, E_1[F_1[L_1[loc(z_1)]]],
-                 DC_1, E_1[F_1[L_1[DC_1.locs(z_1)]]]
+      conclusion DC_1, B_1[F_1[L_1[loc(z_1)]]],
+                 DC_1, B_1[F_1[L_1[DC_1.locs(z_1)]]]
     rule "E-load-top":
       # top-level version of E-load
       conclusion DC_1, L_1[loc(z_1)],
                  DC_1, L_1[DC_1.locs(z_1)]
 
     rule "E-return":
-      conclusion DC_1, B_1[Frame(typ, E_1[Return(val_1)])], DC_1, B_1[val_1]
+      conclusion DC_1, B_1[Frame(typ_1, E_1[Return(val_1)])],
+                 DC_1, B_1[Frame(typ_1, val_1)]
     rule "E-return-unit":
-      conclusion DC_1, B_1[Frame(typ, E_1[Return()])], DC_1, B_1[TupleCons()]
+      conclusion DC_1, B_1[Frame(typ_1, E_1[Return()])],
+                 DC_1, B_1[Frame(typ_1, TupleCons())]
+    rule "E-unwind":
+      conclusion DC_1, B_1[Frame(typ, val_1)],
+                 DC_1, B_1[val_1]
 
     rule "E-unreachable":
       conclusion DC_1, B_1[Unreachable()], DC_1, Unreachable()
