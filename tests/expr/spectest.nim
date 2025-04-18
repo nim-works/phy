@@ -124,6 +124,10 @@ proc convert(tree: PackedTree[syntax_source.NodeKind], n: NodeIndex): Node =
     tree(nkConstr,
       sym("FloatVal"),
       convertFloat(tree.getFloat(n)))
+  of StringVal:
+    tree(nkConstr,
+      sym("StringVal"),
+      Node(kind: nkString, sym: tree.getString(n)))
   of Ident:
     tree(nkConstr,
       sym("Ident"),
