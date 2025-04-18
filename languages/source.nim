@@ -452,6 +452,7 @@ const lang* = language:
 
     rule "S-return":
       premise mtypes(C_1, e_1, typ_1)
+      condition typ_1 != VoidTy()
       condition typ_1 <:= C_1.ret
       conclusion C_1, Return(e_1), VoidTy()
 
