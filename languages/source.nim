@@ -1534,6 +1534,8 @@ const lang* = language:
       Letrec(x_1, `proc`(typ_1, ...[x_2, typ_2], e_1), reduceModule(Module(...decl_1)))
     of Module(*TypeDecl(x, texpr)):
       Unreachable()
+    of Module(+TypeDecl(x, texpr), +decl_1):
+      reduceModule(Module(...decl_1))
 
   inductive cstep(inp DC, inp e, out DC, out e):
     ## Transitive closure of `step`. Relates an expression to the irreducible
