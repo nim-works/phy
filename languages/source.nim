@@ -456,7 +456,7 @@ const lang* = language:
       conclusion C_1, Return(e_1), VoidTy()
 
     rule "S-return-unit":
-      condition C_1.ret == UnitTy()
+      condition UnitTy() <:= C_1.ret
       conclusion C_1, Return(), VoidTy()
 
     rule "S-field":
