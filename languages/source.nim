@@ -1190,11 +1190,6 @@ const lang* = language:
               files: ((string, z) -> val)} # name + time -> content
   ## `DC` is the dynamic context
 
-  func utf8Bytes(_: string) -> *z
-    # TODO: the function is mostly self-explanatory, but it should be defined in
-    #       a bit more detail nonetheless
-    ##
-
   ## Evaluation Contexts
   ## ~~~~~~~~~~~~~~~~~~~
 
@@ -1303,6 +1298,10 @@ const lang* = language:
           Asgn(le_1, With(le_1, string_1, val_1))
 
     axiom "E-seq-cons", Seq(typ, *val_1), `array`(...val_1)
+
+    rule "E-string-cons":
+      let b = bytes(string_1)
+      conclusion Seq(StringVal(string_1)), array(...char(b))
 
     rule "E-at":
       condition 0 <= n_1
@@ -1432,10 +1431,6 @@ const lang* = language:
       conclusion Call(val_1, *val_2), Frame(typ_r, e_2)
 
   inductive reducesTo(inp DC, inp e, out DC, out e):
-    rule "E-string-cons":
-      # FIXME: doesn't need to be an impure reduction
-      where *z_1, utf8Bytes(string_1)
-      conclusion DC_1, Seq(StringVal(string_1)), DC_1, array(...IntVal(z_1))
 
     rule "E-let-introduce":
       let z_1 = DC_1.nloc
