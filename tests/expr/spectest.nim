@@ -31,8 +31,6 @@ const
        files: {:}))
     ## the initial dynamic context to pass to `cstep`
   issues = [ # tests that are currently expected to fail
-    "t19_write.test",
-    "t19_writeErr.test",
     "t20_readFile.test",
     "t20_readFile_missing.test",
     "t22_record_type_equality_1.test"
