@@ -443,7 +443,8 @@ const lang* = language:
 
     rule "S-seq-cons":
       premise ttypes(C_1, texpr_1, typ_1)
-      premise ...types(C_1, e_2, typ_2)
+      condition typ_1 != VoidTy()
+      premise ...mtypes(C_1, e_2, typ_2)
       condition ...(typ_2 <:= typ_1)
       conclusion C_1, Seq(texpr_1, *e_2), SeqTy(typ_1)
 
@@ -451,11 +452,12 @@ const lang* = language:
 
     rule "S-return":
       premise mtypes(C_1, e_1, typ_1)
+      condition typ_1 != VoidTy()
       condition typ_1 <:= C_1.ret
       conclusion C_1, Return(e_1), VoidTy()
 
     rule "S-return-unit":
-      condition C_1.ret == UnitTy()
+      condition UnitTy() <:= C_1.ret
       conclusion C_1, Return(), VoidTy()
 
     rule "S-field":
@@ -526,6 +528,7 @@ const lang* = language:
       condition string_1 notin C_1.symbols
       condition string_1 notin builtIn
       premise mtypes(C_1, e_1, typ_1)
+      condition typ_1 != VoidTy()
       let C_2 = C_1 + C(symbols: {string_1: mut(typ_1)})
       premise mtypes(C_2, e_2, typ_2)
       conclusion C_1, Let(Ident(string_1), e_1, e_2), typ_2
@@ -580,13 +583,14 @@ const lang* = language:
     rule "S-while":
       premise mtypes(C_1, e_1, BoolTy())
       premise mtypes(C_1, e_2, typ_1)
+      condition not same(e_1, Ident("true"))
       condition typ_1 in {VoidTy(), UnitTy()}
       conclusion C_1, While(e_1, e_2), UnitTy()
 
-    rule "S-while":
+    rule "S-while-true":
       premise mtypes(C_1, e_1, typ_1)
       condition typ_1 in {VoidTy(), UnitTy()}
-      conclusion C_1, While(True, e_1), VoidTy()
+      conclusion C_1, While(Ident("true"), e_1), VoidTy()
 
     rule "S-builtin-not":
       premise mtypes(C_1, e_1, typ_1)
@@ -664,7 +668,7 @@ const lang* = language:
       premise mtypes(C_1, e_1, SeqTy(typ_1))
       premise mtypes(C_1, e_2, typ_2)
       condition typ_2 <:= typ_1
-      conclusion C_1, Call(Ident("concat"), e_1, e_2), UnitTy()
+      conclusion C_1, Call(Ident("concat"), e_1, e_2), SeqTy(typ_1)
 
     rule "S-builtin-write":
       premise mtypes(C_1, e_1, SeqTy(CharTy()))
@@ -710,12 +714,17 @@ const lang* = language:
 
   inductive toplevel(inp C, inp (decl + module), out C, out typ):
     rule "S-type-decl":
+      condition string_1 notin C_1.symbols
+      condition string_1 notin builtIn
       premise ttypes(C_1, texpr_1, typ_1)
       where C_2, C_1 + C(symbols: {string_1: type(typ_1)})
       conclusion C_1, TypeDecl(Ident(string_1), texpr_1), C_2, VoidTy()
 
     rule "S-proc-decl":
       condition string_1 notin C_1.symbols
+      condition string_1 notin builtIn
+      condition ...(string_2 notin C_1.symbols)
+      condition ...(string_2 notin builtIn)
       condition unique(string_2) # all symbols must be unique
       condition string_1 notin string_2
       premise ttypes(C_1, texpr_1, typ_1)
@@ -1181,11 +1190,6 @@ const lang* = language:
               files: ((string, z) -> val)} # name + time -> content
   ## `DC` is the dynamic context
 
-  func utf8Bytes(_: string) -> *z
-    # TODO: the function is mostly self-explanatory, but it should be defined in
-    #       a bit more detail nonetheless
-    ##
-
   ## Evaluation Contexts
   ## ~~~~~~~~~~~~~~~~~~~
 
@@ -1294,6 +1298,10 @@ const lang* = language:
           Asgn(le_1, With(le_1, string_1, val_1))
 
     axiom "E-seq-cons", Seq(typ, *val_1), `array`(...val_1)
+
+    rule "E-string-cons":
+      let b = bytes(string_1)
+      conclusion Seq(StringVal(string_1)), array(...char(b))
 
     rule "E-at":
       condition 0 <= n_1
@@ -1423,10 +1431,6 @@ const lang* = language:
       conclusion Call(val_1, *val_2), Frame(typ_r, e_2)
 
   inductive reducesTo(inp DC, inp e, out DC, out e):
-    rule "E-string-cons":
-      # FIXME: doesn't need to be an impure reduction
-      where *z_1, utf8Bytes(string_1)
-      conclusion DC_1, Seq(StringVal(string_1)), DC_1, array(...IntVal(z_1))
 
     rule "E-let-introduce":
       let z_1 = DC_1.nloc
@@ -1526,6 +1530,8 @@ const lang* = language:
       Letrec(x_1, `proc`(typ_1, ...[x_2, typ_2], e_1), reduceModule(Module(...decl_1)))
     of Module(*TypeDecl(x, texpr)):
       Unreachable()
+    of Module(+TypeDecl(x, texpr), +decl_1):
+      reduceModule(Module(...decl_1))
 
   inductive cstep(inp DC, inp e, out DC, out e):
     ## Transitive closure of `step`. Relates an expression to the irreducible

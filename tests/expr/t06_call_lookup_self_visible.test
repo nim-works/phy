@@ -1,8 +1,6 @@
 discard """
-  description: "Ensure that a procedure name is visible to its body."
+  description: "Ensure that a procedure name is visible to its body"
+  arguments: "c" # don't evaluate; the program describes an infinite loop
 """
-(Module
-  (ProcDecl (Ident "a") (UnitTy) (Params)
-    (Return (Call (Ident "a"))))
-  (ProcDecl (Ident "main") (UnitTy) (Params)
-    (Return)))
+(ProcDecl (Ident "a") (UnitTy) (Params)
+  (Return (Call (Ident "a"))))

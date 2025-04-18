@@ -1820,6 +1820,8 @@ proc sem(body: NimNode): LangDef =
   c.builtin("trunc", fntype(ratType, intType))
   c.builtin("^", forall(1, fntype(tup(tvar(0), intType), tvar(0))))
   c.builtin("*", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
+  c.builtin("bytes", fntype(listT(intType), listT(intType)))
+  # TODO: ^^ only accept string values as input, not arbitrary int lists
 
   # first pass: make sure the broad shape of `body` is correct and collect the
   # names of all symbols while looking for and reporting collisions

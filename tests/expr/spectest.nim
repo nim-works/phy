@@ -31,22 +31,6 @@ const
        files: {:}))
     ## the initial dynamic context to pass to `cstep`
   issues = [ # tests that are currently expected to fail
-    "t05_proc_with_union_return_type.test",
-    "t05_return_operand_cannot_be_void.test",
-    "t06_call_lookup_self_visible.test",
-    "t06_declared_type_usage.test",
-    "t06_redeclaration_error_2.test",
-    "t06_redeclaration_error_3.test",
-    "t09_decl_void_error.test",
-    "t15_while_true.test",
-    "t16_seq_construct_with_void_error.test",
-    "t17_seq_concat_to_empty.test",
-    "t17_seq_concat_to_non_empty.test",
-    "t17_seq_copy_4.test",
-    "t18_seq_character_string_1.test",
-    "t18_seq_character_string_2.test",
-    "t19_write.test",
-    "t19_writeErr.test",
     "t20_readFile.test",
     "t20_readFile_missing.test",
     "t22_record_type_equality_1.test"
@@ -133,6 +117,10 @@ proc convert(tree: PackedTree[syntax_source.NodeKind], n: NodeIndex): Node =
     tree(nkConstr,
       sym("FloatVal"),
       convertFloat(tree.getFloat(n)))
+  of StringVal:
+    tree(nkConstr,
+      sym("StringVal"),
+      Node(kind: nkString, sym: tree.getString(n)))
   of Ident:
     tree(nkConstr,
       sym("Ident"),

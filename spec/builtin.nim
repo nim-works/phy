@@ -134,6 +134,14 @@ const arr = [
     assert idx in 0'n..bignum(n[0].children.high)
     result = n[0]
     result.children[idx.toInt] = n[2]
+  ),
+  ("bytes", proc(n: Node): Node =
+    # convert the string to a list of UTF8 bytes
+    assert n.kind == nkString
+    result = Node(kind: nkGroup)
+    result.children.newSeq(n.sym.len)
+    for i, it in n.sym.pairs:
+      result.children[i] = makeNum(rational(ord it))
   )]
 
 const functions* = block:
