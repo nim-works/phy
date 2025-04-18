@@ -100,7 +100,7 @@ proc typeof(c; tree; n): Node =
     unreachable()
 
 proc newLocal(c; typ: Node): Node =
-  assert typ.kind in {Type, UInt, Int, Float}
+  assert typ.kind in {Type, UInt, Int, Float, Ptr}
   result = Node(kind: Local, val: uint32(c.firstTemp + c.temps.len))
   c.temps.add typ
 
@@ -409,7 +409,7 @@ proc lowerProc(c; tree; n; sig: NodeIndex, bu) =
 proc lower*(tree; ptrSize: int): ChangeSet[NodeKind] =
   ## Computes the changeset representing the lowering for a whole module
   ## (`tree`). `ptrSize` is the size-in-bytes of a pointer value.
-  var c = Context(addrType: Node(kind: UInt, val: ptrSize.uint32))
+  var c = Context(addrType: Node(kind: Ptr))
 
   for it in tree.items(tree.child(0)):
     if tree[it].kind == ProcTy:
