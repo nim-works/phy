@@ -17,14 +17,24 @@ type
       ## all bindings recorded within the frame. Separated into scopes to make
       ## adding tentative bindings (which may be discarded again) easier
 
-  Trace* = object
-    ## Stores an established relation together with the sub-relations
-    ## established to prove that it holds.
-    id*: int         ## ID of the relation
-    rule*: int       ## ID of the used rule
-    input*: Node     ## values in input positions
-    output*: Node    ## values in output positions
-    sub*: seq[Trace]
+  LogEntryKind* = enum
+    lekRelation ## start of a relation
+    lekRule     ## start of a rule
+    lekMatch    ## a rule applied
+    lekMismatch ## a rule didn't apply
+    lekFailure  ## a relation failed
+    lekSuccess  ## a rule and thus relation succeeded
+
+  LogEntry* = object
+    ## An entry in the execution log.
+    case kind*: LogEntryKind
+    of lekRelation, lekMatch:
+      id*: int
+      data*: Node ## inputs or outputs
+    of lekRule:
+      rule*: int
+    of lekFailure, lekSuccess, lekMismatch:
+      discard
 
   Context = object
     relCache: seq[seq[Node]]
@@ -33,8 +43,12 @@ type
       ## sequence represents a not-yet-cached entry
     frames: seq[Frame]
       ## stack of frames
-    traces: seq[Trace]
-      ## list of traces collected during evaluation
+
+    doLog: bool
+      ## whether logging is enabled
+    logs: seq[LogEntry]
+      ## if logging is enabled, accumulates log entries describing
+      ## the execution
 
   Match = object
     ## The result of matching a term against a pattern.
@@ -298,6 +312,11 @@ template catch(c: var Context, body, els: untyped) =
     c.frames[frames - 1].scopes.shrink(scopes)
     els
 
+template log(c: var Context, entry: LogEntry) =
+  ## If logging is enabled, evaluates `entry` and adds it to the log.
+  if c.doLog:
+    c.logs.add entry
+
 proc interpret*(c; lang; n: Node, then: sink Next): Node {.tailcall.}
 
 proc eval(c; lang; n: Node): Node =
@@ -404,12 +423,14 @@ proc interpretRelation(c; lang; id: int, args: sink Node): Node =
     c.relCache[id] = transformBody(lang, lang.relations[id])
 
   c.frames.add(Frame(scopes: @[{ParamId: args}.toTable]))
-  let original = move c.traces
   var rule = -1
+
+  c.log LogEntry(kind: lekRelation, id: id, data: args)
 
   # the cache's storage may change during the loop, so don't use an `items`
   # iterator
   for i in 0..<c.relCache[id].len:
+    c.log LogEntry(kind: lekRule, rule: i)
     c.catch:
       c.push()
       result = eval(c, lang, c.relCache[id][i])
@@ -417,7 +438,8 @@ proc interpretRelation(c; lang; id: int, args: sink Node): Node =
       rule = i
       break
     do:
-      discard "try the next rule"
+      c.log LogEntry(kind: lekMismatch)
+      # try the next rule
 
   c.frames.shrink(c.frames.len - 1) # pop the frame
   if result.kind == nkFail:
@@ -425,16 +447,14 @@ proc interpretRelation(c; lang; id: int, args: sink Node): Node =
     for it in lang.relations[id].params.items:
       if not it.input:
         # it isn't, fail
+        c.log LogEntry(kind: lekFailure)
         raise Failure.newException("")
     # it is, return false
     result = Node(kind: nkFalse)
   else:
-    # success!
-    let trace = Trace(id: id, rule: rule, input: args, output: result,
-                      sub: move c.traces)
-    # restore the previous list and remember the successful relation
-    c.traces = original
-    c.traces.add trace
+    c.log LogEntry(kind: lekMatch, id: id, data: result)
+
+  c.log LogEntry(kind: lekSuccess)
 
 proc matchRPattern(c; lang; id: int, n: Node, ctx: seq[int],
                    then: proc(c: var Context, lang: LangDef, n: Node, ctx: seq[int]): Node): Node =
@@ -757,10 +777,19 @@ proc interpret(c; lang; n: Node, then: sink Next): Node {.tailcall.} =
     echo n.kind
     unreachable()
 
-proc interpret*(lang; n: Node): (Node, Trace) =
-  ## Evaluates expression `n` and returns the resulting value plus a trace
-  ## of all relations established in order to reach this result.
+proc interpret*(lang; n: Node): Node =
+  ## Evaluates expression `n` and returns the resulting value, or an `nkFail`
+  ## node, if evaluation failed.
   var c = Context()
-  result[0] = eval(c, lang, n)
-  if c.traces.len > 0:
-    result[1] = c.traces[0]
+  result =
+    try:            eval(c, lang, n)
+    except Failure: Node(kind: nkFail)
+
+proc interpretAndLog*(lang; n: Node): (Node, seq[LogEntry]) =
+  ## Similar to `interpret <#interpret,LangDef,Node>`_, but with execution
+  ## logging enabled.
+  var c = Context(doLog: true)
+  result[0] =
+    try:            eval(c, lang, n)
+    except Failure: Node(kind: nkFail)
+  result[1] = c.logs

@@ -195,18 +195,21 @@ proc `$`(n: Node): string =
 
 proc applyFunc(id: int, n: sink Node): Option[Node] =
   ## Generic function application.
-  let e = tree(nkCall, Node(kind: nkFunc, id: id), n)
-  try:
-    some(interpret(lang, e)[0])
-  except Failure:
+  let e = interpret(lang, tree(nkCall, Node(kind: nkFunc, id: id), n))
+  if e.kind == nkFail:
     none(Node)
+  else:
+    some(e)
 
 proc applyRelation(id: int, n: sink Node): Option[Node] =
   ## Generic relation application.
-  let e = tree(nkCall, Node(kind: nkRelation, id: id), n)
   try:
-    some(interpret(lang, e)[0])
-  except Failure, KeyError:
+    let e = interpret(lang, tree(nkCall, Node(kind: nkRelation, id: id), n))
+    if e.kind == nkFail:
+      none(Node)
+    else:
+      some(e)
+  except KeyError:
     none(Node)
 
 proc runTest(e: sink Node, spec: TestSpec): string =
