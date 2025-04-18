@@ -37,7 +37,6 @@ const
     "t06_declared_type_usage.test",
     "t06_redeclaration_error_2.test",
     "t06_redeclaration_error_3.test",
-    "t15_while_true.test",
     "t18_seq_character_string_1.test",
     "t18_seq_character_string_2.test",
     "t19_write.test",

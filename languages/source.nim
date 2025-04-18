@@ -582,10 +582,11 @@ const lang* = language:
     rule "S-while":
       premise mtypes(C_1, e_1, BoolTy())
       premise mtypes(C_1, e_2, typ_1)
+      condition not same(e_1, True)
       condition typ_1 in {VoidTy(), UnitTy()}
       conclusion C_1, While(e_1, e_2), UnitTy()
 
-    rule "S-while":
+    rule "S-while-true":
       premise mtypes(C_1, e_1, typ_1)
       condition typ_1 in {VoidTy(), UnitTy()}
       conclusion C_1, While(True, e_1), VoidTy()
