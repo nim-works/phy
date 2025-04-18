@@ -32,7 +32,6 @@ const
     ## the initial dynamic context to pass to `cstep`
   issues = [ # tests that are currently expected to fail
     "t05_return_operand_cannot_be_void.test",
-    "t06_call_lookup_self_visible.test",
     "t18_seq_character_string_1.test",
     "t18_seq_character_string_2.test",
     "t19_write.test",
