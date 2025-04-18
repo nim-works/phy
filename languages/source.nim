@@ -582,14 +582,14 @@ const lang* = language:
     rule "S-while":
       premise mtypes(C_1, e_1, BoolTy())
       premise mtypes(C_1, e_2, typ_1)
-      condition not same(e_1, True)
+      condition not same(e_1, Ident("true"))
       condition typ_1 in {VoidTy(), UnitTy()}
       conclusion C_1, While(e_1, e_2), UnitTy()
 
     rule "S-while-true":
       premise mtypes(C_1, e_1, typ_1)
       condition typ_1 in {VoidTy(), UnitTy()}
-      conclusion C_1, While(True, e_1), VoidTy()
+      conclusion C_1, While(Ident("true"), e_1), VoidTy()
 
     rule "S-builtin-not":
       premise mtypes(C_1, e_1, typ_1)
@@ -713,12 +713,17 @@ const lang* = language:
 
   inductive toplevel(inp C, inp (decl + module), out C, out typ):
     rule "S-type-decl":
+      condition string_1 notin C_1.symbols
+      condition string_1 notin builtIn
       premise ttypes(C_1, texpr_1, typ_1)
       where C_2, C_1 + C(symbols: {string_1: type(typ_1)})
       conclusion C_1, TypeDecl(Ident(string_1), texpr_1), C_2, VoidTy()
 
     rule "S-proc-decl":
       condition string_1 notin C_1.symbols
+      condition string_1 notin builtIn
+      condition ...(string_2 notin C_1.symbols)
+      condition ...(string_2 notin builtIn)
       condition unique(string_2) # all symbols must be unique
       condition string_1 notin string_2
       premise ttypes(C_1, texpr_1, typ_1)
