@@ -17,12 +17,24 @@ import
     colortext
   ],
   phy/sexpstreams,
-  spec/interpreter
+  spec/[
+    interpreter,
+    rationals
+  ]
 
 import spec/types except Node
 
 type
   Node = types.Node[TypeId] # shorthand that's easier to write
+
+  Trace = object
+    ## Information about a relation together with the sub-relations
+    ## established as part of its evaluation.
+    id*: int         ## ID of the relation
+    rule*: int       ## ID of the used rule
+    input*: Node     ## values in input positions
+    output*: Node    ## values in output positions
+    sub*: seq[Trace]
 
 const
   LoaderCode = """
@@ -105,9 +117,9 @@ proc fromSexp(s: SexpNode): Node =
     else:
       Node(kind: nkSymbol, sym: s.symbol)
   of SInt:
-    Node(kind: nkNumber, sym: $s.num)
+    Node(kind: nkNumber, num: rational(s.num))
   of SFloat:
-    Node(kind: nkNumber, sym: $s.fnum)
+    Node(kind: nkNumber, num: rational(s.fnum))
   of SString:
     Node(kind: nkString, sym: s.str)
   of SNil, SCons, SKeyword:
@@ -131,7 +143,9 @@ proc add(res: var string, n: Node) =
         res.add ' '
       res.add it
     res.add ")"
-  of nkSymbol, nkNumber:
+  of nkNumber:
+    res.addRat n.num
+  of nkSymbol:
     res.add n.sym
   of nkString:
     res.add escape(n.sym)
@@ -157,7 +171,7 @@ proc getDefault(lang: LangDef, typ: TypeId): types.Node[TypeId] =
   ## Returns the default value for `typ`.
   case lang[typ].kind
   of tkInt, tkRat, tkAll:
-    Node(kind: nkNumber, sym: "0", typ: typ)
+    Node(kind: nkNumber, num: rational(0), typ: typ)
   of tkBool:
     Node(kind: nkFalse, typ: typ)
   of tkVoid:
@@ -226,6 +240,108 @@ proc pretty(res: var ColText, t: Trace, indent: int) =
     res.add "\n"
     pretty(res, it, indent + 1)
 
+proc pretty(log: seq[LogEntry]): ColText =
+  ## Formats `log` and appends the result to `result`.
+  var indent = 0
+  var stack: seq[int] ## id stack
+  for it in log.items:
+    case it.kind
+    of lekRelation:
+      result.add repeat("  ", indent)
+      result.add "- "
+      result.add lang.relations[it.id].name + fgCyan
+      var ip, countIn = 0
+      # count the number of inputs:
+      for it in lang.relations[it.id].params.items:
+        if it.input:
+          inc countIn
+
+      # render the inputs:
+      for x in lang.relations[it.id].params.items:
+        if x.input:
+          result.add " "
+          if countIn == 1:
+            result.add $it.data
+          else:
+            result.add $it.data[ip]
+            inc ip
+
+      result.add "\n"
+      stack.add it.id
+      inc indent
+    of lekRule:
+      result.add repeat("  ", indent)
+      result.add lang.relations[stack[^1]].rules[it.rule].name + fgYellow
+      result.add "\n"
+      inc indent
+    of lekMismatch:
+      result.add repeat("  ", indent)
+      result.add "fail" + fgRed
+      result.add "\n"
+      dec indent, 1
+    of lekFailure, lekSuccess:
+      # only marks the end of the relation
+      discard stack.pop()
+      dec indent, 1
+    of lekMatch:
+      result.add repeat("  ", indent)
+      result.add "success" + fgGreen
+      var op, countOut = 0
+      # count the number of outputs:
+      for it in lang.relations[it.id].params.items:
+        if not it.input:
+          inc countOut
+
+      # render the output:
+      for x in lang.relations[it.id].params.items:
+        if not x.input:
+          result.add " "
+          if countOut == 1:
+            result.add $it.data
+          else:
+            result.add $it.data[op]
+            inc op
+
+      result.add "\n"
+      dec indent, 1
+
+proc pretty(t: Trace): ColText =
+  pretty(result, t, 0)
+
+proc toTraces(log: openArray[LogEntry]): seq[Trace] =
+  ## Creates a list of relation traces from the log of a sucessful evaluation.
+  proc collect(log: openArray[LogEntry], i: var int): Trace =
+    result.id = log[i].id
+    result.input = log[i].data
+    var rule = 0
+    inc i
+    while i < log.len:
+      case log[i].kind
+      of lekRelation:
+        result.sub.add collect(log, i)
+        # `i` already points to the next relevant item
+      of lekRule:
+        inc i
+      of lekMismatch:
+        # the rule didn't match, discard the collected traces
+        result.sub.shrink(0)
+        inc i
+        inc rule
+      of lekMatch:
+        # found the matching rule
+        result.output = log[i].data
+        result.rule = rule
+        inc i
+      of lekFailure, lekSuccess:
+        # found the end of the relation's rules
+        inc i
+        break
+
+  assert log[0].kind == lekRelation
+  var i = 0
+  while i < log.len:
+    result.add collect(log, i)
+
 proc pick(lang: LangDef, name: string): Node =
   # look through the relations
   for i, it in lang.relations.pairs:
@@ -243,16 +359,17 @@ proc error(msg: string) =
   echo "Error: " + fgRed, msg
 
 proc eval(callee, args: sink Node) =
-  try:
-    let (res, trace) = interpret(lang, tree(nkCall, callee, args))
-    if trace.input.kind != nkFail: # guard against empty traces
-      var str: ColText
-      pretty(str, trace, 0)
-      echo str
+  let (res, log) = interpretAndLog(lang, tree(nkCall, callee, args))
+  if res.kind == nkFail:
+    error("evaluation failed")
+    if log.len > 0:
+      echo pretty(log)
+  else:
+    if log.len > 0:
+      for it in toTraces(log).items:
+        echo pretty(it)
     prev = res
     echo "Got: " + fgGreen, prev
-  except CatchableError:
-    error "evaluation failed"
 
 proc handleCmd(cmd: SexpNode) =
   ## The command processing logic.

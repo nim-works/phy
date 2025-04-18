@@ -3,7 +3,8 @@
 ## implementing a type checker and (basic) transformer for it.
 
 import
-  std/[macros, tables, sets, strutils, strformat, hashes]
+  std/[macros, tables, sets, strutils, strformat, hashes],
+  rationals
 
 # a lot of the types from ``types`` are redefined here, so everything is
 # imported explicitly
@@ -623,7 +624,9 @@ proc matchesPattern(c; pat, term: Node): bool =
     true # matches everything
   of nkTrue, nkFalse:
     term.kind == pat.kind
-  of nkSymbol, nkNumber, nkString:
+  of nkNumber:
+    term.kind == nkNumber and term.num == pat.num
+  of nkSymbol, nkString:
     term.kind == pat.kind and term.sym == pat.sym
   of nkType:
     matchesType(c, pat.typ, term)
@@ -677,6 +680,9 @@ proc typeConstr(c; n: var Node, info: NimNode, isPattern: static[bool]) =
     when isPattern: matchesPattern(c, pat, witness(term))
     else:           matchesPattern(c, pat, term)
 
+  if n[0].sym notin c.lookup:
+    error(fmt"no constructor with name {n[0].sym}", info)
+
   let s = c.lookup[n[0].sym]
   case s.kind
   of skConstr:
@@ -695,7 +701,7 @@ proc typeConstr(c; n: var Node, info: NimNode, isPattern: static[bool]) =
       # the choice
       n.typ = c.newTypeVar(info, Type(kind: tkOr, children: cand))
   else:
-    unreachable()
+    error(fmt"not a constructor: {n[0].sym}", info)
 
   if n.typ.isNil:
     error("no valid construction with the given shape exists", info)
@@ -744,7 +750,9 @@ proc finishUnpack(body: Node, vars: HashSet[int], info: NimNode): Node =
     # order doesn't matter...
     result.add tree(nkBind, Node(kind: nkVar, id: it), Node(kind: nkVar, id: it))
   result.add body
-  result.typ = listT(body.typ)
+  # unpack expressions with no type are okay
+  if body.typ != nil:
+    result.typ = listT(body.typ)
 
 proc semBindingName(c; n: NimNode, typ: Type): Node =
   ## Makes sure `n` is a valid identifier for a binding and - if so -
@@ -786,9 +794,11 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
     elif result.typ.kind == tkForall:
       result.typ = c.instantiate(result.typ)
   of nnkIntLit:
-    result = Node(kind: nkNumber, sym: $n.intVal, typ: c.lookup["z"].typ)
+    result = Node(kind: nkNumber, num: rational(n.intVal.int),
+                  typ: c.lookup["z"].typ)
   of nnkFloatLit:
-    result = Node(kind: nkNumber, sym: $n.floatVal, typ: c.lookup["r"].typ)
+    result = Node(kind: nkNumber, num: rational(n.floatVal),
+                  typ: c.lookup["r"].typ)
   of nnkStrLit:
     result = Node(kind: nkString, sym: n.strVal, typ: c.lookup["string"].typ)
   of nnkPar:
@@ -825,6 +835,19 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
       let body = recurse(n[1], false) # analyze the body
       let vars = c.unpacked.pop() # pop the context again
       return finishUnpack(body, vars, n)
+    elif n.kind == nnkInfix and n[0].eqIdent("or") or n[0].eqIdent("and"):
+      # short-circuiting 'or' or 'and'; both are implemented as an 'if'
+      let typ = c.lookup["bool"].typ
+      let a = recurse(n[1])
+      let b = recurse(n[2])
+      check(c, typ, a.typ, n[1])
+      check(c, typ, b.typ, n[2])
+      if n[0].eqIdent("or"):
+        result = tree(nkIf, a, Node(kind: nkTrue, typ: typ), b)
+      else:
+        result = tree(nkIf, a, b, Node(kind: nkFalse, typ: typ))
+      result.typ = typ
+      return
 
     let callee = semExpr(c, n[0], false, isHead=true)
     var call: Node
@@ -842,17 +865,15 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
     else:
       sig = callee.typ
 
-    var isConstr = false
     if callee.kind == nkSymbol:
       # must be a construction expression, which is typed based on shape
       call = Node(kind: nkConstr)
       call.add callee
-      isConstr = true
     elif sig.kind == tkFunc:
       call = Node(kind: nkCall)
       call.add callee
       let expect = numParams(sig)
-      if n.len - 1 > expect:
+      if n.len - 1 != expect:
         error(fmt"expected {expect} arguments, but got {n.len - 1}", n)
     else:
       error(fmt"expected something callable, got '{sig}'", n)
@@ -862,21 +883,29 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
         if not it.input:
           error("relations that bind are only allowed in a 'premise'", n)
 
-    for i in 1..<n.len:
-      let x = recurse(n[i], isConstr)
-      # function applications are type-checked right away
-      if sig.kind == tkFunc:
+    if sig.kind == tkFunc:
+      for i in 1..<n.len:
+        let x = recurse(n[i], false)
         check(c, getParam(sig, i - 1), x.typ, n[i])
-      call.add x
+        call.add x
 
-    if callee.kind == nkSymbol:
-      if not inConstr:
-        typeConstr(c, call, n, isPattern=false)
-      # else: only start typing from the top-level construction expression
+      call.typ = sig[1]
       result = call
     else:
-      # typed directly
-      call.typ = sig[1]
+      # it's a value construction expressions
+      for i in 1..<n.len:
+        if n[i].kind == nnkPrefix and n[i][0].eqIdent("...") and
+           n[i][1].kind == nnkBracket:
+          # group unpacking is allowed in constructions
+          c.unpacked.add initHashSet[int](0) # push an unpack context
+          var body = Node(kind: nkGroup)
+          for it in n[i][1].items:
+            body.add recurse(it, true)
+          call.add finishUnpack(body, c.unpacked.pop(), n[i])
+        else:
+          call.add recurse(n[i], true)
+
+      typeConstr(c, call, n, isPattern=false)
       result = call
   of nnkBracketExpr:
     let a = recurse(n[0])
@@ -953,7 +982,7 @@ proc semPatternIdent(c; n: NimNode, accept: set[NodeKind]): Node =
   of nnkIdent:
     var name = n.strVal
     if name == "_":
-      return Node(kind: nkType, typ: Type(kind: tkAll))
+      return Node(kind: nkType, typ: Type(kind: tkVoid))
 
     let sub = name.find('_')
     if sub != -1:
@@ -1025,7 +1054,7 @@ proc semPattern(c; n: NimNode; accept: set[NodeKind], check = true): Node =
       typeConstr(c, result, n, isPattern=true)
   of nnkIntLit:
     require(nkNumber, "number not allowed in this context")
-    result = Node(kind: nkNumber, sym: $n.intVal,
+    result = Node(kind: nkNumber, num: rational(n.intVal.int),
                   typ: c.lookup["z"].typ)
   of nnkStrLit:
     require(nkString, "string not allowed in this context")
@@ -1087,7 +1116,7 @@ proc semPattern(c; n: NimNode; accept: set[NodeKind], check = true): Node =
     result.add Node(kind: nkSymbol, sym: name(n[0]))
     let accept = accept + InConstrPat
     for i in 1..<n.len:
-      result.add semPattern(c, n[i], accept, check=false)
+      result.add semPattern(c, n[i], accept)
     if check:
       typeConstr(c, result, n, isPattern=false)
   else:
@@ -1118,6 +1147,55 @@ proc checkRPattern(n: Node, info: NimNode) =
   aux(n)
   if not foundHole:
     error("pattern is missing a hole", info)
+
+proc plugPattern(c: Context, into: int, n: Node): seq[Node] =
+  ## Tries to plug the hole of `into` with the or-pattern `hole` (which also
+  ## has a hole). This only works for purely self-recursive patterns.
+  # consider the following recursive pattern-with-a-hole:
+  #   E ::= . | A(E) | B(E)
+  # (the dot stands for a hole).
+  # Now there's second recursive pattern, looking like this:
+  #   E' ::= E[E'] | C(E')
+  # Plugging `E` with `E'` means replacing the hole in `E` with `E'`, which
+  # results in:
+  #   E[E'] = E' | A(E' | A(E[E']) | B(E[E'])) | B(E' | A(E[E']) | B(E[E']))
+  # (for demonstration purposes, E is inlined into the A and B patterns once).
+  # Inlining E' gets us:
+  #   E[E'] = E[E'] | C(E') | A(E[E']) | B(E[E'])
+  # `X ::= X | Y`` is equal to `X ::= Y`, so the simplified version is just:
+  #   E[E'] = C(E') | A(E[E']) | B(E[E'])
+  # putting this back into E' gets us:
+  #   E' ::= C(E') | A(E[E']) | B(E[E']) | C(E')
+  # `C(E')` appears twice, so the second appearance can be removed:
+  #   E' ::= C(E') | A(E[E']) | B(E[E'])
+  # `E'` is identical to `E[E']`! This allows for a final simplification:
+  #   E' ::= C(E') | A(E') | B(E')
+  # In other words, plugging a self-recursive pattern `x` with self-
+  # recursive pattern `y` can be achieved by just replacing all holes and
+  # self-references in `x` with `y` and merging the result into `y`.
+  proc plug(n: Node, id: int, with: Node): Node {.nimcall.} =
+    case n.kind
+    of nkContext:
+      if n.id == id:
+        with
+      else:
+        error("pattern is too complex")
+        unreachable()
+    of nkHole:
+      with
+    of withChildren:
+      var r = Node(kind: n.kind)
+      for it in n.children.items:
+        r.add plug(it, id, with)
+      r
+    else:
+      n
+
+  for it in c.matchers[into].patterns.items:
+    let x = plug(it, into, n)
+    # drop immediate self recursion
+    if x.kind != nkContext:
+      result.add x
 
 proc semPremise(c; n: NimNode): Node =
   var n = n
@@ -1165,11 +1243,15 @@ proc semPredicate(c; n: NimNode): Node =
     n.expectLen 2
     semPremise(c, n[1])
   elif n[0].eqIdent("where"):
-    # it'd be much nicer if `where x, y` could be written as `let x = y`,
-    # but that syntax doesn't work for more complex pattern matching
     n.expectLen 3
-    let pat = semPattern(c, n[1], AllPat)
-    tree(nkMatches, pat, receive(c, n[2], pat.typ))
+    let
+      pat = semPattern(c, n[1], AllPat)
+      e = semExpr(c, n[2])
+    # XXX: this is overly strict. `where` is effectively a dynamic type check,
+    #      so we only need to make sure that the two types (i.e., sets) have
+    #      *some* overlap
+    check(c, e.typ, pat.typ, n[1])
+    tree(nkMatches, pat, e)
   elif n[0].eqIdent("condition"):
     n.expectLen 2
     let term = semExpr(c, n[1])
@@ -1366,6 +1448,19 @@ proc parseTypeUse(c: Context; n: NimNode): Type =
     error("not a type use", n)
     unreachable()
 
+proc addConstrSym(c; name: string, typ: Type, id: int, info: NimNode) =
+  ## Adds a symbol for a constructor with name `name` to the symbol table.
+  let sym = Sym(kind: skConstr, id: id, typ: typ)
+  c.lookup.withValue name, prev:
+    if prev.kind == skConstr:
+      prev[] = Sym(kind: skOverload, overloads: @[move prev[], sym])
+    elif prev.kind == skOverload:
+      prev.overloads.add sym
+    else:
+      error(fmt"{name} cannot be overloaded", info)
+  do:
+    c.lookup[name] = sym
+
 proc semConstrDef(c; n: NimNode, typ: Type): Node =
   ## Parses a constructor definition, which use a subset of the available
   ## pattern syntax.
@@ -1404,14 +1499,18 @@ proc semConstrDef(c; n: NimNode, typ: Type): Node =
         for it in n.items:
           result.addChecked(semConstrSub(c, it), it)
       of nnkCall:
-        result = tree(nkConstr, Node(kind: nkSymbol, sym: name(n[0])))
-        for i in 1..<n.len:
-          result.addChecked(semConstrSub(c, n[i]), n[i])
+        # treat the constructor as constructing a new anonymous data type
+        let typ = Type(kind: tkData)
+        typ.constr.add semConstrDef(c, n, typ)
+        c.addConstrSym(typ.constr[0][0].sym, typ, typ.constr.high, n[0])
+        result = Node(kind: nkType, typ: typ)
       else:
         error("expected identifier or call syntax", n)
 
-    result = semConstrSub(c, n)
-    result[0].typ = Type(kind: tkPat)
+    result = tree(nkConstr, Node(kind: nkSymbol, sym: name(n[0]),
+                                 typ: Type(kind: tkPat)))
+    for i in 1..<n.len:
+      result.add semConstrSub(c, n[i])
     result.typ = typ
   else:
     error("expected identifier or call syntax", n)
@@ -1439,19 +1538,7 @@ proc semType(c; body: NimNode, self: Type; base = Type(nil)) =
       error("construction is not covered by the parent type", it)
 
     self.constr.add pat
-    # add the constructor symbol to the lookup table:
-    let
-      name = pat[0].sym
-      sym = Sym(kind: skConstr, id: self.constr.high, typ: self)
-    c.lookup.withValue name, prev:
-      if prev.kind == skConstr:
-        prev[] = Sym(kind: skOverload, overloads: @[move prev[], sym])
-      elif prev.kind == skOverload:
-        prev.overloads.add sym
-      else:
-        error(fmt"{name} cannot be overloaded", it)
-    do:
-      c.lookup[name] = sym
+    c.addConstrSym(pat[0].sym, self, self.constr.high, it)
 
 proc semBody(c; n: NimNode, typ: Type, top: bool): Node
 
@@ -1504,7 +1591,9 @@ proc semCase(c; n: NimNode, typ: Type): Node =
             else:
               check(c, it.typ, dest[0], b[i])
         else:
-          check(c, p.typ, dest, b[i])
+          # the pattern must be a subtype of or equal to the matched
+          # expression's type
+          check(c, dest, p.typ, b[i])
         o.add p
     of nnkElse, nnkElseExpr:
       # turn into a "match all" branch
@@ -1684,19 +1773,8 @@ proc convertFrom(to: var types.TypeId, x: sink Type,
       types[id] = c
     to = id + 1
 
-proc newLit[K, V](t: Table[K, V]): NimNode =
-  ## Creates the construction expression for `t`.
-  if t.len == 0:
-    result = newCall(ident"default", t.typeof.getTypeInst)
-  else:
-    result = newNimNode(nnkTableConstr)
-    for k, v in t.pairs:
-      result.add newTree(nnkExprColonExpr, newLit(k), newLit(v))
-    result = newCall(bindSym"toTable", result)
-
-macro language*(body: untyped): LangDef =
-  ## Parses and type-checks the meta-language module `body` and returns it as
-  ## a ``LangDef`` object.
+proc sem(body: NimNode): LangDef =
+  ## The entry point into the semantic checker.
   body.expectKind nnkStmtList
 
   var
@@ -1723,8 +1801,8 @@ macro language*(body: untyped): LangDef =
     c.functions.add Function[Type](name: name, body: Node(kind: nkHole))
     c.lookup[name] = Sym(kind: skFunc, id: c.functions.high, typ: typ)
 
-  c.builtin("or", fntype(tup(boolType, boolType), boolType))
-  c.builtin("and", fntype(tup(boolType, boolType), boolType))
+  c.builtin("updated", forall(1, fntype(tup(listT(tvar(0)), intType, tvar(0)),
+                                        listT(tvar(0)))))
   c.builtin("in", forall(2, fntype(tup(tvar(0), tvar(1)), boolType)))
   c.builtin("notin", forall(2, fntype(tup(tvar(0), tvar(1)), boolType)))
   c.builtin("same", forall(1, fntype(tup(tvar(0), tvar(0)), boolType)))
@@ -1735,10 +1813,12 @@ macro language*(body: untyped): LangDef =
   c.builtin("neg", forall(1, fntype(tvar(0), tvar(0))))
   c.builtin("+", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
   c.builtin("-", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
-  c.builtin("<=", forall(1, fntype(tup(tvar(0), tvar(0)), boolType)))
-  c.builtin("<", forall(1, fntype(tup(tvar(0), tvar(0)), boolType)))
-  c.builtin("/", forall(1, fntype(tup(tvar(0), tvar(0)), ratType)))
-  c.builtin("^", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
+  c.builtin("<=", forall(1, fntype(tup(ratType, ratType), boolType)))
+  c.builtin("<", forall(1, fntype(tup(ratType, ratType), boolType)))
+  c.builtin("/", forall(1, fntype(tup(ratType, ratType), ratType)))
+  c.builtin("mod", fntype(tup(ratType, ratType), ratType))
+  c.builtin("trunc", fntype(ratType, intType))
+  c.builtin("^", forall(1, fntype(tup(tvar(0), intType), tvar(0))))
   c.builtin("*", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
 
   # first pass: make sure the broad shape of `body` is correct and collect the
@@ -1839,11 +1919,25 @@ macro language*(body: untyped): LangDef =
         let id = c.lookup[name(it[1])].id
         it[2].expectKind nnkStmtList
         for x in it[2].items:
-          var pat = semPattern(c, x, {nkContext, nkHole, nkConstr})
-          checkRPattern(pat, x)
-          c.finalize(pat) # resolve type variables
-          c.flushVars()
-          c.matchers[id].patterns.add pat
+          # TODO: this special handling shouldn't be needed. A "context" is
+          #       just a named or-pattern, and it should therefore be allowed
+          #       to be made of arbitrary sub patterns (the restrictions w.r.t.
+          #       holes still apply)
+          if x.kind == nnkBracketExpr:
+            let pat = semPattern(c, x, {nkPlug, nkContext})
+            # only self recursion is allowed at the moment
+            if pat[1].kind == nkContext and pat[1].id == id:
+              let patterns =
+                plugPattern(c, pat[0].id, Node(kind: nkContext, id: id))
+              c.matchers[id].patterns.add patterns
+            else:
+              error(fmt"plugged-with pattern must be '{name(it[1])}'", x)
+          else:
+            var pat = semPattern(c, x, {nkContext, nkHole, nkConstr})
+            checkRPattern(pat, x)
+            c.finalize(pat) # resolve type variables
+            c.flushVars()
+            c.matchers[id].patterns.add pat
     of nnkFuncDef:
       c.lookup.withValue name(macros.name(it)), val:
         c.functions[val.id] = semFunction(c, it, val.typ)
@@ -1865,10 +1959,32 @@ macro language*(body: untyped): LangDef =
       convertFrom(id, sym.typ, map, lang.types)
       lang.names[id] = name
 
-  result = newLit(lang)
+  result = lang
 
-macro term*(x: untyped): TNode =
-  ## Turns the meta-language term `x` into its data representation.
+proc removeQuoted(n: NimNode): NimNode =
+  ## Replaces all accent-quoted identifiers with raw identifiers.
+  if n.kind == nnkAccQuoted and n.len == 1:
+    result = n[0] # remove the quote
+  else:
+    result = n
+    for i in 0..<n.len:
+      result[i] = removeQuoted(n[i])
+
+macro language*(body: untyped): LangDef =
+  ## Parses and type-checks the meta-language module `body` and returns it as
+  ## a ``LangDef`` object.
+
+  # instead of performing anaylsis of the body directly in the macro and
+  # turning the data into a construction expression (via ``newLit``), the
+  # code block is turned into a NimNode-literal (via quote) which is then
+  # passed to `sem`. This has the major upside of not requiring using
+  # `newLit` and getting rid the subsequent analysis/evaluation of the
+  # construction.
+  # The accent-quotes in the body need to be filtered out, otherwise `quote`
+  # would use them for interpolation
+  newCall(bindSym"sem", newCall(bindSym"quote", removeQuoted(body)))
+
+proc parse(n: NimNode): TNode =
   template wrap(nk: NodeKind, start: int, body: untyped): untyped =
     var r = TNode(kind: nk)
     for i in start..<n.len:
@@ -1876,33 +1992,44 @@ macro term*(x: untyped): TNode =
       r.add body
     r
 
+  case n.kind
+  of nnkIntLit:
+    TNode(kind: nkNumber, num: rational(n.intVal.int))
+  of nnkFloatLit:
+    TNode(kind: nkNumber, num: rational(n.floatVal))
+  of nnkStrLit:
+    TNode(kind: nkString, sym: n.strVal)
+  of nnkIdent, nnkSym:
+    TNode(kind: nkSymbol, sym: n.strVal)
+  of nnkAccQuoted:
+    TNode(kind: nkSymbol, sym: n[0].strVal)
+  of nnkCurly:
+    wrap(nkSet, 0, parse(it))
+  of nnkCall:
+    wrap(nkConstr, 0, parse(it))
+  of nnkTupleConstr:
+    wrap(nkTuple, 0, parse(it))
+  of nnkObjConstr:
+    wrap(nkRecord, 1,
+      TNode(kind: nkAssoc, children: @[parse(it[0]), parse(it[1])]))
+  of nnkTableConstr:
+    wrap(nkMap, 0,
+      TNode(kind: nkAssoc, children: @[parse(it[0]), parse(it[1])]))
+  of nnkStmtList, nnkStmtListExpr:
+    n.expectLen 1
+    parse(n[0])
+  else:
+    error("invalid expression", n)
+    TNode()
+
+macro term*(x: untyped): TNode =
+  ## Returns the AST for the meta-language term `x`.
+  # the NimSkull grammar requires the ``quote`` argument being a statement
+  # list...
+  let x =
+    case x.kind
+    of nnkStmtList: x
+    else:           newTree(nnkStmtList, x)
   # TODO: take the language as a parameter and use ``semExpr`` instead of
   #       ``parse``
-  proc parse(n: NimNode): TNode =
-    case n.kind
-    of nnkIntLit, nnkFloatLit:
-      TNode(kind: nkNumber, sym: $n.intVal)
-    of nnkStrLit:
-      TNode(kind: nkString, sym: n.strVal)
-    of nnkIdent, nnkSym:
-      TNode(kind: nkSymbol, sym: n.strVal)
-    of nnkAccQuoted:
-      TNode(kind: nkSymbol, sym: n[0].strVal)
-    of nnkCurly:
-      wrap(nkSet, 0, parse(it))
-    of nnkCall:
-      wrap(nkConstr, 0, parse(it))
-    of nnkTupleConstr:
-      wrap(nkTuple, 0, parse(it))
-    of nnkObjConstr:
-      wrap(nkRecord, 1,
-        TNode(kind: nkAssoc, children: @[parse(it[0]), parse(it[1])]))
-    of nnkTableConstr:
-      wrap(nkMap, 0,
-        TNode(kind: nkAssoc, children: @[parse(it[0]), parse(it[1])]))
-    else:
-      error("invalid expression", n)
-      TNode()
-
-  let ast = parse(x)
-  result = newLit(ast)
+  newCall(bindSym"parse", newCall(bindSym"quote", removeQuoted(x)))

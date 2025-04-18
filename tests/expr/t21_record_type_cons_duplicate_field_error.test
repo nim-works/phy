@@ -1,0 +1,4 @@
+discard """
+  reject: true
+"""
+(TypeDecl rec (RecordTy (Field x (IntTy)) (Field x (IntTy))))

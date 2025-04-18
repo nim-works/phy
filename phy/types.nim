@@ -29,7 +29,9 @@ type
     tkChar  ## UTF-8 byte
     tkInt
     tkFloat
+    tkArray
     tkTuple ## an anonymous product type
+    tkRecord
     tkUnion ## an anonymous sum type
     tkProc
     tkSeq
@@ -42,9 +44,16 @@ type
       discard
     of tkTuple, tkUnion, tkProc, tkSeq:
       elems*: seq[SemType]
+    of tkArray:
+      length*: SizeUnit ## number of elements
+      elem*: seq[SemType] ## element type
+      # instead of a shared-ownership ``ref``, a single-item seq is used
+    of tkRecord:
+      fields*: seq[tuple[name: string, typ: SemType]]
+        ## the fields are always ordered lexicographically by name
 
 const
-  AggregateTypes* = {tkTuple, tkUnion, tkSeq}
+  AggregateTypes* = {tkArray, tkTuple, tkRecord, tkUnion, tkSeq}
   ComplexTypes*   = AggregateTypes + {tkProc}
     ## non-primitive types
 
@@ -71,6 +80,26 @@ proc cmp*(a, b: SemType): int =
         return
 
     result = 0 # the types are equal
+  of tkArray:
+    result = cmp(a.elem[0], a.elem[0])
+    if result == 0:
+      result =
+        if   a.length > b.length: -1
+        elif a.length < b.length: 1
+        else: 0
+  of tkRecord:
+    result = a.fields.len - b.fields.len
+    if result != 0:
+      return
+    for i in 0..<a.fields.len:
+      result = cmp(a.fields[i].name, b.fields[i].name)
+      if result != 0:
+        return
+      result = cmp(a.fields[i].typ, b.fields[i].typ)
+      if result != 0:
+        return
+
+    result = 0 # the types are equal
 
 proc errorType*(): SemType {.inline.} =
   SemType(kind: tkError)
@@ -83,6 +112,10 @@ proc procType*(ret: sink SemType): SemType =
   ## Constructs a procedure type with `ret` as the return type.
   SemType(kind: tkProc, elems: @[ret])
 
+proc arrayType*(length: SizeUnit, elem: sink SemType): SemType =
+  ## Constructs an array type.
+  SemType(kind: tkArray, length: length, elem: @[elem])
+
 proc `==`*(a, b: SemType): bool =
   ## Compares two types for equality.
   if a.kind != b.kind:
@@ -93,6 +126,10 @@ proc `==`*(a, b: SemType): bool =
     result = true
   of tkTuple, tkUnion, tkProc, tkSeq:
     result = a.elems == b.elems
+  of tkArray:
+    result = a.length == b.length and a.elem == b.elem
+  of tkRecord:
+    result = a.fields == b.fields
 
 proc isSubtypeOf*(a, b: SemType): bool =
   ## Computes whether `a` is a subtype of `b`.
@@ -106,18 +143,30 @@ proc isSubtypeOf*(a, b: SemType): bool =
   else:
     false
 
+proc alignment*(t: SemType): SizeUnit
+proc paddedSize*(t: SemType): SizeUnit
+
 proc size*(t: SemType): SizeUnit =
-  ## Computes the size without padding of a location of type `t`.
+  ## Computes the size without trailing padding of a location of type `t`.
   case t.kind
   of tkVoid: unreachable()
   of tkError: 8 # TODO: return a value indicating "unknown"
   of tkUnit, tkBool, tkChar: 1
   of tkInt, tkFloat: 8
   of tkProc: 8 # size of a pointer
+  of tkArray:
+    paddedSize(t.elem[0]) * t.length
   of tkTuple:
     var s = 0
     for it in t.elems.items:
       s += size(it)
+    s
+  of tkRecord:
+    var s = 0
+    for it in t.fields.items:
+      let mask = alignment(it.typ) - 1
+      s = (s + mask) and not mask
+      s += size(it.typ)
     s
   of tkUnion:
     var s = 0
@@ -135,10 +184,17 @@ proc alignment*(t: SemType): SizeUnit =
   of tkUnit, tkBool, tkChar: 1
   of tkInt, tkFloat: 8
   of tkProc: 8
+  of tkArray:
+    alignment(t.elem[0])
   of tkTuple:
     var a = 0
     for it in t.elems.items:
       a = max(a, alignment(it))
+    a
+  of tkRecord:
+    var a = 0
+    for it in t.fields.items:
+      a = max(a, alignment(it.typ))
     a
   of tkUnion:
     var a = 0
@@ -185,11 +241,26 @@ proc isTriviallyCopyable*(typ: SemType): bool =
     true
   of tkSeq:
     false
+  of tkArray:
+    isTriviallyCopyable(typ.elem[0])
   of tkUnion, tkTuple:
     # trivially copyable only if all element types are
     for it in typ.elems.items:
       if not isTriviallyCopyable(it):
         return false
     true
+  of tkRecord:
+    for it in typ.fields.items:
+      if not isTriviallyCopyable(it.typ):
+        return false
+    true
   of tkVoid:
     unreachable()
+
+proc find*(typ: SemType, field: string): int =
+  ## Returns the index of the field with the given name in record type `typ`,
+  ## or -1 if there's no such field.
+  for i, it in typ.fields.pairs:
+    if it.name == field:
+      return i
+  result = -1

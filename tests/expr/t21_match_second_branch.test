@@ -1,0 +1,9 @@
+discard """
+  output: "2 : (IntTy)"
+"""
+(Match
+  (As (TupleCons) (UnionTy (IntTy) (UnitTy)))
+  (Rule (As x (IntTy))
+    1)
+  (Rule (As x (UnitTy))
+    2))

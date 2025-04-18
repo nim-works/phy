@@ -1,0 +1,9 @@
+discard """
+  output: "1 : (IntTy)"
+"""
+(Match
+  (As 10 (UnionTy (IntTy) (UnitTy)))
+  (Rule (As x (IntTy))
+    1)
+  (Rule (As y (UnitTy))
+    2))

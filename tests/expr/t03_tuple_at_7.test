@@ -1,0 +1,4 @@
+discard """
+  output: "2.5 : (UnionTy (UnitTy) (IntTy) (FloatTy))"
+"""
+(At (TupleCons (TupleCons) 1 2.5) 2)

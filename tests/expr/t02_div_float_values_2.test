@@ -1,0 +1,4 @@
+discard """
+  output: "0.3333333333333333 : (FloatTy)"
+"""
+(Call (Ident "/") (FloatVal 1.0) (FloatVal 3.0))

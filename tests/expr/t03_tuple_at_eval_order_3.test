@@ -1,0 +1,14 @@
+discard """
+  description: "The index expressions are evaluated strictly from left to right"
+  output: "1 : (IntTy)"
+"""
+(Exprs
+  (Decl i 0)
+  (At
+    (At
+      (TupleCons
+        (TupleCons 1 2))
+      i)
+    (Exprs
+      (Asgn i 100)
+      0)))

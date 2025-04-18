@@ -1,8 +1,8 @@
 ## Implements an interpreter for the full meta-language. The expressions are
 ## evaluated directly, without an intermediate IR or a VM.
 
-import std/[tables, strutils, sugar]
-import builtin
+import std/[tables, sugar]
+import builtin, bignums, rationals, cps
 import types except Node
 
 type
@@ -17,14 +17,24 @@ type
       ## all bindings recorded within the frame. Separated into scopes to make
       ## adding tentative bindings (which may be discarded again) easier
 
-  Trace* = object
-    ## Stores an established relation together with the sub-relations
-    ## established to prove that it holds.
-    id*: int         ## ID of the relation
-    rule*: int       ## ID of the used rule
-    input*: Node     ## values in input positions
-    output*: Node    ## values in output positions
-    sub*: seq[Trace]
+  LogEntryKind* = enum
+    lekRelation ## start of a relation
+    lekRule     ## start of a rule
+    lekMatch    ## a rule applied
+    lekMismatch ## a rule didn't apply
+    lekFailure  ## a relation failed
+    lekSuccess  ## a rule and thus relation succeeded
+
+  LogEntry* = object
+    ## An entry in the execution log.
+    case kind*: LogEntryKind
+    of lekRelation, lekMatch:
+      id*: int
+      data*: Node ## inputs or outputs
+    of lekRule:
+      rule*: int
+    of lekFailure, lekSuccess, lekMismatch:
+      discard
 
   Context = object
     relCache: seq[seq[Node]]
@@ -33,8 +43,12 @@ type
       ## sequence represents a not-yet-cached entry
     frames: seq[Frame]
       ## stack of frames
-    traces: seq[Trace]
-      ## list of traces collected during evaluation
+
+    doLog: bool
+      ## whether logging is enabled
+    logs: seq[LogEntry]
+      ## if logging is enabled, accumulates log entries describing
+      ## the execution
 
   Match = object
     ## The result of matching a term against a pattern.
@@ -46,7 +60,7 @@ type
     of false:
       discard
 
-  Next = proc(c: var Context, lang: LangDef, n: Node): Node
+  Next = proc(c: var Context, lang: LangDef, val: sink Node): Node {.contcc.}
     ## type of a continuation
 
 using
@@ -59,6 +73,15 @@ const
 
 proc unreachable() {.noreturn, noinline.} =
   raise AssertionDefect.newException("unreachable")
+
+proc drop[T](x: sink T) {.inline.} =
+  ## Utility procedure that does nothing except destroying `x`.
+  discard
+
+proc take(x: sink Node, i: int): Node =
+  ## Consumes a whole node and returns a single element out of it, dropping
+  ## the rest.
+  move x[i]
 
 proc extract(term: Node, path: seq[int]): Node =
   ## Returns the term at the given `path`.
@@ -195,10 +218,10 @@ proc matches(lang; pat, term: Node): Match =
   case pat.kind
   of nkTrue, nkFalse:
     test term.kind == pat.kind
-  of nkNumber, nkString:
+  of nkNumber:
+    test term.kind == nkNumber and term.num == pat.num
+  of nkSymbol, nkString:
     test term.kind == pat.kind and term.sym == pat.sym
-  of nkSymbol:
-    test (term.kind == nkSymbol and term.sym == pat.sym)
   of nkConstr:
     if term.kind == nkConstr:
       matchList(lang, pat, term)
@@ -231,10 +254,14 @@ proc matches(lang; pat, term: Node): Match =
       Match(has: false)
   of nkType:
     case lang[pat.typ].kind
-    of tkAll:
+    of tkVoid, tkAll:
+      # TODO: address the type-system issue(s) that results in 'void'
+      #       and 'all' being the same thing at this stage (they shouldn't be)
       Match(has: true)
+    of tkBool:
+      test term.kind in {nkTrue, nkFalse}
     of tkInt:
-      test term.kind == nkNumber # TODO: wrong, must be an int
+      test term.kind == nkNumber and term.num.isInt
     of tkRat:
       test term.kind == nkNumber
     of tkList:
@@ -285,9 +312,20 @@ template catch(c: var Context, body, els: untyped) =
     c.frames[frames - 1].scopes.shrink(scopes)
     els
 
-proc interpret*(c; lang; n: Node, then: Next): Node
+template log(c: var Context, entry: LogEntry) =
+  ## If logging is enabled, evaluates `entry` and adds it to the log.
+  if c.doLog:
+    c.logs.add entry
 
-proc interpretFunc(c; lang; id: int, args: Node): Node =
+proc interpret*(c; lang; n: Node, then: sink Next): Node {.tailcall.}
+
+proc eval(c; lang; n: Node): Node =
+  ## Evaluates `n`, returning the result or raising an exception. Important:
+  ## this breaks the continuation chain.
+  interpret(c, lang, n,
+    proc(c; lang; val: sink Node): Node {.cont.} = val)
+
+proc interpretFunc(c; lang; id: int, args: sink Node): Node =
   ## Evaluates an invocation of function `id` with argument `args`.
   if lang.functions[id].body.kind == nkHole: # no body?
     # the in/notin functions with function operands are special
@@ -309,8 +347,7 @@ proc interpretFunc(c; lang; id: int, args: Node): Node =
       result = (functions[lang.functions[id].name])(args)
   else:
     c.frames.add(Frame(scopes: @[toTable({ParamId: args})]))
-    result = interpret(c, lang, lang.functions[id].body,
-      (c: var Context, lang, val) => val)
+    result = eval(c, lang, lang.functions[id].body)
     c.frames.shrink(c.frames.len - 1) # pop the frame again
 
 proc makeTuple(args: sink seq[Node]): Node =
@@ -377,7 +414,7 @@ proc transformBody(lang; rel: Relation[TypeId]): seq[Node] =
       t[1],
       Node(kind: nkFail))
 
-proc interpretRelation(c; lang; id: int, args: Node): Node =
+proc interpretRelation(c; lang; id: int, args: sink Node): Node =
   ## Evaluates an invocation of the evaluator function for relation `id`.
   if id >= c.relCache.len or c.relCache[id].len == 0:
     # TODO: perform the transformation outside of interpretation, so that it
@@ -386,21 +423,23 @@ proc interpretRelation(c; lang; id: int, args: Node): Node =
     c.relCache[id] = transformBody(lang, lang.relations[id])
 
   c.frames.add(Frame(scopes: @[{ParamId: args}.toTable]))
-  let original = move c.traces
   var rule = -1
+
+  c.log LogEntry(kind: lekRelation, id: id, data: args)
 
   # the cache's storage may change during the loop, so don't use an `items`
   # iterator
   for i in 0..<c.relCache[id].len:
+    c.log LogEntry(kind: lekRule, rule: i)
     c.catch:
       c.push()
-      result = interpret(c, lang, c.relCache[id][i],
-        (c: var Context, lang, val) => val)
+      result = eval(c, lang, c.relCache[id][i])
       c.rollback() # discard all bindings; they're no longer needed
       rule = i
       break
     do:
-      discard "try the next rule"
+      c.log LogEntry(kind: lekMismatch)
+      # try the next rule
 
   c.frames.shrink(c.frames.len - 1) # pop the frame
   if result.kind == nkFail:
@@ -408,16 +447,14 @@ proc interpretRelation(c; lang; id: int, args: Node): Node =
     for it in lang.relations[id].params.items:
       if not it.input:
         # it isn't, fail
+        c.log LogEntry(kind: lekFailure)
         raise Failure.newException("")
     # it is, return false
     result = Node(kind: nkFalse)
   else:
-    # success!
-    let trace = Trace(id: id, rule: rule, input: args, output: result,
-                      sub: move c.traces)
-    # restore the previous list and remember the successful relation
-    c.traces = original
-    c.traces.add trace
+    c.log LogEntry(kind: lekMatch, id: id, data: result)
+
+  c.log LogEntry(kind: lekSuccess)
 
 proc matchRPattern(c; lang; id: int, n: Node, ctx: seq[int],
                    then: proc(c: var Context, lang: LangDef, n: Node, ctx: seq[int]): Node): Node =
@@ -480,7 +517,7 @@ proc plug(term, hole: Node): Node =
      nkContext, nkVar, nkType:
     result = term
 
-proc prepareCond(n: Node): Node =
+proc prepareCond(n: sink Node): Node =
   if n.kind == nkGroup:
     for it in n.children.items:
       if it.kind == nkFalse:
@@ -494,9 +531,9 @@ proc interpretAll(c; lang; s: openArray[Node]): seq[Node] =
   ## created within.
   result.newSeq(s.len)
   for i, it in result.mpairs:
-    it = interpret(c, lang, s[i], (c: var Context, lang, val) => val)
+    it = eval(c, lang, s[i])
 
-proc interpretMatch(c; lang; pat, term: Node, then: Next): Node =
+proc interpretMatch(c; lang; pat, term: Node, then: sink Next): Node =
   ## Tries matching `term` with `pat`, and on success, adds the captures to
   ## the context and invokes `then` with `nkTrue`; `nkFalse` otherwise.
   var m = matches(lang, pat, term);
@@ -506,7 +543,8 @@ proc interpretMatch(c; lang; pat, term: Node, then: Next): Node =
     if m.bindings.pop(HoleId, plugs):
       # yes, resolve them
       c.merge(m.bindings)
-      proc inner(c; lang; j: int): Node =
+      proc inner(c; lang; j: int): Node {.closure.} =
+        # TODO: make `inner` a tailcall procedure
         if j < plugs.len:
           let (pat, term) = (plugs[j][0], plugs[j][1])
           assert pat.kind == nkPlug
@@ -517,14 +555,15 @@ proc interpretMatch(c; lang; pat, term: Node, then: Next): Node =
             (c: var Context, lang, res, ctx) => (
               # try the plugged-with pattern:
               interpretMatch(c, lang, pat[1], res,
-                (c: var Context, lang, val) => (
+                proc(c; lang; val: sink Node): Node {.
+                    cont: (ptr pat, ptr term, ptr ctx, j, inner).} =
                   if val.kind == nkTrue:
                     if pat[0].kind == nkBind:
                       # bind the context to the given name
                       c.addBinding(pat[0][0].id, withHole(term, ctx))
                     inner(c, lang, j + 1) # continue with the next plug
                   else:
-                    raise Failure.newException("")))))
+                    raise Failure.newException(""))))
         else:
           # all plugs could be resolved successfully
           then(c, lang, Node(kind: nkTrue))
@@ -537,16 +576,14 @@ proc interpretMatch(c; lang; pat, term: Node, then: Next): Node =
     # no match
     then(c, lang, Node(kind: nkFalse))
 
-proc interpret(c; lang; n: Node, then: Next): Node =
+proc interpret(c; lang; n: Node, then: sink Next): Node {.tailcall.} =
   ## Evaluates expression `n`. Evaluation uses continuation-passing-style
   ## (=CPS): instead of returning the value, the `then` procedure is
   ## invoked with it; this makes the non-deterministic plug pattern matching
   ## possible.
-  # for reasons of efficiency (and to keep recursion in check), evaluation of
-  # some intermediate results does not use CPS, meaning that any plug pattern
-  # matching within wouldn't work. In general, the same continuation may be
-  # invoked multiple times and thus their output value must only depend on
-  # immediate inputs (or immutable captures)
+  # for reasons of code complexity, evaluation of some intermediate results
+  # does not use CPS, meaning that any plug pattern matching within doesn't
+  # work
   case n.kind
   of nkFail:
     raise Failure.newException("")
@@ -555,78 +592,90 @@ proc interpret(c; lang; n: Node, then: Next): Node =
   of nkFalse, nkTrue, nkNumber, nkFunc, nkString, nkRelation:
     then(c, lang, n)
   of nkTuple:
-    then(c, lang, tree(nkTuple, interpretAll(c, lang, n.children)))
+    then(c, lang,
+      Node(kind: nkTuple, children: interpretAll(c, lang, n.children)))
+  of nkGroup:
+    then(c, lang,
+      Node(kind: nkGroup, children: interpretAll(c, lang, n.children)))
   of nkSet:
-    then(c, lang, tree(nkSet, interpretAll(c, lang, n.children)))
+    then(c, lang,
+      Node(kind: nkSet, children: interpretAll(c, lang, n.children)))
   of nkConstr:
+    proc append(to: var seq[Node], n: sink Node) {.nimcall.} =
+      # groups in this context can have a nesting depth of at most 2, so using
+      # recursion here is fine
+      case n.kind
+      of nkGroup:
+        for i in 0..<n.len:
+          append(to, move n[i])
+      else:
+        to.add n
+
     var elems: seq[Node]
     for it in n.children.items:
-      let elem = interpret(c, lang, it,
-        (c: var Context, lang, val) => val)
-      if elem.kind == nkGroup:
-        # inline the items into the construction
-        elems.add elem.children
-      else:
-        elems.add elem
+      append(elems, eval(c, lang, it))
 
-    then(c, lang, Node(kind: nkConstr, children: move elems))
+    then(c, lang, Node(kind: nkConstr, children: elems))
   of nkVar:
     # look through the scopes:
     for i in countdown(c.frames[^1].scopes.high, 0):
       if n.id in c.frames[^1].scopes[i]:
-        let tmp = c.frames[^1].scopes[i][n.id]
-        # watch out! parameter aliasing violation (hence the copy)
-        return then(c, lang, tmp)
+        return then(c, lang, c.frames[^1].scopes[i][n.id])
     # assuming that the interpreter and type-checker work, a missing binding
-    # for a name is fine: it means that a repetition match matched zero items
+    # for a name is fine: it means that a repetition matched zero items
     then(c, lang, Node(kind: nkGroup))
   of nkImplies:
     interpret(c, lang, n[0],
-      (c: var Context, lang, val) => (
+      proc(c; lang; val: sink Node): Node {.cont: (ptr n, then).} =
         if val.kind != nkTrue:
-          then(c, lang, Node(kind: nkFalse))
+          then(c, lang, val)
         else:
-          interpret(c, lang, n[1],
-            (c: var Context, lang, val) => then(c, lang, val))))
+          drop val
+          interpret(c, lang, n[1], then))
   of nkMatches:
     interpret(c, lang, n[1],
-      (c: var Context, lang, val) =>
+      proc(c; lang; val: sink Node): Node {.cont: (ptr n, then).} =
         interpretMatch(c, lang, n[0], val, then))
   of nkMap:
     var elems = newSeq[Node](n.len)
     for i, it in n.children.pairs:
       elems[i] = tree(nkAssoc,
-        interpret(c, lang, it[0], (c: var Context, lang, val) => val),
-        interpret(c, lang, it[1], (c: var Context, lang, val) => val))
+        eval(c, lang, it[0]),
+        eval(c, lang, it[1]))
     then(c, lang, Node(kind: nkMap, typ: n.typ, children: elems))
   of nkRecord:
     var elems = newSeq[Node](n.len)
     for i, it in n.children.pairs:
-      elems[i] = tree(nkAssoc, it[0],
-        interpret(c, lang, it[1], (c: var Context, lang, val) => val))
+      elems[i] = tree(nkAssoc, it[0], eval(c, lang, it[1]))
     then(c, lang, Node(kind: nkRecord, typ: n.typ, children: elems))
   of nkIf:
     interpret(c, lang, n[0],
-      (c: var Context, lang, val) => (
+      proc(c; lang; val: sink Node): Node {.cont: (ptr n, then).} =
         let val = prepareCond(val); # fold boolean lists first
         if val.kind == nkTrue:
+          drop val
           interpret(c, lang, n[1], then)
         else:
           assert val.kind == nkFalse
-          interpret(c, lang, n[2], then)))
+          drop val
+          interpret(c, lang, n[2], then))
   of nkMatch:
-    proc step(c; lang; val: Node, i: int): Node =
+    proc step(c; lang; n: Node, val: sink Node, i: int,
+              then: sink Next): Node {.tailcall.} =
       if i < n.len:
         # a multi-pattern 'of' branch is turned into a single-tuple pattern
         # match
-        let m = matches(lang, makeTuple(n[i].children[0..^2]), val)
+        let m = block: matches(lang, makeTuple(n[i].children[0..^2]), val)
         if m.has:
           # found a branch that applies
           c.merge(m.bindings)
-          interpret(c, lang, n[i][^1], then)
+          drop val
+          drop m
+          interpret(c, lang, n[i][n[i].len - 1], then)
         else:
           # try the next branch
-          step(c, lang, val, i + 1)
+          drop m
+          step(c, lang, n, val, i + 1, then)
       else:
         # no branch applies, fail
         raise Failure.newException("")
@@ -634,59 +683,80 @@ proc interpret(c; lang; n: Node, then: Next): Node =
     if n[0].kind == nkHole:
       # ``case _`` means "use the current parameter"
       let tmp = c.frames[^1].scopes[0][ParamId]
-      # watch out! parameter aliasing violation (hence the temporary)
-      step(c, lang, tmp, 1)
+      step(c, lang, n, tmp, 1, then)
     else:
       interpret(c, lang, n[0],
-        (c: var Context, lang, n) => step(c, lang, n, 1))
+        proc(c; lang; val: sink Node): Node {.cont: (ptr n, then).} =
+          step(c, lang, n, val, 1, then))
   of nkCall:
     interpret(c, lang, n[0],
-      (c: var Context, lang, val) => (
-        let args = interpretAll(c, lang, n.children.toOpenArray(1, n.len - 1));
+      proc(c; lang; val: sink Node): Node {.cont: (ptr n, then).} =
+        let args = interpretAll(c, lang, n.children.toOpenArray(1, n.len - 1))
         case val.kind
         of nkFunc:
-          then(c, lang, interpretFunc(c, lang, val.id, makeTuple(args)))
+          let id = val.id
+          drop val
+          then(c, lang, interpretFunc(c, lang, id, makeTuple(args)))
         of nkRelation:
-          then(c, lang, interpretRelation(c, lang, val.id, makeTuple(args)))
+          let id = val.id
+          drop val
+          then(c, lang, interpretRelation(c, lang, id, makeTuple(args)))
         of nkGroup:
           # it's a list lookup
-          if parseInt(args[0].sym) in 0..(val.len-1):
-            then(c, lang, val[args[0].sym.parseInt])
+          let idx = args[0].num.toInt
+          drop args
+          let L = bignum(val.len)
+          if idx >= 0'n and idx < L:
+            let i = idx.toInt.int
+            drop L
+            drop idx
+            then(c, lang, take(val, i))
           else:
             raise Failure.newException("")
         of nkMap:
           # it's a map lookup
           for it in val.children.items:
             if it[0] == args[0]:
-              return then(c, lang, it[1])
+              let ret = it[1]
+              drop args
+              drop val
+              return then(c, lang, ret)
           raise Failure.newException("")
         of nkSet:
           # it's a set lookup
           for it in val.children.items:
             if it == args[0]:
+              drop args
+              drop val
               return then(c, lang, Node(kind: nkTrue))
+          drop args
+          drop val
           then(c, lang, Node(kind: nkFalse))
         else:
-          unreachable()))
+          unreachable())
   of nkProject:
     interpret(c, lang, n[0],
-      (c: var Context, lang, val) => (
+      proc(c; lang; val: sink Node): Node {.cont: (ptr n, then).} =
         # pick the correct value using the name:
         for it in val.children.items:
           if it[0].sym == n[1].sym:
-            return then(c, lang, it[1])
-        unreachable()))
+            let ret = it[1]
+            drop val
+            return then(c, lang, ret)
+        unreachable())
   of nkPlug:
     interpret(c, lang, n[0],
-      (c: var Context, lang, val) =>
+      proc(c; lang; val: sink Node): Node {.cont: (ptr n, then).} =
         interpret(c, lang, n[1],
-          (c: var Context, lang, pl) =>
-            then(c, lang, plug(val, pl))))
+          proc(c; lang; pl: sink Node): Node {.cont: (val, then).} =
+            let p = plug(val, pl)
+            drop val
+            drop pl
+            then(c, lang, p)))
   of nkUnpack:
     var inputs: seq[Node]
     for i in 0..<n.len - 1:
-      inputs.add interpret(c, lang, n[i][1],
-        (c: var Context, lang, val) => val)
+      inputs.add eval(c, lang, n[i][1])
 
     var output: seq[Node]
     for i in 0..<inputs[0].len:
@@ -696,19 +766,30 @@ proc interpret(c; lang; n: Node, then: Next): Node =
         c.addBinding(n[x][0].id, it[output.len])
       c.push()
       # ...then execute the body:
-      output.add interpret(c, lang, n[^1], (c: var Context, lang, val) => val)
+      output.add eval(c, lang, n[^1])
       let tmp = c.pop()
       c.rollback() # drop the input bindings
       c.merge(wrap(tmp)) # group-merge the collected bindings
-    then(c, lang, Node(kind: nkGroup, children: move output))
+
+    drop inputs
+    then(c, lang, Node(kind: nkGroup, children: output))
   else:
     echo n.kind
     unreachable()
 
-proc interpret*(lang; n: Node): (Node, Trace) =
-  ## Evaluates expression `n` and returns the resulting value plus a trace
-  ## of all relations established in order to reach this result.
+proc interpret*(lang; n: Node): Node =
+  ## Evaluates expression `n` and returns the resulting value, or an `nkFail`
+  ## node, if evaluation failed.
   var c = Context()
-  result[0] = interpret(c, lang, n, (c: var Context, lang, val) => val)
-  if c.traces.len > 0:
-    result[1] = c.traces[0]
+  result =
+    try:            eval(c, lang, n)
+    except Failure: Node(kind: nkFail)
+
+proc interpretAndLog*(lang; n: Node): (Node, seq[LogEntry]) =
+  ## Similar to `interpret <#interpret,LangDef,Node>`_, but with execution
+  ## logging enabled.
+  var c = Context(doLog: true)
+  result[0] =
+    try:            eval(c, lang, n)
+    except Failure: Node(kind: nkFail)
+  result[1] = c.logs

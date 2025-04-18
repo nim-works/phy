@@ -31,6 +31,7 @@ type
     ekType
     ekLocal
     ekParam
+    ekValue       ## a value bound to an identifier via a match pattern
 
   Entity = object
     kind: EntityKind
@@ -115,6 +116,7 @@ const
     "+": ekBuiltinProc,
     "-": ekBuiltinProc,
     "*": ekBuiltinProc,
+    "/": ekBuiltinProc,
     "div": ekBuiltinProc,
     "mod": ekBuiltinProc,
     "==": ekBuiltinProc,
@@ -151,7 +153,7 @@ using
 
 func align(val: SizeUnit, to: SizeUnit): SizeUnit =
   ## Rounds `val` to the multiple of `to`, the latter must be a power of two.
-  let mask = val - 1
+  let mask = to - 1
   (val + mask) and not mask
 
 template `+`(t: SemType, a: set[ExprFlag]): ExprType =
@@ -232,6 +234,24 @@ proc expectNot(c; typ: sink SemType, kind: TypeKind): SemType =
     c.error("type not allowed in this context")
     result = errorType()
 
+proc unionOf(types: openArray[SemType]): tuple[typ: SemType, folded: bool] =
+  ## Attempts to create a union type from `types`. If the resulting union would
+  ## only consist of a single type, the single type is returned and `folded` is
+  ## set to true.
+  if types.len == 1:
+    (types[0], true)
+  else:
+    var union = SemType(kind: tkUnion)
+    for it in types.items:
+      let at = lowerBound(union.elems, it, cmp)
+      if at >= union.elems.len or union.elems[at] != it:
+        union.elems.insert(it, at)
+
+    if union.elems.len == 1:
+      (union.elems[0], true)
+    else:
+      (union, false)
+
 proc evalType(c; t; n: NodeIndex): SemType =
   ## Evaluates a type expression, yielding the resulting type.
   case t[n].kind
@@ -240,6 +260,17 @@ proc evalType(c; t; n: NodeIndex): SemType =
   of BoolTy:  prim(tkBool)
   of IntTy:   prim(tkInt)
   of FloatTy: prim(tkFloat)
+  of SourceKind.ArrayTy:
+    let length = t.getInt(t.child(n, 0))
+    let typ = c.expectNot(c.evalType(t, t.child(n, 1)), tkVoid)
+    if length < 0:
+      c.error("array length must not be negative")
+      errorType()
+    elif length > high(uint32).int:
+      c.error("arrays must not have more than 2^32 elements")
+      errorType()
+    else:
+      arrayType(SizeUnit(length), typ)
   of TupleTy:
     if t.len(n) == 0:
       prim(tkUnit)
@@ -259,6 +290,20 @@ proc evalType(c; t; n: NodeIndex): SemType =
           discard "all good"
 
       tup
+  of RecordTy:
+    var rec = SemType(kind: tkRecord)
+    for it in t.items(n):
+      let
+        name = t.getString(t.child(it, 0))
+        elem = c.expectNot(evalType(c, t, t.child(it, 1)), tkVoid)
+        i = lowerBound(rec.fields, name,
+          proc(a, b: auto): int = cmp(a.name, b))
+      # important: keep the lexicographic order of the fields intact
+      if i >= rec.fields.len or rec.fields[i].name != name:
+        rec.fields.insert((name, elem), i)
+      else:
+        c.error("record type has a field with name '$1'" % [name])
+    rec
   of UnionTy:
     var list = newSeq[SemType]()
     for i, it in t.pairs(n):
@@ -313,6 +358,13 @@ proc typeToIL(c; typ: SemType): uint32 =
     c.addType Node(kind: Int, val: 8)
   of tkFloat:
     c.addType Node(kind: Float, val: 8)
+  of tkArray:
+    let elem = c.typeToIL(typ.elem[0])
+    c.addType Array:
+      c.types.add Node(kind: Immediate, val: paddedSize(typ).uint32)
+      c.types.add Node(kind: Immediate, val: alignment(typ).uint32)
+      c.types.add Node(kind: Immediate, val: uint32(typ.length)) # length
+      c.types.add Node(kind: Type, val: elem)
   of tkTuple:
     let args = mapIt(typ.elems, c.typeToIL(it))
     c.addType Record:
@@ -325,6 +377,9 @@ proc typeToIL(c; typ: SemType): uint32 =
           c.types.add Node(kind: Immediate, val: off.uint32)
           c.types.add Node(kind: Type, val: it)
         off += paddedSize(typ.elems[i])
+  of tkRecord:
+    # records and tuples share the same translation logic
+    c.typeToIL(SemType(kind: tkTuple, elems: mapIt(typ.fields, it.typ)))
   of tkUnion:
     let args = mapIt(typ.elems, c.typeToIL(it))
     let inner = c.addType Union:
@@ -455,6 +510,9 @@ proc genCapAccess(c; e: sink IrNode, typ: SemType): IrNode =
 proc newIntOp(c; op: NodeKind, a, b: sink IrNode): IrNode =
   newBinaryOp(op, c.typeToIL(prim(tkInt)), a, b)
 
+proc newCmpOp(c; op: NodeKind, a, b: sink IrNode): IrNode =
+  newBinaryOp(op, c.typeToIL(prim(tkBool)), a, b)
+
 proc newAllocCall(size, align: sink IrNode): IrNode =
   newCall(AllocProc, @[size, align])
 
@@ -528,6 +586,21 @@ proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
       els.add IrNode(kind: Loop, children: @[loopBody])
       els.add newReturn(dst)
       body = newIf(c.newIntOp(Eq, srcLen, newIntVal(0)), then, els)
+    of tkArray:
+      # set up the loop counter:
+      let counter = newLocal(2)
+      locals.add prim(tkInt)
+      body.add newAsgn(counter, newIntVal(0))
+
+      var loopBody = IrNode(kind: Stmts)
+      loopBody.add newIf(c.newIntOp(Eq, counter, newIntVal(typ.length)),
+                         newBreak(1))
+      loopBody.add newAsgn(newAt(dst, counter),
+        newCall(c.getTypeBoundOp(opCopy, typ.elems[0]), newAt(src, counter)))
+      loopBody.add newAsgn(counter, c.newIntOp(Add, counter, newIntVal(1)))
+
+      body.add IrNode(kind: Loop, children: @[loopBody])
+      body.add newReturn(dst)
     of tkTuple:
       body = IrNode(kind: Stmts)
       # copy each tuple element from the source to the destination:
@@ -562,24 +635,91 @@ proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
     else:
       unreachable() # no copy procedure needed
   of opAt:
-    # at(s: seq(T), index: int) -> pointer
-    procTy = SemType(kind: tkProc, elems: @[pointerType, typ, prim(tkInt)])
-    params.add 0
-    params.add 1
-    locals.add typ
-    locals.add prim(tkInt)
+    case typ.kind
+    of tkSeq:
+      # at(s: seq(T), index: int) -> pointer
+      procTy = SemType(kind: tkProc, elems: @[pointerType, typ, prim(tkInt)])
+      params.add 0
+      params.add 1
+      locals.add typ
+      locals.add prim(tkInt)
 
-    let
-      s   = newLocal(0)
-      idx = newLocal(1)
+      let
+        s   = newLocal(0)
+        idx = newLocal(1)
 
-    body = IrNode(kind: Stmts)
-    body.add newIf(
-      c.newIntOp(Le, newIntVal(0), idx),
-      newIf(
-        c.newIntOp(Lt, idx, newFieldExpr(s, 0)),
-        newReturn(newAddr(c.genSeqAccess(s, idx, typ)))))
-    body.add newUnreachable()
+      body = IrNode(kind: Stmts)
+      body.add newIf(
+        c.newIntOp(Le, newIntVal(0), idx),
+        newIf(
+          c.newIntOp(Lt, idx, newFieldExpr(s, 0)),
+          newReturn(newAddr(c.genSeqAccess(s, idx, typ)))))
+      body.add newUnreachable()
+    of tkArray:
+      # at(arr: pointer, index: int) -> pointer
+      procTy = SemType(kind: tkProc,
+                       elems: @[pointerType, pointerType, prim(tkInt)])
+      params.add 0
+      params.add 1
+      locals.add pointerType
+      locals.add prim(tkInt)
+
+      let
+        arr = newLocal(0)
+        idx = newLocal(1)
+
+      body = IrNode(kind: Stmts)
+      body.add newIf(
+        c.newIntOp(Le, newIntVal(0), idx),
+        newIf(
+          c.newIntOp(Lt, idx, newIntVal(typ.length)),
+          newReturn(newAddr(newAt(newDeref(c.typeToIL(typ), arr), idx)))))
+      body.add newUnreachable()
+    of tkTuple:
+      # at(s: tuple, index: int, tmp: pointer) -> pointer
+      let (ret, folded) = unionOf(typ.elems)
+      procTy = SemType(kind: tkProc,
+                       elems: @[pointerType, typ, prim(tkInt), pointerType])
+      params.add 0
+      params.add 1
+      params.add 2
+      locals.add typ
+      locals.add prim(tkInt)
+      locals.add pointerType
+      locals.add prim(tkBool) # temporary
+      let
+        tup = newLocal(0)
+        idx = newLocal(1)
+        res = newDeref(c.typeToIL(ret), newLocal(2))
+
+      # the extra pointer parameters must hold a pointer to a location that is
+      # used as an intermediary. The external intermediary is needed so that
+      # the procedure can return a pointer to the result value, which is needed
+      # for the receiver to wrap it in an Deref, so that the tuple access can
+      # be an lvalue expression in the IL...
+
+      body = IrNode(kind: Stmts)
+      var caseStmt = newCase(c.typeToIL(prim(tkInt)), idx)
+      for i, it in typ.elems.pairs:
+        var list = IrNode(kind: Stmts)
+        if folded:
+          # the tuple is really an array
+          list.add newAsgn(res, newFieldExpr(tup, i))
+        else:
+          let pos = find(typ.elems, it)
+          list.add newAsgn(newFieldExpr(res, 0), newIntVal(pos))
+          list.add newAsgn(newFieldExpr(newFieldExpr(res, 1), pos),
+                           newFieldExpr(tup, i))
+        caseStmt.add newChoice(newIntVal(i), list)
+
+      let cond = newLocal(3)
+      body.add newIf(c.newCmpOp(Le, newIntVal(0), idx),
+        newAsgn(cond, c.newCmpOp(Lt, idx, newIntVal(typ.elems.len))),
+        newAsgn(cond, newIntVal(0)))
+      body.add newIf(cond, caseStmt, newUnreachable())
+      body.add newReturn(newLocal(2))
+    else:
+      unreachable()
 
   # assemble the final definition and add it to the module:
   var bu = initBuilder(ProcDef)
@@ -798,8 +938,17 @@ proc binaryArithToIL(c; t; n: NodeIndex, name: string, expr, stmts): SemType =
         c.error("arguments must be of 'int' or 'float' type")
         result = errorType()
     of "*":
-      wantType {tkInt}, "arguments must be of 'int' type"
-      expr = check(c, MulChck, valA, valB, stmts)
+      case result.kind
+      of tkInt:
+        expr = check(c, MulChck, valA, valB, stmts)
+      of tkFloat:
+        expr = newBinaryOp(Mul, c.typeToIL(result), valA, valB)
+      else:
+        c.error("arguments must be of 'int' or 'float' type")
+        result = errorType()
+    of "/":
+      wantType {tkFloat}, "arguments must of type 'float'"
+      expr = newBinaryOp(Div, c.typeToIL(result), valA, valB)
     of "div":
       wantType {tkInt}, "arguments must be of 'int' type"
       # emit a division-by-zero guard:
@@ -935,7 +1084,7 @@ proc callToIL(c; t; n: NodeIndex, expr; stmts): SemType =
 
     if ent.kind == ekBuiltinProc:
       case name
-      of "+", "-", "*", "div", "mod":
+      of "+", "-", "*", "/", "div", "mod":
         result = binaryArithToIL(c, t, n, name, expr, stmts)
       of "==", "<", "<=":
         result = relToIL(c, t, n, name, expr, stmts)
@@ -1036,6 +1185,9 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
     of ekParam:
       expr = newLocal(c.params[ent.id].local)
       result = c.params[ent.id].typ + {Lvalue}
+    of ekValue:
+      expr = newLocal(ent.id.uint32)
+      result = c.locals[ent.id] + {}
     of ekProc:
       # expand to a procedure address (`ProcVal`), which is always correct;
       # the callsite can turn it into a static reference (`Proc`) as needed
@@ -1125,6 +1277,37 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       result = prim(tkUnit) + {}
   of SourceKind.Call:
     result = callToIL(c, t, n, expr, stmts) + {}
+  of SourceKind.ArrayCons:
+    let length = t.len(n)
+    if length < high(uint32).int:
+      var
+        elem = prim(tkVoid) # start with the bottom type
+        args = newSeq[Expr](length)
+
+      # analyze the elements and compute the common type:
+      for i, it in t.pairs(n):
+        args[i] = c.exprToIL(t, it)
+        if args[i].typ.kind == tkVoid:
+          c.error("element cannot be of type 'void'")
+          args[i].typ = errorType()
+
+        if elem.kind != tkError:
+          elem = commonType(elem, args[i].typ)
+          if elem.kind == tkError and args[i].typ.kind != tkError:
+            c.error("cannot unify types")
+
+      result = arrayType(length, elem) + {}
+      expr = c.newTemp(result.typ)
+
+      # emit the assignments:
+      for i, it in args.pairs:
+        stmts.add newAsgn(
+          newAt(expr, newIntVal(i)),
+          c.use(c.fitExpr(it, elem), stmts))
+    else:
+      # don't bother analyzing all those elements...
+      c.error("array must not exceed 2^32 elements")
+      result = errorType() + {}
   of SourceKind.TupleCons:
     if t.len(n) > 0:
       var elems = newSeq[SemType](t.len(n))
@@ -1153,6 +1336,38 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       # it's the unit value
       expr = UnitNode
       result = prim(tkUnit) + {}
+  of SourceKind.RecordCons:
+    var
+      typ = SemType(kind: tkRecord)
+      elems = newSeq[(string, Expr)]()
+
+    for it in t.items(n):
+      let
+        (nameN, elemN) = t.pair(it)
+        name = t.getString(nameN)
+
+      var e = c.exprToIL(t, elemN)
+      if e.typ.kind == tkVoid:
+        c.error("field type cannot be void")
+        # turn into an error expression:
+        e.typ = errorType()
+        e.expr = IrNode(kind: None)
+
+      if find(typ, name) != -1:
+        c.error("record already has field with name " & name)
+      else:
+        # make sure to keep the lexicographic order
+        typ.fields.insert((name, e.typ), lowerBound(typ.fields, name,
+          proc(a: auto, b: auto): int = cmp(a.name, b)))
+
+      elems.add (name, e)
+
+    expr = c.newTemp(typ)
+
+    for (name, elem) in elems.items:
+      stmts.add newAsgn(newFieldExpr(expr, find(typ, name)), c.use(elem, stmts))
+
+    result = typ + {}
   of SourceKind.Seq:
     if t[n, 0].kind == SourceKind.StringVal:
       # it's a string constructor
@@ -1238,12 +1453,28 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       tup = c.exprToIL(t, a)
     case tup.typ.kind
     of tkTuple:
-      let idx = t.getInt(b)
-      if idx >= 0 and idx < tup.typ.elems.len:
-        result = tup.typ.elems[idx] + tup.attribs
-        expr = newFieldExpr(inlineLvalue(c, tup, stmts), idx.int)
+      if t[b].kind == SourceKind.IntVal:
+        let idx = t.getInt(b)
+        if idx >= 0 and idx < tup.typ.elems.len:
+          result = tup.typ.elems[idx] + tup.attribs
+          expr = newFieldExpr(inlineLvalue(c, tup, stmts), idx.int)
+        else:
+          c.error("tuple has no element with index " & $idx)
+          result = errorType() + {Lvalue, Mutable}
       else:
-        c.error("tuple has no element with index " & $idx)
+        c.error("field selector must be an immediate integer")
+        result = errorType() + {Lvalue, Mutable}
+    of tkRecord:
+      if t[b].kind == SourceKind.Ident:
+        let idx = find(tup.typ, t.getString(b))
+        if idx >= 0:
+          result = tup.typ.fields[idx].typ + tup.attribs
+          expr = newFieldExpr(inlineLvalue(c, tup, stmts), idx.int)
+        else:
+          c.error("record has no field with name '$1'" % [t.getString(b)])
+          result = errorType() + {Lvalue, Mutable}
+      else:
+        c.error("field selector must be an identifier")
         result = errorType() + {Lvalue, Mutable}
     of tkError:
       result = tup.typ + {}
@@ -1256,12 +1487,13 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       arr = c.exprToIL(t, a)
       idx = c.exprToIL(t, b)
 
-    if arr.typ.kind notin {tkSeq, tkError}:
-      c.error("expected 'seq' value")
+    if arr.typ.kind notin {tkSeq, tkArray, tkTuple, tkError}:
+      c.error("expected 'seq', 'array' or 'tuple' value")
     if idx.typ.kind notin {tkInt, tkError}:
       c.error("index expression must be of type 'int'")
 
-    if arr.typ.kind == tkSeq:
+    case arr.typ.kind
+    of tkSeq:
       result = arr.typ.elems[0] + arr.attribs
 
       let at = c.getTypeBoundOp(opAt, arr.typ)
@@ -1276,6 +1508,44 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       #   could render the array stale
       expr = newDeref(c.typeToIL(result.typ),
         newCall(at, @[c.inlineLvalue(arr, stmts), c.capture(idx, stmts)]))
+    of tkArray:
+      result = arr.typ.elem[0] + arr.attribs
+
+      # works the same as a seq access, just without the payload indirection
+      let
+        at = c.getTypeBoundOp(opAt, arr.typ)
+        res = newCall(at, @[newAddr(c.inlineLvalue(arr, stmts)),
+                            c.capture(idx, stmts)])
+      if Lvalue in arr.attribs:
+        # use deferred evaluation
+        expr = newDeref(c.typeToIL(result.typ), res)
+      else:
+        # evaluate the access eagerly
+        let tmp = c.newTemp(pointerType)
+        stmts.add newAsgn(tmp, res)
+        expr = newDeref(c.typeToIL(result.typ), tmp)
+    of tkTuple:
+      let (typ, _) = unionOf(arr.typ.elems)
+      # the result is neither mutable nor is it an lvalue, but lvalue-ness
+      # currently has to be preserved for the enclosing `At` access to
+      # produce the right IL code
+      result = typ + (arr.attribs * {Lvalue})
+
+      let at = c.getTypeBoundOp(opAt, arr.typ)
+      # while not yielding a mutable lvalue, dynamic tuple access has the same
+      # evaluation order as seq access
+      let
+        tmp = c.newTemp(typ)
+        res = newCall(at, @[c.inlineLvalue(arr, stmts), c.capture(idx, stmts),
+                            newAddr(tmp)])
+      if Lvalue in arr.attribs:
+        # use deferred evaluation for the actual tuple access (including the
+        # index check)
+        expr = newDeref(c.typeToIL(result.typ), res)
+      else:
+        # evaluate the access eagerly
+        stmts.add newDrop(res)
+        expr = tmp
     else:
       result = errorType() + arr.attribs
   of SourceKind.As:
@@ -1320,6 +1590,82 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
   of SourceKind.Unreachable:
     stmts.add newUnreachable()
     result = prim(tkVoid) + {}
+  of SourceKind.Match:
+    var e = c.exprToIL(t, t.child(n, 0))
+    if e.typ.kind notin {tkUnion, tkError}:
+      c.error("expression must be of union type")
+      e.typ = errorType()
+
+    var
+      got = newSeq[SemType]() ## the handled types
+      handlers = newSeq[tuple[local: IrNode, body: Expr]]()
+      res = prim(tkVoid) # start with the bottom type
+
+    # the type of the Match expression is the least upper bound between all
+    # handlers. Thus, analysis has to happen in two passes: the first one
+    # analyses all handlers, and the second one does the fitting and generates
+    # the dispatcher
+    for it in t.items(n, 1):
+      let
+        (pat, bodyNode) = t.pair(it)
+        typ = c.expectNot(c.evalType(t, t.child(pat, 1)), tkVoid)
+        at = lowerBound(got, typ, cmp)
+
+      c.openScope()
+      let name {.cursor.} = t.getString(t.child(pat, 0))
+      if c.lookup(name).kind != ekNone:
+        c.error("redeclaration of '$1'" % [name])
+      let tmp = c.newTemp(typ)
+      c.addDecl(name, Entity(kind: ekValue, id: tmp.id.int))
+      let body = c.exprToIL(t, bodyNode)
+      c.closeScope()
+
+      let newResult = commonType(res, body.typ)
+      if tkError notin {res.kind, body.typ.kind} and
+         newResult.kind == tkError:
+        c.error("'$1' and '$2' cannot be unified into a single type" %
+                [$res, $body.typ])
+      res = newResult
+
+      if at >= got.len or got[at] != typ:
+        got.insert typ, at
+        handlers.add (tmp, body)
+      else:
+        c.error("duplicate handler for '$1'" % [$typ])
+
+    expr = c.newTemp(res)
+
+    # second pass:
+    if e.typ.kind == tkUnion:
+      let target = capture(c, e, stmts) ## the union to match against
+      var handled: int
+      # XXX: the IL require the selector expression for a case statement to
+      #      be a simple expression (which a field expression is not), hence
+      #      the intermediate temporary
+      let sel = c.newTemp(prim(tkInt))
+      stmts.add newAsgn(sel, newFieldExpr(target, 0))
+      var caseStmt = newCase(c.typeToIL(prim(tkInt)), sel)
+      for i, it in handlers.pairs:
+        let idx = e.typ.elems.find(c.locals[it.local.id])
+        if idx != -1:
+          var body = IrNode(kind: Stmts)
+          body.add newAsgn(it.local, newFieldExpr(newFieldExpr(target, 1), idx))
+          body.add wrap(c, c.fitExpr(it.body, res), expr).children
+          caseStmt.add newChoice(newIntVal(idx), body)
+          inc handled
+        else:
+          c.error("'$1' is not part of '$2'" %
+                  [$c.locals[it.local.id], $e.typ])
+
+      if handled != e.typ.elems.len:
+        # not all types in the union have a matching handler
+        for it in e.typ.elems.items:
+          if find(got, it) == -1:
+            c.error("a matcher for '$1' is missing" % [$it])
+
+      stmts.add caseStmt
+
+    result = res + {}
   of SourceKind.Exprs:
     let last = t.len(n) - 1
     var seenVoidExpr = false

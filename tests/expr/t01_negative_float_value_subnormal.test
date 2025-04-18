@@ -1,0 +1,4 @@
+discard """
+  output: "-5e-324 : (FloatTy)"
+"""
+(FloatVal -5e-324)

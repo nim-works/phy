@@ -1,0 +1,4 @@
+discard """
+  output: "-1.0 : (FloatTy)"
+"""
+(Call (Ident "+") (FloatVal -1.0) (FloatVal -0.0))

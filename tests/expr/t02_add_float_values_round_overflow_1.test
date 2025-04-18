@@ -1,0 +1,8 @@
+discard """
+  description: "
+    If the exponent of an addition's result is too large, the result is
+    rounded to infinity.
+  "
+  output: "inf : (FloatTy)"
+"""
+(Call (Ident "+") (FloatVal 1.7976931348623157e+308) (FloatVal 1.99584030953472e+292))

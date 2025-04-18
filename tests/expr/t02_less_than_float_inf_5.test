@@ -1,0 +1,4 @@
+discard """
+  output: "(False) : (BoolTy)"
+"""
+(Call (Ident "<") (FloatVal inf) (FloatVal 0.0))
