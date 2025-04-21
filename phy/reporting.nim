@@ -2,9 +2,6 @@
 ## report hints, warnings, or errors needs access to a ``ReportContext``-
 ## derived type.
 
-import
-  vm/utils
-
 type
   ReportContext*[T] = object of RootObj
     ## The base type that all report context types must be derived from.

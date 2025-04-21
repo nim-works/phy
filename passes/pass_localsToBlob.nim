@@ -3,8 +3,7 @@
 
 import
   std/[packedsets],
-  passes/[changesets, syntax, trees],
-  vm/utils
+  passes/[changesets, syntax, trees]
 
 type
   LocalId = distinct uint32

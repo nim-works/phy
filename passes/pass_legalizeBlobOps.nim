@@ -2,8 +2,7 @@
 ## (|L3| -> |L3|).
 
 import
-  passes/[changesets, syntax, trees],
-  vm/utils
+  passes/[changesets, syntax, trees]
 
 using
   tree: PackedTree[NodeKind]

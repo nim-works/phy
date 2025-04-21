@@ -3,8 +3,7 @@
 
 import
   std/[tables],
-  passes/[builders, changesets, trees, syntax],
-  vm/utils
+  passes/[builders, changesets, trees, syntax]
 
 type
   Node = TreeNode[NodeKind]

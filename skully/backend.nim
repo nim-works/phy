@@ -9,6 +9,9 @@ import
     strtabs,
     tables
   ],
+  std/private/[
+    containers
+  ],
   compiler/front/[
     options,
     msgs
@@ -32,7 +35,6 @@ import
   ],
   compiler/utils/[
     bitsets,
-    containers,
     platform
   ],
   compiler/backend/[
@@ -57,7 +59,6 @@ import
 
 from compiler/mir/mirbodies import MirBody, `[]`
 
-import vm/utils as vm_utils
 import skully/passes as phy_passes
 
 type
