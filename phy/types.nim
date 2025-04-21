@@ -10,11 +10,6 @@
 #      If types are de-duplicated on creation, this would also reduce testing
 #      types for equality to an integer comparison
 
-import
-  vm/[
-    utils
-  ]
-
 type
   SizeUnit* = int
     ## Used for numbers that represent size and alignment values.

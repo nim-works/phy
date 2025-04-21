@@ -6,8 +6,7 @@ import
   ],
   phy/[
     types
-  ],
-  vm/utils
+  ]
 
 proc typeToString*(typ: SemType): string =
   ## Returns the text representation of `typ` meant for diagnostic messages

@@ -5,8 +5,7 @@
 
 import
   experimental/sexp,
-  passes/trees,
-  vm/utils
+  passes/trees
 
 type
   NodeKind* = enum

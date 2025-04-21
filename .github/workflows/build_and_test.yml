@@ -59,7 +59,7 @@ jobs:
       # use a pinned version in order to make CI runs reproducible
       - uses: nim-works/setup-nimskull@0.1.2
         with:
-          nimskull-version: "0.1.0-dev.21456"
+          nimskull-version: "0.1.0-dev.21464"
 
       - name: Build koch
         run: nim c -d:nimStrictMode --outdir:bin koch.nim
@@ -91,7 +91,7 @@ jobs:
       # use a pinned version in order to make CI runs reproducible
       - uses: nim-works/setup-nimskull@0.1.2
         with:
-          nimskull-version: "0.1.0-dev.21456"
+          nimskull-version: "0.1.0-dev.21464"
 
       - name: Build koch
         run: nim c -d:nimStrictMode --outdir:bin koch.nim
@@ -123,7 +123,7 @@ jobs:
       # use a pinned version in order to make CI runs reproducible
       - uses: nim-works/setup-nimskull@0.1.2
         with:
-          nimskull-version: "0.1.0-dev.21456"
+          nimskull-version: "0.1.0-dev.21464"
 
       - name: Build koch
         run: nim c -d:nimStrictMode --outdir:bin koch.nim

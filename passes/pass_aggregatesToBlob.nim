@@ -2,8 +2,7 @@
 ## address value arithmetic (|L3| -> |L3|).
 
 import
-  passes/[changesets, syntax, trees],
-  vm/utils
+  passes/[changesets, syntax, trees]
 
 type
   Node = TreeNode[NodeKind]

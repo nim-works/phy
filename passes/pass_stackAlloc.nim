@@ -3,8 +3,7 @@
 ## (|L2| -> |L1|).
 
 import
-  passes/[changesets, syntax, trees],
-  vm/utils
+  passes/[changesets, syntax, trees]
 
 type
   Node = TreeNode[NodeKind]
