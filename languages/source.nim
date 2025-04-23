@@ -1270,13 +1270,13 @@ const lang* = language:
     axiom "E-while", While(e_1, e_2), If(e_1, Exprs(e_2, While(e_1, e_2)), TupleCons())
 
     rule "E-match-success":
-      premise types(C(ret: VoidTy), val_1, typ_1)
+      premise types(C(ret: VoidTy()), val_1, typ_1)
       condition typ_1 == texpr_1
       conclusion Match(val_1, Rule(As(Ident(string_1), texpr_1), e_1), *any),
                  substitute(e_1, {string_1 : val_1})
 
     rule "E-match-next":
-      premise types(C(ret: VoidTy), val_1, typ_1)
+      premise types(C(ret: VoidTy()), val_1, typ_1)
       condition typ_1 != texpr_1
       conclusion Match(val_1, Rule(As(x, texpr_1), e), +rule_1),
                  Match(val_1, ...rule_1)
