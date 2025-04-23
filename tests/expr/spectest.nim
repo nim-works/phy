@@ -99,7 +99,7 @@ proc convertFloat(f: float): Node =
   of fcNegZero:
     tree(nkConstr, sym("Zero"), Node(kind: nkTrue))
   of fcNan:
-    tree(nkConstr, sym("Nan"))
+    sym("Nan")
   of fcInf:
     tree(nkConstr, sym("Inf"), Node(kind: nkFalse))
   of fcNegInf:
@@ -146,8 +146,6 @@ proc add(res: var string, n: Node) =
         res.add "-inf"
       else:
         res.add "inf"
-    elif n[0].sym == "Nan":
-      res.add "nan"
     elif n[0].sym == "Zero":
       if n[1].kind == nkTrue:
         res.add "-"
@@ -164,15 +162,20 @@ proc add(res: var string, n: Node) =
       res.add n[^1].sym
     else:
       res.add "("
-      for i, it in n.children.pairs:
-        if i > 0:
-          res.add ' '
-        res.add it
+      res.add n[0].sym
+      for i in 1..<n.len:
+        res.add ' '
+        res.add n[i]
       res.add ")"
   of nkNumber:
     res.addRat n.num
   of nkSymbol:
-    res.add n.sym
+    if n.sym == "Nan":
+      res.add "nan"
+    else:
+      res.add "("
+      res.add n.sym
+      res.add ")"
   of nkString:
     res.add escape(n.sym)
   else:
