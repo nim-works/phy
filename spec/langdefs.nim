@@ -1276,10 +1276,12 @@ proc semPredicate(c; n: NimNode): Node =
     let
       pat = semPattern(c, n[1], AllPat)
       e = semExpr(c, n[2])
-    # XXX: this is overly strict. `where` is effectively a dynamic type check,
-    #      so we only need to make sure that the two types (i.e., sets) have
-    #      *some* overlap
-    check(c, e.typ, pat.typ, n[1])
+    # the pattern and source only need to have some overlap, if the actual
+    # run-time value isn't matched by the pattern, a run-time error will be
+    # reported
+    if fitsC(c, e.typ, pat.typ) == relNone and
+       fitsC(c, pat.typ, e.typ) == relNone:
+      error(fmt"{pat.typ} and {e.typ} have no overlap", n[0])
     tree(nkMatches, pat, e)
   elif n[0].eqIdent("condition"):
     n.expectLen 2
