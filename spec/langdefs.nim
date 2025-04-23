@@ -645,7 +645,7 @@ proc matchesPattern(c; pat, term: Node): bool =
 
 proc matchesType(c; typ: Type, n: Node): bool =
   ## Answers the question: "does expression `n` inhabit `typ`".
-  if typ.kind == tkSum and n.kind != nkType:
+  if typ.kind == tkSum and n.kind in {nkSymbol, nkConstr, nkTuple}:
     for it in typ.children.items:
       if matchesType(c, it, n):
         return true
