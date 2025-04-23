@@ -17,9 +17,8 @@ type
     # important: the ordinal values of the shared fields must be identical; the
     # conversion logic relies on it
     tkAll, tkVoid, tkBool, tkInt, tkRat, tkList, tkFunc, tkTuple, tkRecord,
-    tkData, tkSum
+    tkPat, tkSum
 
-    tkPat  ## type of a pattern-based constructor
     tkVar  ## type variable that's not fully resolved yet
     tkForall ## forall(t..., t) - a type with variables
     tkOr   ## an existential type. **Not a sum type**
@@ -28,12 +27,12 @@ type
     ## A ref type is used because the shared ownership makes the type checker
     ## much easier to implement.
     case kind: TypeKind
-    of tkAll, tkBool, tkInt, tkRat, tkPat, tkVoid:
+    of tkAll, tkBool, tkInt, tkRat, tkVoid:
       discard
     of tkVar:
       id: int
-    of tkData:
-      constr*: seq[types.Node[Type]]
+    of tkPat:
+      pat*: types.Node[Type]
     of tkFunc, tkTuple, tkSum, tkForall, tkList, tkOr:
       children: seq[Type]
     of tkRecord:
@@ -147,7 +146,6 @@ proc `$`(t: Type): string =
   of tkRat: "rat"
   of tkBool: "bool"
   of tkFunc: $t[0] & " -> " & $t[1]
-  of tkData: "data(...)"
   of tkList: "*" & $t[0]
   of tkPat:  "..."
   of tkVar:  "tvar:" & $t.id
@@ -257,10 +255,10 @@ proc toExpr(c; s: Sym): Node =
   of skContext:
     result = Node(kind: nkContext, id: s.id, typ: s.typ)
   of skConstr:
-    result = s.typ.constr[s.id][0]
+    result = s.typ.pat[0]
   of skOverload:
     let b = s.overloads[0]
-    result = b.typ.constr[b.id][0]
+    result = b.typ.pat[0]
 
 proc skip(c; a: Type): Type =
   ## Skips linked type variables, only returning type variables that never
@@ -353,7 +351,7 @@ proc fits(c; b, a: Type): TypeRel
 
 proc fitsC(c; b, a: Type): TypeRel =
   ## Cached version of ``fits``.
-  if b.kind != tkVar and a.kind in {tkFunc, tkRecord, tkTuple, tkData}:
+  if b.kind != tkVar and a.kind in {tkFunc, tkRecord, tkTuple, tkSum}:
     # don't cache type variable relations, as those aren't stable
     c.typerelCache.withValue (b, a), val:
       result = val[]
@@ -481,14 +479,14 @@ proc fits(c; b, a: Type): TypeRel =
       relSubtype
     else:
       relNone
-  of tkData:
-    if b.kind == tkData:
-      # every construction that's part of `b` must also be part of `a` (but
+  of tkPat:
+    if b.kind == tkPat:
+      # every value that's part of `b` must also be part of `a` (but
       # not the other way around)
-      for it in b.constr.items:
-        if not matchesType(c, a, it):
-          return relNone
-      relSubtype
+      if matchesType(c, a, b.pat):
+        relSubtype
+      else:
+        relNone
     else:
       relNone
   of tkSum:
@@ -642,7 +640,7 @@ proc matchesPattern(c; pat, term: Node): bool =
 
 proc matchesType(c; typ: Type, n: Node): bool =
   ## Answers the question: "does expression `n` inhabit `typ`".
-  if typ.kind == tkSum:
+  if typ.kind == tkSum and n.kind != nkType:
     for it in typ.children.items:
       if matchesType(c, it, n):
         return true
@@ -650,13 +648,7 @@ proc matchesType(c; typ: Type, n: Node): bool =
 
   case n.kind
   of nkConstr:
-    if typ.kind == tkData:
-      for it in typ.constr.items:
-        if matchesPattern(c, it, n):
-          return true
-      false
-    else:
-      false
+    typ.kind == tkPat and matchesPattern(c, typ.pat, n)
   of nkTuple:
     if typ.kind == tkTuple and typ.children.len == n.len:
       for i, it in typ.children.pairs:
@@ -686,12 +678,12 @@ proc typeConstr(c; n: var Node, info: NimNode, isPattern: static[bool]) =
   let s = c.lookup[n[0].sym]
   case s.kind
   of skConstr:
-    if match(s.typ.constr[s.id], n):
+    if match(s.typ.pat, n):
       n.typ = s.typ
   of skOverload:
     var cand: seq[Type]
     for it in s.overloads.items:
-      if match(it.typ.constr[it.id], n):
+      if match(it.typ.pat, n):
         cand.add it.typ
     if cand.len == 1:
       n.typ = cand[0]
@@ -1448,9 +1440,9 @@ proc parseTypeUse(c: Context; n: NimNode): Type =
     error("not a type use", n)
     unreachable()
 
-proc addConstrSym(c; name: string, typ: Type, id: int, info: NimNode) =
+proc addConstrSym(c; name: string, typ: Type, info: NimNode) =
   ## Adds a symbol for a constructor with name `name` to the symbol table.
-  let sym = Sym(kind: skConstr, id: id, typ: typ)
+  let sym = Sym(kind: skConstr, typ: typ)
   c.lookup.withValue name, prev:
     if prev.kind == skConstr:
       prev[] = Sym(kind: skOverload, overloads: @[move prev[], sym])
@@ -1461,15 +1453,16 @@ proc addConstrSym(c; name: string, typ: Type, id: int, info: NimNode) =
   do:
     c.lookup[name] = sym
 
-proc semConstrDef(c; n: NimNode, typ: Type): Node =
+proc semConstrDef(c; n: NimNode, typ: Type): Type =
   ## Parses a constructor definition, which use a subset of the available
   ## pattern syntax.
   case n.kind
   of nnkIdent, nnkAccQuoted:
     # turn into a tree to make downstream processing easier
-    result = Node(kind: nkSymbol, sym: name(n), typ: Type(kind: tkPat))
-    result = tree(nkConstr, result)
-    result.typ = typ
+    # TODO: ^^ don't
+    let pat = Node(kind: nkSymbol, sym: name(n))
+    result = Type(kind: tkPat, pat: tree(nkConstr, pat))
+    c.addConstrSym(result.pat[0].sym, result, n)
   of nnkCall:
     proc addChecked(r: var Node, n: sink Node, info: NimNode) {.nimcall.} =
       if r.len > 0 and r.children[^1].kind in {nkOneOrMore, nkZeroOrMore} and
@@ -1499,19 +1492,17 @@ proc semConstrDef(c; n: NimNode, typ: Type): Node =
         for it in n.items:
           result.addChecked(semConstrSub(c, it), it)
       of nnkCall:
-        # treat the constructor as constructing a new anonymous data type
-        let typ = Type(kind: tkData)
-        typ.constr.add semConstrDef(c, n, typ)
-        c.addConstrSym(typ.constr[0][0].sym, typ, typ.constr.high, n[0])
+        var pat = tree(nkConstr, Node(kind: nkSymbol, sym: name(n[0])))
+        for i in 1..<n.len:
+          pat.add semConstrSub(c, n[i])
+
+        let typ = Type(kind: tkPat, pat: pat)
+        c.addConstrSym(typ.pat[0].sym, typ, n[0])
         result = Node(kind: nkType, typ: typ)
       else:
         error("expected identifier or call syntax", n)
 
-    result = tree(nkConstr, Node(kind: nkSymbol, sym: name(n[0]),
-                                 typ: Type(kind: tkPat)))
-    for i in 1..<n.len:
-      result.add semConstrSub(c, n[i])
-    result.typ = typ
+    result = c.semConstrSub(n).typ
   else:
     error("expected identifier or call syntax", n)
 
@@ -1527,18 +1518,17 @@ proc semType(c; body: NimNode, self: Type; base = Type(nil)) =
     c.typerelCache[(self, base)] = relSubtype
 
   for it in body.items:
-    let pat = semConstrDef(c, it, self)
+    let d = semConstrDef(c, it, self)
 
     # make sure there's no equivalent pattern in the current type:
-    for p in self.constr.items:
-      if matchesPattern(c, p, pat) and matchesPattern(c, pat, p):
+    for p in self.children.items:
+      if matchesPattern(c, p.pat, d.pat) and matchesPattern(c, d.pat, p.pat):
         error("duplicate construction pattern", it)
 
-    if base != nil and not matchesType(c, base, pat):
+    if base != nil and not matchesType(c, base, d.pat):
       error("construction is not covered by the parent type", it)
 
-    self.constr.add pat
-    c.addConstrSym(pat[0].sym, self, self.constr.high, it)
+    self.children.add d
 
 proc semBody(c; n: NimNode, typ: Type, top: bool): Node
 
@@ -1760,8 +1750,7 @@ proc convertFrom(to: var types.TypeId, x: sink Type,
                  map: var Table[Type, types.TypeId],
                  types: var seq[TType]) =
   ## The interesting part of the conversion logic.
-  if x.isNil or x.kind == tkPat:
-    # pat types are only needed for the type checker; they're discarded here
+  if x.isNil:
     to = 0
   else:
     let id = map.mgetOrPut(x, types.len)
@@ -1838,11 +1827,11 @@ proc sem(body: NimNode): LangDef =
       of "typ":
         it.expectLen 3
         addSym(c, name(it[1]), it):
-          Sym(kind: skType, typ: Type(kind: tkData))
+          Sym(kind: skType, typ: Type(kind: tkSum))
       of "subtype":
         it.expectLen 4
         addSym(c, name(it[1]), it):
-          Sym(kind: skType, typ: Type(kind: tkData))
+          Sym(kind: skType, typ: Type(kind: tkSum))
       of "context":
         it.expectLen 3
         # use void as the type, so that an r-pattern can be used everywhere
