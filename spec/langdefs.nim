@@ -643,6 +643,32 @@ proc matchesPattern(c; pat, term: Node): bool =
   else:
     unreachable()
 
+proc samePattern(a, b: Node): bool =
+  ## Returns whether `a` and `b` denote the exact same set of values.
+  if a.kind != b.kind:
+    return false
+
+  case a.kind
+  of nkSymbol:
+    a.sym == b.sym
+  of nkType:
+    a.typ == b.typ
+  of nkConstr, nkGroup, nkTuple:
+    # FIXME: the comparison isn't entirely correct. For example: "a a*" and
+    #        "a+" are considered not equal, even though they match exactly the
+    #        same set of sequences
+    if a.len == b.len:
+      for i in 0..<a.len:
+        if not samePattern(a[i], b[i]):
+          return false
+      true
+    else:
+      false
+  of nkZeroOrMore, nkOneOrMore:
+    samePattern(a[0], b[0])
+  else:
+    unreachable()
+
 proc matchesType(c; typ: Type, n: Node): bool =
   ## Answers the question: "does expression `n` inhabit `typ`".
   if typ.kind == tkSum and n.kind in {nkSymbol, nkConstr, nkTuple}:
@@ -1451,17 +1477,33 @@ proc parseTypeUse(c: Context; n: NimNode): Type =
     error("not a type use", n)
     unreachable()
 
-proc addConstrSym(c; name: string, typ: Type, info: NimNode) =
-  ## Adds a symbol for a constructor with name `name` to the symbol table.
-  let sym = Sym(kind: skConstr, typ: typ)
+proc addConstrPattern(c; pat: Node, info: NimNode): Type =
+  ## Adds construction pattern `pat` to the context and symbol table, but only
+  ## if an equal pattern doesn't yet exist. Returns the type for the pattern.
+  assert pat.kind == nkConstr
+  let sym = Sym(kind: skConstr, typ: Type(kind: tkPat, pat: pat))
+  let name = pat[0].sym
   c.lookup.withValue name, prev:
     if prev.kind == skConstr:
-      prev[] = Sym(kind: skOverload, overloads: @[move prev[], sym])
+      if samePattern(prev.typ.pat, pat):
+        # pattern already exists
+        result = prev.typ
+      else:
+        result = sym.typ
+        prev[] = Sym(kind: skOverload, overloads: @[move prev[], sym])
     elif prev.kind == skOverload:
+      for it in prev.overloads.items:
+        if samePattern(it.typ.pat, pat):
+          # pattern already exists
+          return it.typ
+
+      # it's a new pattern
+      result = sym.typ
       prev.overloads.add sym
     else:
       error(fmt"{name} cannot be overloaded", info)
   do:
+    result = sym.typ
     c.lookup[name] = sym
 
 proc semConstrDef(c; n: NimNode): Type =
@@ -1512,9 +1554,7 @@ proc semConstrDef(c; n: NimNode): Type =
         for i in 1..<n.len:
           pat.add semConstrSub(c, n[i])
 
-        let typ = Type(kind: tkPat, pat: pat)
-        c.addConstrSym(typ.pat[0].sym, typ, n[0])
-        result = Node(kind: nkType, typ: typ)
+        result = Node(kind: nkType, typ: c.addConstrPattern(pat, n[0]))
       else:
         error("expected identifier or call syntax", n)
 
