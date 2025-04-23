@@ -43,7 +43,8 @@ type
   SymKind = enum
     skDef
     skType
-    skConstr   ## type constructor
+    skConstr   ## value constructor
+    skValue    ## named value
     skContext
     skVar
     skFunc
@@ -57,7 +58,7 @@ type
       overloads: seq[Sym]
     of skDef:
       e: Node
-    of skConstr, skType, skContext, skFunc, skRelation, skVar:
+    of skConstr, skValue, skType, skContext, skFunc, skRelation, skVar:
       typ: Type
       id: int
 
@@ -98,7 +99,8 @@ using
   c: var Context
 
 const
-  InTuplePat = {nkTrue, nkFalse, nkNumber, nkString, nkType, nkTuple, nkConstr}
+  InTuplePat = {nkTrue, nkFalse, nkNumber, nkString, nkType, nkTuple,
+                nkConstr, nkSymbol}
   InConstrPat = InTuplePat + {nkGroup, nkZeroOrMore, nkOneOrMore}
   OfBranchPat = InConstrPat + {nkVar}
   AllPat = OfBranchPat + {nkPlug}
@@ -254,6 +256,9 @@ proc toExpr(c; s: Sym): Node =
         it.incl s.id # register the variable with the unpack context
   of skContext:
     result = Node(kind: nkContext, id: s.id, typ: s.typ)
+  of skValue:
+    result = s.typ.pat
+    result.typ = s.typ
   of skConstr:
     result = s.typ.pat[0]
   of skOverload:
@@ -647,6 +652,8 @@ proc matchesType(c; typ: Type, n: Node): bool =
     return false
 
   case n.kind
+  of nkSymbol:
+    typ.kind == tkPat and typ.pat.kind == nkSymbol and typ.pat.sym == n.sym
   of nkConstr:
     typ.kind == tkPat and matchesPattern(c, typ.pat, n)
   of nkTuple:
@@ -780,9 +787,9 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
     result = toExpr(c, resolveIdent(c, n))
     if result.kind == nkType:
       error("cannot use type here", n)
-    elif result.typ.kind == tkPat and not isHead:
-      result = tree(nkConstr, result)
-      typeConstr(c, result, n, isPattern=false)
+    elif result.kind == nkSymbol:
+      if result.typ.isNil and not isHead:
+        error("cannot use constructor symbol here", n)
     elif result.typ.kind == tkForall:
       result.typ = c.instantiate(result.typ)
   of nnkIntLit:
@@ -844,7 +851,9 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
     let callee = semExpr(c, n[0], false, isHead=true)
     var call: Node
     var sig: Type
-    if callee.typ.kind == tkVar:
+    # TODO: there are too many separate but related 'if' statements
+    #       here -> refactor
+    if callee.typ != nil and callee.typ.kind == tkVar:
       # try to infer the type as a function type
       let t = skip(c, callee.typ)
       if c.tvars[t.id].curr.kind == tkFunc:
@@ -858,9 +867,12 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
       sig = callee.typ
 
     if callee.kind == nkSymbol:
-      # must be a construction expression, which is typed based on shape
-      call = Node(kind: nkConstr)
-      call.add callee
+      if callee.typ.isNil:
+        # must be a construction expression, which is typed based on shape
+        call = Node(kind: nkConstr)
+        call.add callee
+      else:
+        error(fmt"'{callee.sym}' is not a value kind", n[0])
     elif sig.kind == tkFunc:
       call = Node(kind: nkCall)
       call.add callee
@@ -875,7 +887,7 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
         if not it.input:
           error("relations that bind are only allowed in a 'premise'", n)
 
-    if sig.kind == tkFunc:
+    if sig != nil and sig.kind == tkFunc:
       for i in 1..<n.len:
         let x = recurse(n[i], false)
         check(c, getParam(sig, i - 1), x.typ, n[i])
@@ -985,7 +997,8 @@ proc semPatternIdent(c; n: NimNode, accept: set[NodeKind]): Node =
     elif name in c.lookup:
       result = toExpr(c, c.lookup[name])
       if result.kind == nkSymbol:
-        result = tree(nkConstr, result) # auto-expand
+        if result.typ.isNil:
+          error("constructor symbol cannot be used as pattern", n)
       elif result.kind notin {nkContext, nkHole, nkType, nkTrue, nkFalse}:
         error("only contexts, values, and types may be used as a pattern", n)
 
@@ -1042,8 +1055,6 @@ proc semPattern(c; n: NimNode; accept: set[NodeKind], check = true): Node =
   case n.kind
   of nnkIdent, nnkAccQuoted:
     result = semPatternIdent(c, n, accept)
-    if result.kind == nkConstr and check:
-      typeConstr(c, result, n, isPattern=true)
   of nnkIntLit:
     require(nkNumber, "number not allowed in this context")
     result = Node(kind: nkNumber, num: rational(n.intVal.int),
@@ -1453,16 +1464,21 @@ proc addConstrSym(c; name: string, typ: Type, info: NimNode) =
   do:
     c.lookup[name] = sym
 
-proc semConstrDef(c; n: NimNode, typ: Type): Type =
+proc semConstrDef(c; n: NimNode): Type =
   ## Parses a constructor definition, which use a subset of the available
   ## pattern syntax.
   case n.kind
   of nnkIdent, nnkAccQuoted:
-    # turn into a tree to make downstream processing easier
-    # TODO: ^^ don't
-    let pat = Node(kind: nkSymbol, sym: name(n))
-    result = Type(kind: tkPat, pat: tree(nkConstr, pat))
-    c.addConstrSym(result.pat[0].sym, result, n)
+    let name = name(n)
+    c.lookup.withValue name, prev:
+      if prev.kind == skValue:
+        # named value already exists, reuse the type
+        result = prev.typ
+      else:
+        error(fmt"{name} cannot be overloaded with value", n)
+    do:
+      result = Type(kind: tkPat, pat: Node(kind: nkSymbol, sym: name))
+      c.lookup[result.pat.sym] = Sym(kind: skValue, typ: result)
   of nnkCall:
     proc addChecked(r: var Node, n: sink Node, info: NimNode) {.nimcall.} =
       if r.len > 0 and r.children[^1].kind in {nkOneOrMore, nkZeroOrMore} and
@@ -1518,7 +1534,7 @@ proc semType(c; body: NimNode, self: Type; base = Type(nil)) =
     c.typerelCache[(self, base)] = relSubtype
 
   for it in body.items:
-    let d = semConstrDef(c, it, self)
+    let d = semConstrDef(c, it)
 
     # make sure there's no equivalent pattern in the current type:
     for p in self.children.items:
