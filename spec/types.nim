@@ -63,7 +63,7 @@ type
     tkFunc
     tkTuple
     tkRecord ## record type
-    tkData   ## inductively defined data type
+    tkPat    ## pattern describing a set of values
     tkSum    ## sum type
 
   TypeId* = int
@@ -72,9 +72,8 @@ type
     case kind*: TypeKind
     of tkAll, tkVoid, tkBool, tkInt, tkRat:
       discard
-    of tkData:
-      constr*: seq[Node[TypeId]]
-        ## the patterns describing the shapes of valid constructions
+    of tkPat:
+      pat*: Node[TypeId]
     of tkFunc, tkTuple, tkList, tkSum:
       children*: seq[TypeId]
     of tkRecord:

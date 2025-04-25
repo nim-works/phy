@@ -194,16 +194,20 @@ proc getDefault(lang: LangDef, typ: TypeId): types.Node[TypeId] =
       r.add tree(nkAssoc, Node(kind: nkSymbol, sym: it.name),
                  getDefault(lang, it.typ))
     r
-  of tkData:
-    var r: Node
-    # find a nullary constructor
-    for it in lang[typ].constr.items:
-      if it.kind == nkSymbol or it.len == 1:
-        r = it
-        break
-    r
   of tkSum:
-    getDefault(lang, lang[typ].children[0])
+    var r = Node(kind: nkFail)
+    # look for a type that has a default value
+    for it in lang[typ].children.items:
+      r = getDefault(lang, it)
+      if r.kind != nkFail:
+        return r
+    r
+  of tkPat:
+    if lang[typ].pat.kind == nkSymbol or lang[typ].pat.len == 1:
+      lang[typ].pat
+    else:
+      # too complex
+      Node(kind: nkFail)
 
 proc pretty(res: var ColText, t: Trace, indent: int) =
   ## Pretty-prints the trace `t` and adds the result to `res`.
