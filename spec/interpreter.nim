@@ -131,85 +131,116 @@ proc wrap(a: sink Match): Match =
   result = a
   result.bindings = wrap(result.bindings)
 
-proc merge(a: var Match, b: Match) =
+proc merge(a: var Match, b: sink Match) =
   a.bindings.merge(b.bindings)
   a.ctx.add b.ctx
 
 proc matches(lang; pat: Node, term: Node): Match
 
-proc matchList(lang; pat: Node, term: Node): Match =
+proc matchList(lang; pat, term: Node): Match {.tailcall.} =
   ## Matches the sequence-like `term` against the sequence-like pattern `pat`.
-  # the implementation uses a non-deterministic finite-state machine realized
-  # using continuation-passing-style. The match procedure takes a pattern, a
-  # cursor (term + index), the previous match state (for tracking the
-  # bindings), and a continuation as input
-  type Cont = proc(lang: LangDef, term: Node, i: int, b: sink Match): Match
-  template cont(body: untyped): untyped {.dirty.} =
-    # cannot use the `=>` macro because of the sink parameter
-    proc tmp(lang; term: Node, i: int, sub: sink Match): Match {.gensym.} =
-      body
-    tmp
+  type
+    PLNext = proc(a: LangDef, b: int, c: sink Match): Match {.contcc.}
+    Rest = proc(a: LangDef, b: int, c: sink Match,
+                d: sink PLNext): Match {.contcc.}
+      ## the continuation representing the rest of the pattern sequence
 
-  proc match(lang; pat, term: Node, i: int, b: sink Match, then: Cont): Match =
-    proc rep(lang; pat, term: Node, i: int, b: sink Match, then: Cont): Match =
-      let m = match(lang, pat[0], term, i, Match(has: true),
-        cont(rep(lang, pat, term, i, wrap(sub), then)))
-      if m.has:
-        b.merge(m) # merge the bindings
-        b
-      else:
-        then(lang, term, i, b)
+  proc step(lang; pat, term: Node, pi, ti: int, b: sink Match,
+            ret: sink PLNext): Match {.tailcall.}
 
-    case pat.kind
-    of nkOneOrMore:
-      let m = match(lang, pat[0], term, i, Match(has: true),
-        cont(rep(lang, pat, term, i, wrap(sub), then)))
-      if m.has:
-        b.merge(m)
-        b
-      else:
-        Match(has: false)
-    of nkZeroOrMore:
-      rep(lang, pat, term, i, b, then)
-    of nkGroup:
-      # all patterns in the group must match sequentially
-      proc step(lang; term: Node, i, j: int, b: sink Match): Match =
-        if j < pat.len:
-          match(lang, pat[j], term, i, b,
-            cont(step(lang, term, i, j + 1, sub)))
+  proc rep(lang; pat, term: Node, ti: int, b: sink Match, rest: sink Rest,
+           ret: sink PLNext): Match {.tailcall.} =
+    # note: `a* rest` is the same as `(a a* rest) | rest`
+    # try the repetition's content:
+    step(lang, pat, term, 0, ti, Match(has: true),
+      proc(lang; ti2: int, m: sink Match): Match {.
+          cont: (ptr pat, ptr term, rest, b, ti, ret).} =
+        if m.has:
+          # it's a match! greedily try to continue with the repetition
+          rep(lang, pat, term, ti2, wrap(m), rest,
+            proc(lang; ti2: int, m: sink Match): Match {.
+                cont: (ti, b, rest, ret).} =
+              if m.has:
+                # success! the repetition + rest was successful
+                b.merge(m)
+                drop rest
+                ret(lang, ti2, b)
+              else:
+                # continuing would result in a failure; backtrack
+                drop m
+                rest(lang, ti, b, ret))
         else:
-          then(lang, term, i, b)
+          # no match, try `rest`
+          drop m
+          rest(lang, ti, b, ret))
 
-      step(lang, term, i, 0, b)
-    elif i < term.len:
-      case pat.kind
+  proc step(lang; pat, term: Node, pi, ti: int, b: sink Match,
+            ret: sink PLNext): Match {.tailcall.} =
+    ## Represents the body of a for-loop iterating over `pat`, with `pi` being
+    ## the loop variable (an index into `pat`). `ti` is a cursor into `term`.
+    if pi == pat.len:
+      # end of pattern
+      return ret(lang, ti, b)
+
+    case pat[pi].kind
+    of nkOneOrMore:
+      step(lang, pat[pi], term, 0, ti, Match(has: true),
+        proc(lang; ti: int, m: sink Match): Match {.
+            cont: (ptr pat, ptr term, b, pi, ret).} =
+          if not m.has:
+            drop b
+            return ret(lang, 0, m)
+
+          b.merge(wrap(m))
+          rep(lang, pat[pi], term, ti, b,
+            proc(lang; ti: int, m: sink Match, ret: sink PLNext): Match {.
+                cont: (ptr pat, ptr term, pi).} =
+              step(lang, pat, term, pi + 1, ti, m, ret)
+            , ret))
+    of nkZeroOrMore:
+      rep(lang, pat[pi], term, ti, b,
+        proc(lang; ti: int, m: sink Match, ret: sink PLNext): Match {.
+            cont: (ptr pat, ptr term, pi).} =
+          step(lang, pat, term, pi + 1, ti, m, ret),
+        ret)
+    of nkGroup:
+      # all patterns in the group must match sequentially. Start a nested for-
+      # loop for the group
+      step(lang, pat[pi], term, 0, ti, b,
+        proc(lang; ti: int, m: sink Match): Match {.
+            cont: (ptr pat, ptr term, ret, pi).} =
+          if m.has:
+            step(lang, pat, term, pi + 1, ti, m, ret)
+          else:
+            ret(lang, 0, m))
+    elif ti < term.len:
+      case pat[pi].kind
       of nkContext, nkHole:
         assert b.ctx.len == 0, "multiple holes?"
-        b.ctx = @[i]
-        b.bindings[HoleId] = pat # remember the shape of the hole for later
-        then(lang, term, i + 1, b)
+        b.ctx = @[ti]
+        b.bindings[HoleId] = pat[pi] # remember the shape of the hole for later
+        step(lang, pat, term, pi + 1, ti + 1, b, ret)
       else:
-        var tmp = matches(lang, pat, term[i])
+        var tmp = matches(lang, pat[pi], term[ti])
         if tmp.has:
           if tmp.ctx.len > 0: # was there a "hole match"?
-            tmp.ctx.insert(i) # prepend the position to the list
+            tmp.ctx.insert(ti) # prepend the position to the list
           b.merge(tmp)
-          then(lang, term, i + 1, b)
+          step(lang, pat, term, pi + 1, ti + 1, b, ret)
         else:
-          Match(has: false)
+          drop b
+          ret(lang, 0, tmp)
     else:
-      Match(has: false)
+      drop b
+      ret(lang, 0, Match(has: false))
 
-  proc step(lang; pat, term: Node, i, j: int, b: sink Match): Match =
-    if j < pat.len:
-      match(lang, pat[j], term, i, b,
-        cont(step(lang, pat, term, i, j + 1, sub)))
-    else:
+  step(lang, pat, term, 0, 0, Match(has: true),
+    proc(lang; i: int, m: sink Match): Match {.cont: (ptr term).} =
       # the list pattern only matches the term if the term is fully consumed
-      if term.len == i: b
-      else:             Match(has: false)
-
-  step(lang, pat, term, 0, 0, Match(has: true))
+      if m.has and term.len == i:
+        m
+      else:
+        Match(has: false))
 
 proc matches(lang; typ: TypeId, term: Node): Match =
   template test(cond: bool): Match =
