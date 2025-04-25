@@ -242,6 +242,41 @@ proc matchList(lang; pat, term: Node): Match {.tailcall.} =
       else:
         Match(has: false))
 
+proc matches(lang; typ: TypeId, term: Node): Match =
+  template test(cond: bool): Match =
+    Match(has: cond)
+
+  case lang[typ].kind
+  of tkVoid, tkAll:
+    # TODO: address the type-system issue(s) that results in 'void'
+    #       and 'all' being the same thing at this stage (they shouldn't be)
+    Match(has: true)
+  of tkBool:
+    test term.kind in {nkTrue, nkFalse}
+  of tkInt:
+    test term.kind == nkNumber and term.num.isInt
+  of tkRat:
+    test term.kind == nkNumber
+  of tkList:
+    # TODO: not really correct...
+    test term.kind == nkString
+  of tkRecord:
+    # TODO: should not reach here. Static type checking should elide these
+    #       patterns
+    Match(has: true)
+  of tkFunc:
+    # TODO: same as above
+    test term.kind in {nkMap, nkSet}
+  of tkSum:
+    for it in lang[typ].children.items:
+      if matches(lang, it, term).has:
+        return Match(has: true)
+    Match(has: false)
+  of tkPat:
+    matches(lang, lang[typ].pat, term)
+  else:
+    unreachable()
+
 proc matches(lang; pat, term: Node): Match =
   ## The heart of the pattern matcher (for non-recursive patterns).
   template test(cond: bool): Match =
@@ -284,39 +319,7 @@ proc matches(lang; pat, term: Node): Match =
     else:
       Match(has: false)
   of nkType:
-    case lang[pat.typ].kind
-    of tkVoid, tkAll:
-      # TODO: address the type-system issue(s) that results in 'void'
-      #       and 'all' being the same thing at this stage (they shouldn't be)
-      Match(has: true)
-    of tkBool:
-      test term.kind in {nkTrue, nkFalse}
-    of tkInt:
-      test term.kind == nkNumber and term.num.isInt
-    of tkRat:
-      test term.kind == nkNumber
-    of tkList:
-      # TODO: not really correct...
-      test term.kind == nkString
-    of tkRecord:
-      # TODO: should not reach here. Static type checking should elide these
-      #       patterns
-      Match(has: true)
-    of tkFunc:
-      # TODO: same as above
-      test term.kind in {nkMap, nkSet}
-    of tkData:
-      for it in lang[pat.typ].constr.items:
-        if matches(lang, it, term).has:
-          return Match(has: true)
-      Match(has: false)
-    of tkSum:
-      for it in lang[pat.typ].children.items:
-        if matches(lang, Node(kind: nkType, typ: it), term).has:
-          return Match(has: true)
-      Match(has: false)
-    else:
-      unreachable()
+    matches(lang, pat.typ, term)
   of nkZeroOrMore:
     test term.kind == nkGroup or term.kind == nkString
   of nkOneOrMore:
