@@ -62,6 +62,8 @@ type
 
   Next = proc(c: var Context, lang: LangDef, val: sink Node): Node {.contcc.}
     ## type of a continuation
+  PNext = proc(lang: LangDef, m: sink Match): Match {.contcc.}
+    ## type of return continuation for pattern matching
 
 using
   c: var Context
@@ -135,9 +137,11 @@ proc merge(a: var Match, b: sink Match) =
   a.bindings.merge(b.bindings)
   a.ctx.add b.ctx
 
-proc matches(lang; pat: Node, term: Node): Match
+proc matches(lang; pat, term: Node, m: sink Match,
+             ret: sink PNext): Match {.tailcall.}
 
-proc matchList(lang; pat, term: Node): Match {.tailcall.} =
+proc matchList(lang; pat, term: Node, m: sink Match,
+               ret: sink PNext): Match {.tailcall.} =
   ## Matches the sequence-like `term` against the sequence-like pattern `pat`.
   type
     PLNext = proc(a: LangDef, b: int, c: sink Match): Match {.contcc.}
@@ -221,36 +225,44 @@ proc matchList(lang; pat, term: Node): Match {.tailcall.} =
         b.bindings[HoleId] = pat[pi] # remember the shape of the hole for later
         step(lang, pat, term, pi + 1, ti + 1, b, ret)
       else:
-        var tmp = matches(lang, pat[pi], term[ti])
-        if tmp.has:
-          if tmp.ctx.len > 0: # was there a "hole match"?
-            tmp.ctx.insert(ti) # prepend the position to the list
-          b.merge(tmp)
-          step(lang, pat, term, pi + 1, ti + 1, b, ret)
-        else:
-          drop b
-          ret(lang, 0, tmp)
+        matches(lang, pat[pi], term[ti], Match(has: true),
+          proc(lang; tmp: sink Match): Match {.
+              cont: (ptr pat, ptr term, pi, ti, b, ret).} =
+            if tmp.has:
+              if tmp.ctx.len > 0: # was there a "hole match"?
+                tmp.ctx.insert(ti) # prepend the position to the list
+              b.merge(tmp)
+              step(lang, pat, term, pi + 1, ti + 1, b, ret)
+            else:
+              drop b
+              ret(lang, 0, tmp))
     else:
       drop b
       ret(lang, 0, Match(has: false))
 
-  step(lang, pat, term, 0, 0, Match(has: true),
-    proc(lang; i: int, m: sink Match): Match {.cont: (ptr term).} =
+  step(lang, pat, term, 0, 0, m,
+    proc(lang; i: int, m: sink Match): Match {.cont: (ptr term, ret).} =
       # the list pattern only matches the term if the term is fully consumed
       if m.has and term.len == i:
-        m
+        ret(lang, m)
       else:
-        Match(has: false))
+        drop m
+        ret(lang, Match(has: false)))
 
-proc matches(lang; typ: TypeId, term: Node): Match =
+proc matches(lang; typ: TypeId, term: Node, m: sink Match,
+             ret: sink PNext): Match {.tailcall.} =
   template test(cond: bool): Match =
-    Match(has: cond)
+    if cond:
+      ret(lang, m)
+    else:
+      drop m
+      ret(lang, Match(has: false))
 
   case lang[typ].kind
   of tkVoid, tkAll:
     # TODO: address the type-system issue(s) that results in 'void'
     #       and 'all' being the same thing at this stage (they shouldn't be)
-    Match(has: true)
+    test true
   of tkBool:
     test term.kind in {nkTrue, nkFalse}
   of tkInt:
@@ -263,24 +275,45 @@ proc matches(lang; typ: TypeId, term: Node): Match =
   of tkRecord:
     # TODO: should not reach here. Static type checking should elide these
     #       patterns
-    Match(has: true)
+    test true
   of tkFunc:
     # TODO: same as above
     test term.kind in {nkMap, nkSet}
   of tkSum:
-    for it in lang[typ].children.items:
-      if matches(lang, it, term).has:
-        return Match(has: true)
-    Match(has: false)
+    proc step(lang; typ: TypeId, i: int, term: Node, m: sink Match,
+              ret: sink PNext): Match {.tailcall.} =
+      if i < lang[typ].children.len:
+        matches(lang, lang[typ].children[i], term, Match(has: true),
+          proc(lang; sub: sink Match): Match {.
+              cont: (ptr term, typ, i, m, ret).} =
+            if sub.has:
+              m.merge(sub)
+              ret(lang, m) # found a match
+            else:
+              # continue searching
+              drop sub
+              step(lang, typ, i + 1, term, m, ret))
+      else:
+        # no summand type matched -> no match
+        drop m
+        ret(lang, Match(has: false))
+
+    step(lang, typ, 0, term, m, ret)
   of tkPat:
-    matches(lang, lang[typ].pat, term)
+    matches(lang, lang.types[typ.ord - 1].pat, term, m, ret)
   else:
     unreachable()
 
-proc matches(lang; pat, term: Node): Match =
+proc matches(lang; pat, term: Node, m: sink Match,
+             ret: sink PNext): Match {.tailcall.} =
   ## The heart of the pattern matcher (for non-recursive patterns).
   template test(cond: bool): Match =
-    Match(has: cond)
+    if cond:
+      ret(lang, m)
+    else:
+      drop m
+      ret(lang, Match(has: false))
+
   case pat.kind
   of nkTrue, nkFalse:
     test term.kind == pat.kind
@@ -290,36 +323,53 @@ proc matches(lang; pat, term: Node): Match =
     test term.kind == pat.kind and term.sym == pat.sym
   of nkConstr:
     if term.kind == nkConstr:
-      matchList(lang, pat, term)
+      matchList(lang, pat, term, m, ret)
     else:
-      Match(has: false)
+      drop m
+      ret(lang, Match(has: false))
   of nkTuple:
     if term.kind == nkTuple and term.len == pat.len:
-      var res = Match(has: true)
-      for i, it in term.children.pairs:
-        let tmp = matches(lang, pat[i], it)
-        if tmp.has:
-          res.merge(tmp)
+      proc step(lang; pat, term: Node, i: int, m: sink Match,
+                ret: sink PNext): Match {.tailcall.} =
+        if i < term.len:
+          matches(lang, pat[i], term[i], m,
+            proc(lang; m: sink Match): Match {.
+                cont: (ptr pat, ptr term, i, ret).} =
+              if m.has:
+                step(lang, pat, term, i + 1, m, ret)
+              else:
+                ret(lang, m) # failure, return early
+          )
         else:
-          return tmp
-      res
+          ret(lang, m) # success
+
+      step(lang, pat, term, 0, m, ret)
     else:
-      Match(has: false)
+      drop m
+      ret(lang, Match(has: false))
   of nkHole, nkContext:
     # the hole is recorded as a special binding in order to be looked up again
     # later for the purpose of post-matching
-    Match(has: true, bindings: toTable({HoleId: pat}))
+    m.bindings[HoleId] = pat
+    ret(lang, m)
   of nkPlug:
     # remember the plug pattern and matched term, for later resolution
-    let plug = tree(nkGroup, tree(nkTuple, pat, term))
-    Match(has: true, bindings: toTable({HoleId: plug}))
+    block:
+      m.bindings[HoleId] = tree(nkGroup, tree(nkTuple, pat, term))
+    ret(lang, m)
   of nkBind:
-    if pat.len == 1 or matches(lang, pat[1], term).has:
-      Match(has: true, bindings: toTable({pat[0].id: term}))
+    if pat.len == 1:
+      # unconditional bind
+      m.bindings[pat[0].id] = term
+      ret(lang, m)
     else:
-      Match(has: false)
+      matches(lang, pat[1], term, m,
+        proc(lang; m: sink Match): Match {.cont: (ptr term, ptr pat, ret).} =
+          if m.has:
+            m.bindings[pat[0].id] = term
+          ret(lang, m))
   of nkType:
-    matches(lang, pat.typ, term)
+    matches(lang, pat.typ, term, m, ret)
   of nkZeroOrMore:
     test term.kind == nkGroup or term.kind == nkString
   of nkOneOrMore:
@@ -328,11 +378,17 @@ proc matches(lang; pat, term: Node): Match =
   of nkGroup:
     # matching a standalone list
     if term.kind == nkGroup:
-      matchList(lang, pat, term)
+      matchList(lang, pat, term, m, ret)
     else:
-      Match(has: false)
+      drop m
+      ret(lang, Match(has: false))
   else:
     unreachable()
+
+proc matches(lang; pat, term: Node): Match =
+  ## Temporary adapter procedure for bridging between the CPS and non-CPS code.
+  matches(lang, pat, term, Match(has: true),
+    proc(lang; m: sink Match): Match {.cont.} = m)
 
 template catch(c: var Context, body, els: untyped) =
   ## Runs `body`, with `els` being executed if the former raises a ``Failure``.
