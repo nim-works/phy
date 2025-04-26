@@ -1,10 +1,10 @@
 ## Temporary test orchestrator that runs all tests in the ``expr`` directory
-## using the reference implementation from ``languages/source.nim``. This
+## using the reference implementation from ``languages/core.nim``. This
 ## makes sure the reference implementation works as expected.
 
 import
   std/[os, strutils, strscans, streams, parsecfg, options, math],
-  languages/source,
+  languages/core,
   passes/[syntax_source, trees],
   phy/tree_parser,
   spec/[bignums, interpreter, langdefs, rationals]
@@ -72,7 +72,7 @@ template sym(s: string): Node = Node(kind: nkSymbol, sym: s)
 
 proc convertFloat(f: float): Node =
   ## Converts a floating-point value to the representation used by the
-  ## specification (refer to to the `float` type in ``source.nim``).
+  ## specification (refer to to the `float` type in ``core.nim``).
   # 1-bit sign, 11-bit biased exponent, 52-bit mantissa
   const Bias = 1022 + 53
   case classify(f)
