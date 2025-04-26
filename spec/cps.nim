@@ -26,10 +26,17 @@ proc `=copy`(dst: var CellRef, src: CellRef) =
     else:
       dst.p = src.p.copy(src.p)
 
+# the object checks in `take` have significant overhead, but since the
+# procedure is only used internally, we know that the dynamic type is always
+# correct and thus can safely disable the checks
+{.push checks: off.}
+
 proc take[T](c: sink CellRef): T {.inline.} =
   ## Returns the value from the given cell, `c`, which has to have dynamic
   ## type `T`.
   move (Cell[T])(c.p).val
+
+{.pop.}
 
 proc copyImpl[T](x: CellBase): CellBase =
   Cell[T](val: Cell[T](x).val, copy: x.copy)
