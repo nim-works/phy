@@ -173,7 +173,7 @@ proc buildDefs(args: string): bool =
 
   # there's nothing to do with the compiled language definition, making sure
   # the macro succeeds is enough
-  if not check(getCurrentDir() / "languages" / "source.nim"):
+  if not check(getCurrentDir() / "languages" / "core.nim"):
     echo "Failure"
     quit(1)
 
