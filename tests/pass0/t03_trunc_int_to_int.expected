@@ -1,0 +1,6 @@
+.type t0 () -> int
+.start t0 p0
+  LdImmInt 511
+  SignExtend 56
+  Ret
+.end

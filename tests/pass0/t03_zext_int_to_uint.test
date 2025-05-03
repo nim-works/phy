@@ -1,0 +1,12 @@
+discard """
+  output: "(Done 255)"
+"""
+(TypeDefs
+  (ProcTy (UInt 2)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0) 0 (Locals)
+    (List
+      (Block (Params)
+        (Return
+          (Zext (UInt 2) (Int 1) (IntVal -1)))))))

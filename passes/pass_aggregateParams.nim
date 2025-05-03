@@ -79,7 +79,8 @@ proc signature(c; tree; n): NodeIndex =
 proc typeof(c; tree; n): Node =
   case tree[n].kind
   of Path, Load, Deref, Add, Sub, Mul, Div, Mod, BitNot, BitAnd, BitOr, BitXor,
-     AddChck, SubChck, MulChck, Shl, Shr, Conv, Reinterp, Neg:
+     AddChck, SubChck, MulChck, Shl, Shr, Conv, Zext, Sext, Trunc, Demote,
+     Promote, Reinterp, Neg:
     # these are all expression that store their result type as the first
     # node
     tree[n, 0]
@@ -235,7 +236,7 @@ proc lowerExpr(c; tree; n, bu) =
     c.lowerExpr(tree, tree.child(n, 0), bu)
   of Load, Neg, BitNot:
     c.lowerExpr(tree, tree.child(n, 1), bu)
-  of Reinterp, Conv:
+  of Reinterp, Conv, Zext, Sext, Trunc, Demote, Promote:
     c.lowerExpr(tree, tree.child(n, 2), bu)
   of Add, Sub, Mul, Div, Mod, BitAnd, BitOr, BitXor, AddChck, SubChck, MulChck,
      Eq, Lt, Le, Shl, Shr:
