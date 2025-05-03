@@ -9,7 +9,7 @@ import
 
 type
   NodeKind* = enum
-    Immediate, IntVal, FloatVal, StringVal, ProcVal, Proc, Type, Local, Global
+    Immediate, IntVal, FloatVal, StringVal, Proc, Type, Local, Global
     Int, UInt, Float
 
     List
@@ -56,7 +56,6 @@ proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
   of IntVal:    sexp([newSSymbol("IntVal"), sexp tree.getInt(idx)])
   of FloatVal:  sexp([newSSymbol("FloatVal"), sexp tree.getFloat(idx)])
   of StringVal: sexp([newSSymbol("StringVal"), sexp tree.getString(idx)])
-  of ProcVal:   sexp([newSSymbol("ProcVal"), sexp n.val.int])
   of Proc:      sexp([newSSymbol("Proc"), sexp n.val.int])
   of Type:      sexp([newSSymbol("Type"), sexp n.val.int])
   of Local:     sexp([newSSymbol("Local"), sexp n.val.int])
@@ -73,7 +72,7 @@ proc fromSexp*(kind: NodeKind, val: BiggestInt, lit): Node =
   case kind
   of IntVal:
     Node(kind: kind, val: lit.pack(val))
-  of ProcVal, Proc, Type, Local, Global, Int, UInt, Float:
+  of Proc, Type, Local, Global, Int, UInt, Float:
     Node(kind: kind, val: val.uint32)
   else:
     unreachable()
