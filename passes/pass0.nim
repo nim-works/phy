@@ -61,7 +61,7 @@ func imm(n: TreeNode[NodeKind]): int32 {.inline.} =
   cast[int32](n.val)
 
 func id(n: TreeNode[NodeKind]): int32 {.inline.} =
-  assert n.kind in {Local, Global, Proc, ProcVal}
+  assert n.kind in {Local, Global, Proc}
   cast[int32](n.val)
 
 func typ(n: TreeNode[NodeKind]): TypeId {.inline.} =
@@ -159,12 +159,12 @@ proc genCall(c; tree; call: NodeIndex,
   template numArgs(bias: int): int16 =
      int16((tree.len(call) - ord(fin)) - start - bias)
 
-  if tree[call, start].kind == Proc:
+  if tree[call, start + 1].kind == Proc:
     # it's a static call
-    for it in tree.items(call, start + 1, fin):
+    for it in tree.items(call, start + 2, fin):
       c.genExpr(tree, it)
 
-    c.instr(opcCall, tree[call, start].id, numArgs(0))
+    c.instr(opcCall, tree[call, start + 1].id, numArgs(1))
   else:
     # it's an indirect call
     for it in tree.items(call, start + 2, fin):
@@ -222,7 +222,7 @@ proc genExpr(c; tree; val: NodeIndex) =
     c.loadInt(tree.getInt(val))
   of FloatVal:
     c.loadFloat(tree.getFloat(val))
-  of ProcVal:
+  of Proc:
     # turn into a procedure address by adding 1
     c.loadInt(tree[val].id + 1)
   of Copy:
