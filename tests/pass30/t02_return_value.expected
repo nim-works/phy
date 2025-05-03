@@ -11,5 +11,5 @@
   (ProcDef (Type 2) (Params) (Locals)
     (Stmts
       (Drop
-        (Call (Proc 0)))
+        (Call (Type 1) (Proc 0)))
       (Return))))

@@ -1043,12 +1043,8 @@ proc userCallToIL(c; t; n: NodeIndex, expr; stmts): SemType =
     stmts.add callee.stmts
 
     var call = IrNode(kind: Call)
-    if callee.expr.kind == Proc:
-      # the callee is a statically-known procedure; it's a static call
-      call.add callee.expr
-    else:
-      call.add IrNode(kind: Type, id: c.genProcType(callee.typ))
-      call.add callee.expr
+    call.add IrNode(kind: Type, id: c.genProcType(callee.typ))
+    call.add callee.expr
 
     call.addArgs(c, t, n, callee.typ, stmts)
 
@@ -1189,8 +1185,6 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       expr = newLocal(ent.id.uint32)
       result = c.locals[ent.id] + {}
     of ekProc:
-      # expand to a procedure address (`ProcVal`), which is always correct;
-      # the callsite can turn it into a static reference (`Proc`) as needed
       expr = IrNode(kind: Proc, id: ent.id.uint32)
       result = c.procList[ent.id].typ + {}
     of ekNone:

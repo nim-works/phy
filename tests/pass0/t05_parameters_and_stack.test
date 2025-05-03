@@ -25,4 +25,4 @@ discard """
     (List
       (Block (Params)
         (Return
-          (Call (Proc 0) (IntVal 1) (IntVal 2)))))))
+          (Call (Type 0) (Proc 0) (IntVal 1) (IntVal 2)))))))

@@ -26,10 +26,6 @@ type
 
   Context = object
     addrType: Node
-    cache: seq[NodeIndex]
-      ## indexed by procedure IDs. Caches the signature type for every
-      ## procedure. This greatly speeds up type computation of calls, as it
-      ## eliminates the tree traversal necessary for seeking to the procdef
 
     # per-procedure state:
     locals: NodeIndex
@@ -70,11 +66,9 @@ proc isAggregate(tree; n: Node): bool =
     n = tree[tree.child(0), n.val]
   n.kind in {Record, Union, Array}
 
-proc signature(c; tree; n): NodeIndex =
-  case tree[n].kind
-  of Type: tree.child(tree.child(0), tree[n].val)
-  of Proc: c.cache[tree[n].val]
-  else:    unreachable()
+proc signature(tree; n): NodeIndex =
+  ## Returns the index of the `ProcTy` node for the call at `n`.
+  tree.child(tree.child(0), tree[n].val)
 
 proc typeof(c; tree; n): Node =
   case tree[n].kind
@@ -92,7 +86,7 @@ proc typeof(c; tree; n): Node =
     tree[c.locals, tree[n].val]
   of Call:
     # fetch the return type from the callee's signature
-    tree[c.signature(tree, tree.child(n, 0)), 0]
+    tree[signature(tree, tree.child(n, 0)), 0]
   of Global:
     # fetch the type from the ``GlobalDef``
     tree[tree.child(tree.child(1), tree[n].val), 0]
@@ -167,7 +161,7 @@ proc lowerOperand(c; tree; n; reference: int, bu) =
     # code and/or more work for later passes (more locals usually equals more
     # work and bookkeeping).
     case tree[n].kind
-    of IntVal, FloatVal, ProcVal:
+    of IntVal, FloatVal, NodeKind.Proc:
       discard "nothing to do"
     of Addr:
       c.lowerAddr(tree, n, reference, bu)
@@ -180,8 +174,7 @@ proc lowerOperand(c; tree; n; reference: int, bu) =
     c.lowerExpr(tree, n, bu)
 
 proc lowerCallArgs(c; tree; n; start: int, last: BackwardsIndex; bu) =
-  let sig = c.signature(tree, tree.child(n, start))
-  assert tree[sig].kind == ProcTy
+  let sig = signature(tree, tree.child(n, start))
   let reference = c.stmts.len
 
   # don't consider the dynamic callee value, if any, during the loop, as it's
@@ -219,7 +212,7 @@ proc lowerCallArgs(c; tree; n; start: int, last: BackwardsIndex; bu) =
 
 proc lowerExpr(c; tree; n, bu) =
   case tree[n].kind
-  of IntVal, FloatVal, ProcVal:
+  of IntVal, FloatVal, NodeKind.Proc:
     discard "nothing to do"
   of Copy:
     let x = tree.child(n, 0)
@@ -351,11 +344,12 @@ proc addStmts(c; tree; m: var TreeRef, at: NodeIndex, bu) =
     bu.insert m, at, c.stmts[i]
   c.stmts.shrink(0)
 
-proc lowerProc(c; tree; n; sig: NodeIndex, bu) =
+proc lowerProc(c; tree; n; bu) =
   c.temps.shrink(0)
   c.params.clear()
 
-  let (_, locals, blocks) = tree.triplet(n)
+  let (typ, locals, blocks) = tree.triplet(n)
+  let sig = tree.child(tree.child(0), tree[typ].val)
   c.locals = locals
   c.firstTemp = tree.len(locals)
 
@@ -425,12 +419,7 @@ proc lower*(tree; ptrSize: int): ChangeSet[NodeKind] =
 
   let procs = tree.child(2)
 
-  # cache the signature type for each procedure:
-  c.cache.newSeq(tree.len(procs))
-  for i, it in tree.pairs(procs):
-    c.cache[i] = tree.child(tree.child(0), tree[it, 0].val.int)
-
   # lower the procedures:
   for i, it in tree.pairs(procs):
     if tree[it].kind == ProcDef:
-      c.lowerProc(tree, it, c.cache[i], result)
+      c.lowerProc(tree, it, result)

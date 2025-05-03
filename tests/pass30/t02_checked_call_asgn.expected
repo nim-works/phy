@@ -11,5 +11,5 @@
   (ProcDef (Type 2) (Params)
     (Locals (Type 0))
     (Stmts
-      (CheckedCallAsgn (Local 0) (Proc 0) (Unwind))
+      (CheckedCallAsgn (Local 0) (Type 1) (Proc 0) (Unwind))
       (Return))))

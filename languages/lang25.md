@@ -17,12 +17,9 @@ procdef += (ProcDef <type_id> (Params <local>*) (Locals <type>*) (Stmts <stmt>+)
 Control-flow statements can now appear in a normal statement context:
 
 ```grammar
-exit -= (CheckedCall <proc> <expr>* <goto> <err_goto>)
-      | (CheckedCall <type_id> <expr>+ <goto> <err_goto>)
+exit -= (CheckedCall <type_id> <expr>+ <goto> <err_goto>)
 
-exit += (CheckedCall <proc> <expr>* <err_goto>)
-      | (CheckedCall <type_id> <expr>+ <err_goto>)
-      | (CheckedCallAsgn <local> <proc> <expr>* <err_goto>)
+exit += (CheckedCall <type_id> <expr>+ <err_goto>)
       | (CheckedCallAsgn <local> <type_id> <expr>+ <err_goto>)
 
 stmt += <goto>

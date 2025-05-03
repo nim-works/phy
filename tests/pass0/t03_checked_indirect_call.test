@@ -9,9 +9,12 @@ discard """
     (List
       (Block (Params)
         (Return))))
-  (ProcDef (Type 0) 0 (Locals)
+  (ProcDef (Type 0) 0
+    (Locals (Int 8))
     (List
       (Block (Params)
-        (CheckedCall (Type 0) (ProcVal 0) (Goto 1) (Unwind)))
+        (Asgn (Local 0) (Proc 0))
+        (CheckedCall (Type 0) (Copy (Local 0))
+          (Goto 1) (Unwind)))
       (Block (Params)
         (Return)))))

@@ -6,5 +6,5 @@
     (Return))
   (ProcDef (Type 0) (Params) (Locals)
     (Stmts
-      (CheckedCall (Proc 0))
+      (CheckedCall (Type 0) (Proc 0))
       (Return))))

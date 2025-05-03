@@ -17,5 +17,5 @@
     (List
       (Block (Params)
         (Drop
-          (Call (Type 0) (ProcVal 0) (FloatVal 2.0)))
+          (Call (Type 0) (Proc 0) (FloatVal 2.0)))
         (Return)))))

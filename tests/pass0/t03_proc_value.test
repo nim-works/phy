@@ -9,7 +9,7 @@ discard """
   (ProcDef (Type 0) 0 (Locals)
     (List
       (Block (Params)
-        (Return (ProcVal 0))
+        (Return (Proc 0))
       )
     )
   )

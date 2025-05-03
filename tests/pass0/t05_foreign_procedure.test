@@ -11,4 +11,4 @@ discard """
     (List
       (Block (Params)
         (Return
-          (Call (Proc 0) (IntVal 100)))))))
+          (Call (Type 0) (Proc 0) (IntVal 100)))))))

@@ -27,7 +27,7 @@
         (Drop
           (Add (Int 4)
             (Copy (Local 3))
-            (Call (Proc 0)
+            (Call (Type 1) (Proc 0)
               (Addr (Local 2)))))
         (Asgn (Local 5)
           (Copy (Local 1)))
@@ -36,7 +36,7 @@
         (Drop
           (Sub (Int 4)
             (Copy (Local 5))
-            (Call (Proc 0)
+            (Call (Type 1) (Proc 0)
               (Addr (Local 4)))))
         (Asgn (Local 7)
           (Copy (Local 1)))
@@ -45,7 +45,7 @@
         (Drop
           (Mul (Int 4)
             (Copy (Local 7))
-            (Call (Proc 0)
+            (Call (Type 1) (Proc 0)
               (Addr (Local 6)))))
         (Asgn (Local 9)
           (Copy (Local 1)))
@@ -54,7 +54,7 @@
         (Drop
           (Div (Int 4)
             (Copy (Local 9))
-            (Call (Proc 0)
+            (Call (Type 1) (Proc 0)
               (Addr (Local 8)))))
         (Asgn (Local 11)
           (Copy (Local 1)))
@@ -63,7 +63,7 @@
         (Drop
           (Mod (Int 4)
             (Copy (Local 11))
-            (Call (Proc 0)
+            (Call (Type 1) (Proc 0)
               (Addr (Local 10)))))
         (Asgn (Local 13)
           (Copy (Local 1)))
@@ -72,7 +72,7 @@
         (Drop
           (AddChck (Int 4)
             (Copy (Local 13))
-            (Call (Proc 0)
+            (Call (Type 1) (Proc 0)
               (Addr (Local 12)))
             (Local 1)))
         (Asgn (Local 15)
@@ -82,7 +82,7 @@
         (Drop
           (SubChck (Int 4)
             (Copy (Local 15))
-            (Call (Proc 0)
+            (Call (Type 1) (Proc 0)
               (Addr (Local 14)))
             (Local 1)))
         (Asgn (Local 17)
@@ -92,7 +92,7 @@
         (Drop
           (BitAnd (Int 4)
             (Copy (Local 17))
-            (Call (Proc 0)
+            (Call (Type 1) (Proc 0)
               (Addr (Local 16)))))
         (Asgn (Local 19)
           (Copy (Local 1)))
@@ -101,7 +101,7 @@
         (Drop
           (BitOr (Int 4)
             (Copy (Local 19))
-            (Call (Proc 0)
+            (Call (Type 1) (Proc 0)
               (Addr (Local 18)))))
         (Asgn (Local 21)
           (Copy (Local 1)))
@@ -110,7 +110,7 @@
         (Drop
           (BitXor (Int 4)
             (Copy (Local 21))
-            (Call (Proc 0)
+            (Call (Type 1) (Proc 0)
               (Addr (Local 20)))))
         (Asgn (Local 23)
           (Copy (Local 1)))
@@ -119,7 +119,7 @@
         (Drop
           (Eq (Int 4)
             (Copy (Local 23))
-            (Call (Proc 0)
+            (Call (Type 1) (Proc 0)
               (Addr (Local 22)))))
         (Asgn (Local 25)
           (Copy (Local 1)))
@@ -128,7 +128,7 @@
         (Drop
           (Lt (Int 4)
             (Copy (Local 25))
-            (Call (Proc 0)
+            (Call (Type 1) (Proc 0)
               (Addr (Local 24)))))
         (Asgn (Local 27)
           (Copy (Local 1)))
@@ -137,7 +137,7 @@
         (Drop
           (Le (Int 4)
             (Copy (Local 27))
-            (Call (Proc 0)
+            (Call (Type 1) (Proc 0)
               (Addr (Local 26)))))
         (Asgn (Local 29)
           (Copy (Local 1)))
@@ -146,7 +146,7 @@
         (Drop
           (Shl (Int 4)
             (Copy (Local 29))
-            (Call (Proc 0)
+            (Call (Type 1) (Proc 0)
               (Addr (Local 28)))))
         (Asgn (Local 31)
           (Copy (Local 1)))
@@ -155,7 +155,7 @@
         (Drop
           (Shr (Int 4)
             (Copy (Local 31))
-            (Call (Proc 0)
+            (Call (Type 1) (Proc 0)
               (Addr (Local 30)))))
         (Asgn (Local 34)
           (Copy (Local 1)))
@@ -166,7 +166,7 @@
         (Blit
           (Copy (Local 34))
           (Copy (Local 33))
-          (Call (Proc 0)
+          (Call (Type 1) (Proc 0)
             (Addr (Local 32))))
         (Asgn (Local 36)
           (Copy (Local 1)))
@@ -174,6 +174,6 @@
           (Copy (Local 0)))
         (Clear
           (Copy (Local 36))
-          (Call (Proc 0)
+          (Call (Type 1) (Proc 0)
             (Addr (Local 35))))
         (Return)))))

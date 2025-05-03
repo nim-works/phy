@@ -13,5 +13,5 @@
     (List
       (Block (Params)
         (Drop
-          (Call (Proc 0)))
+          (Call (Type 1) (Proc 0)))
         (Return)))))

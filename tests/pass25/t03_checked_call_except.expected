@@ -12,7 +12,7 @@
     (Locals (Type 0))
     (List
       (Block (Params)
-        (CheckedCall (Proc 0)
+        (CheckedCall (Type 1) (Proc 0)
           (Goto 1)
           (Goto 2)))
       (Block (Params)

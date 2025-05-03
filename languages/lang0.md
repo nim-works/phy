@@ -54,15 +54,14 @@ conv   ::= (Reinterp <type> <type> <expr>)
 
 memops ::= (Load <type> <expr>)
 
-call   ::= (Call <proc> <expr>*)
-        |  (Call <type_id> <expr>+)
+call   ::= (Call <type_id> <expr>+)
 
 intVal   ::= (IntVal <int>)
 floatVal ::= (FloatVal <float>)
 
 simple ::= <intVal>
         |  <floatVal>
-        |  (ProcVal <int>)
+        |  <proc>
         |  (Copy <local>)
         |  (Copy (Global <int>))
 expr   ::= <simple>
@@ -89,9 +88,7 @@ exit ::= <goto>
       |  (Raise <expr> <err_goto>)
       |  (Branch <expr> false:<goto> true:<goto>)
       |  (Select <type> <simple> <choice>+)
-      |  (CheckedCall <proc> <expr>* <goto> <err_goto>)
       |  (CheckedCall <type_id> <expr>+ <goto> <err_goto>)
-      |  (CheckedCallAsgn <local> <proc> <expr>* <goto> <err_goto>)
       |  (CheckedCallAsgn <local> <type_id> <expr>+ <goto> <err_goto>)
 
 stmt ::= (Asgn <local> <expr>)

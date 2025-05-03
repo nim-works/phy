@@ -11,7 +11,7 @@
   (ProcDef (Type 1) (Locals)
     (List
       (Block (Params)
-        (CheckedCall (Proc 0)
+        (CheckedCall (Type 1) (Proc 0)
           (Goto 1)
           (Unwind)))
       (Block (Params)
