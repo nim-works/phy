@@ -145,8 +145,6 @@ proc use*(n: IrNode, lit: var Literals, bu: var Builder[NodeKind]) =
     bu.subTree Load:
       convert(n[0], lit, bu)
       use(n[1], lit, bu)
-  of Proc:
-    bu.add Node(kind: ProcVal, val: n.id)
   else:
     convert(n, lit, bu)
 
