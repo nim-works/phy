@@ -266,13 +266,6 @@ proc registerProc(c; prc: ProcedureId): uint32 =
   if result == c.nextProc: # is it a not-yet-seen procedure?
     inc c.nextProc
 
-proc compilerProc(c; env: var MirEnv, name: string): Node =
-  ## Returns a ``Proc`` reference to the compilerproc with the given `name`.
-  ## The compilerproc is added to `c` and `env` first, if it hasn't been
-  ## already.
-  let p = c.graph.getCompilerProc(name)
-  result = node(Proc, c.registerProc(env.procedures.add(p)))
-
 proc typeRef(c; env: TypeEnv, typ: TypeId): Node =
   node(Type, c.genType(env, typ))
 
@@ -471,6 +464,15 @@ proc genType(c; env: TypeEnv, typ: TypeId): uint32 =
     result = c.types.mgetOrPut(finish(bu), c.types.len.uint32)
     c.typeCache[typ] = result
 
+proc emitCompilerProcCallee(c; env: var MirEnv, name: string, bu) =
+  ## Emits the type and proc value for the compilerproc with the given
+  ## `name`. The procedure is registered first if it hasn't been already.
+  let
+    p = c.graph.getCompilerProc(name)
+    typ = env.types.add(p.typ)
+  bu.add c.genProcType(env, typ, true)
+  bu.add node(Proc, c.registerProc(env.procedures.add(p)))
+
 proc genField(c; env: MirEnv; e: Expr; pos: int32, bu) =
   ## Emits a field access for field `pos`.
   let typ = env.types.canonical(e.typ)
@@ -575,7 +577,7 @@ proc genConst(c; env; tree; n; dest: Expr, stmts) =
   of mnkFloatLit:
     putIntoDest node(FloatVal, c.lit.pack(env.getFloat(tree[n].number)))
   of mnkProcVal:
-    putIntoDest node(ProcVal, c.registerProc(tree[n].prc))
+    putIntoDest node(Proc, c.registerProc(tree[n].prc))
   of mnkArrayConstr:
     for i, it in tree.args(n):
       let nDest = makeExpr tree[it].typ:
@@ -835,7 +837,7 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition,
         bu.subTree Copy:
           bu.add node(Global, c.constMap[tree[n].cnst])
   of mnkProcVal:
-    bu.add node(ProcVal, c.registerProc(tree[n].prc))
+    bu.add node(Proc, c.registerProc(tree[n].prc))
   of mnkDeref, mnkDerefView:
     bu.subTree (if wantValue: Load else: Deref):
       bu.add typeRef(c, env, tree[n].typ)
@@ -996,7 +998,7 @@ proc genField(c; env: MirEnv; tree; n; pos: int32, bu) =
 
 proc genOf(c; env: var MirEnv, tree; e: Expr, typ: TypeId; bu) =
   bu.subTree Call:
-    bu.add compilerProc(c, env, "isObj")
+    c.emitCompilerProcCallee(env, "isObj", bu)
     bu.subTree Copy:
       c.genField(env, e, -1, bu)
 
@@ -1049,7 +1051,7 @@ proc genLength(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
     stmts.goto exit
     stmts.join els
     stmts.putInto dest, Call:
-      bu.add compilerProc(c, env, "nimCStrLen")
+      c.emitCompilerProcCallee(env, "nimCStrLen", bu)
       c.translateValue(env, tree, n, true, bu)
     stmts.join exit
   else:
@@ -1117,7 +1119,7 @@ proc genSetOp(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
                    mPlusSet: "skullyPlusSet",
                    mMinusSet: "skullMinusSet"]
       stmts.addStmt Call:
-        bu.add compilerProc(c, env, Ops[m])
+        c.emitCompilerProcCallee(env, Ops[m], bu)
         takeAddr(dest, bu)
         takeAddr a
         takeAddr b
@@ -1126,7 +1128,7 @@ proc genSetOp(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       stmts.putInto dest, Eq:
         bu.add typeRef(c, env, BoolType)
         bu.subTree Call:
-          bu.add compilerProc(c, env, "nimCmpMem")
+          c.emitCompilerProcCallee(env, "nimCmpMem", bu)
           takeAddr a
           takeAddr b
           lenValue()
@@ -1134,19 +1136,19 @@ proc genSetOp(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     of mLeSet, mLtSet:
       const Ops = [mLeSet: "skullyLeSet", mLtSet: "skullyLtSet"]
       stmts.putInto dest, Call:
-        bu.add compilerProc(c, env, Ops[m])
+        c.emitCompilerProcCallee(env, Ops[m], bu)
         takeAddr a
         takeAddr b
         lenValue()
     of mIncl, mExcl:
       const Ops = [mIncl: "skullyIncl", mExcl: "skullyExcl"]
       stmts.putInto dest, Call:
-        bu.add compilerProc(c, env, Ops[m])
+        c.emitCompilerProcCallee(env, Ops[m], bu)
         takeAddr a
         elem b
     of mInSet:
       stmts.putInto dest, Call:
-        bu.add compilerProc(c, env, "skullyInSet")
+        c.emitCompilerProcCallee(env, "skullyInSet", bu)
         takeAddr a
         elem b
     else:
@@ -1393,21 +1395,21 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     let desc = env.types.headerFor(env.types.canonical(tree[a].typ), Lowered)
     if desc.kind == tkArray:
       wrapAsgn Call:
-        bu.add compilerProc(c, env, "skullyCard")
+        c.emitCompilerProcCallee(env, "skullyCard", bu)
         takeAddr NodePosition(a)
         bu.add node(IntVal, c.lit.pack(desc.size(env.types)))
     elif desc.size(env.types) == 8:
       wrapAsgn Call:
-        bu.add compilerProc(c, env, "countBits64")
+        c.emitCompilerProcCallee(env, "countBits64", bu)
         value a
     elif desc.size(env.types) == 4:
       wrapAsgn Call:
-        bu.add compilerProc(c, env, "countBits32")
+        c.emitCompilerProcCallee(env, "countBits32", bu)
         value a
     else:
       # also use countBits32, but widen the operand first
       wrapAsgn Call:
-        bu.add compilerProc(c, env, "countBits32")
+        c.emitCompilerProcCallee(env, "countBits32", bu)
         bu.subTree Conv:
           bu.add node(UInt, 4)
           bu.add typeRef(c, env, tree[a].typ)
@@ -1457,21 +1459,21 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       unreachable()
   of mEqStr:
     wrapAsgn Call:
-      bu.add compilerProc(c, env, "eqStrings")
+      c.emitCompilerProcCallee(env, "eqStrings", bu)
       value(tree.argument(n, 0))
       value(tree.argument(n, 1))
   of mLeStr:
     wrapAsgn Le:
       bu.add typeRef(c, env, env.types.sizeType)
       bu.subTree Call:
-        bu.add compilerProc(c, env, "cmpStrings")
+        c.emitCompilerProcCallee(env, "cmpStrings", bu)
         value(tree.argument(n, 0))
         bu.add node(IntVal, 0)
   of mLtStr:
     wrapAsgn Lt:
       bu.add typeRef(c, env, env.types.sizeType)
       bu.subTree Call:
-        bu.add compilerProc(c, env, "cmpStrings")
+        c.emitCompilerProcCallee(env, "cmpStrings", bu)
         value(tree.argument(n, 0))
         bu.add node(IntVal, 0)
   of mFinished:
@@ -1513,7 +1515,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         bu.useLvalue dest
         bu.add node(Immediate, 1)
       bu.subTree Call:
-        bu.add compilerProc(c, env, "newSeqPayload")
+        c.emitCompilerProcCallee(env, "newSeqPayload", bu)
         bu.add node(IntVal, c.lit.pack len)
         bu.add node(IntVal, c.lit.pack elemDesc.size(env.types))
         bu.add node(IntVal, c.lit.pack elemDesc.align)
@@ -1568,39 +1570,39 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       bu.add node(IntVal, 1)
   of mSetLengthStr:
     stmts.addStmt Call:
-      bu.add compilerProc(c, env, "setLengthStrV2")
+      c.emitCompilerProcCallee(env, "setLengthStrV2", bu)
       takeAddr NodePosition(tree.argument(n, 0))
       value(tree.argument(n, 1))
   of mNewString:
     wrapAsgn Call:
-      bu.add compilerProc(c, env, "mnewString")
+      c.emitCompilerProcCallee(env, "mnewString", bu)
       value(tree.argument(n, 0))
   of mNewStringOfCap:
     wrapAsgn Call:
-      bu.add compilerProc(c, env, "rawNewString")
+      c.emitCompilerProcCallee(env, "rawNewString", bu)
       value(tree.argument(n, 0))
   of mBoolToStr:
     wrapAsgn Call:
-      bu.add compilerProc(c, env, "nimBoolToStr")
+      c.emitCompilerProcCallee(env, "nimBoolToStr", bu)
       value(tree.argument(n, 0))
   of mCharToStr:
     wrapAsgn Call:
-      bu.add compilerProc(c, env, "nimCharToStr")
+      c.emitCompilerProcCallee(env, "nimCharToStr", bu)
       value(tree.argument(n, 0))
   of mCStrToStr:
     wrapAsgn Call:
-      bu.add compilerProc(c, env, "cstrToNimstr")
+      c.emitCompilerProcCallee(env, "cstrToNimstr", bu)
       value(tree.argument(n, 0))
   of mStrToCStr:
     wrapAsgn Call:
-      bu.add compilerProc(c, env, "nimToCStringConv")
+      c.emitCompilerProcCallee(env, "nimToCStringConv", bu)
       value(tree.argument(n, 0))
   of mAppendStrStr:
     # in theory, the appendStrStr magic supports being merged, but this never
     # happens in practice, meaning that the call expression only ever has
     # two parameters here
     stmts.addStmt Call:
-      bu.add compilerProc(c, env, "prepareAdd")
+      c.emitCompilerProcCallee(env, "prepareAdd", bu)
       takeAddr NodePosition(tree.argument(n, 0))
       bu.subTree Add:
         bu.add typeRef(c, env, env.types.sizeType)
@@ -1614,7 +1616,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
             bu.add node(Immediate, 0)
 
     stmts.addStmt Call:
-      bu.add compilerProc(c, env, "appendString")
+      c.emitCompilerProcCallee(env, "appendString", bu)
       takeAddr NodePosition(tree.argument(n, 0))
       value(tree.argument(n, 1))
   of mConStrStr:
@@ -1643,20 +1645,20 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     stmts.addStmt Asgn:
       bu.useLvalue(temp)
       bu.subTree Call:
-        bu.add compilerProc(c, env, "rawNewString")
+        c.emitCompilerProcCallee(env, "rawNewString", bu)
         bu.add nodes # the length expression
 
     # emit the append calls:
     for (_, _, it) in tree.arguments(n):
       if tree[it].typ == CharType:
         stmts.addStmt Call:
-          bu.add compilerProc(c, env, "appendChar")
+          c.emitCompilerProcCallee(env, "appendChar", bu)
           bu.subTree Addr:
             bu.useLvalue(temp)
           value(it)
       else:
         stmts.addStmt Call:
-          bu.add compilerProc(c, env, "appendString")
+          c.emitCompilerProcCallee(env, "appendString", bu)
           bu.subTree Addr:
             bu.useLvalue(temp)
           value(it)
@@ -1664,13 +1666,13 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     genAsgn(dest, temp, stmts)
   of mParseBiggestFloat:
     wrapAsgn Call:
-      bu.add compilerProc(c, env, "nimParseBiggestFloat")
+      c.emitCompilerProcCallee(env, "nimParseBiggestFloat", bu)
       value(tree.argument(n, 0))
       takeAddr NodePosition(tree.argument(n, 1))
       value(tree.argument(n, 2))
   of mAppendStrCh:
     stmts.addStmt Call:
-      bu.add compilerProc(c, env, "nimAddCharV1")
+      c.emitCompilerProcCallee(env, "nimAddCharV1", bu)
       takeAddr NodePosition(tree.argument(n, 0))
       value(tree.argument(n, 1))
   of mDestroy:
@@ -1719,14 +1721,14 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     case env.types.headerFor(typ, Canonical).kind
     of tkString:
       stmts.addStmt Call:
-        bu.add compilerProc(c, env, "dealloc")
+        c.emitCompilerProcCallee(env, "dealloc", bu)
         bu.subTree Copy:
           bu.subTree Field:
             lvalue(tree.argument(n, 0))
             bu.add node(Immediate, 1)
     of tkSeq:
       stmts.addStmt Call:
-        bu.add compilerProc(c, env, "alignedDealloc")
+        c.emitCompilerProcCallee(env, "alignedDealloc", bu)
         bu.subTree Copy:
           bu.subTree Field:
             lvalue(tree.argument(n, 0))
@@ -1767,7 +1769,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       bu.add node(IntVal, c.lit.pack(tree.numArgs(n) - 1))
 
     stmts.addStmt Call:
-      bu.add compilerProc(c, env, "echoBinSafe")
+      c.emitCompilerProcCallee(env, "echoBinSafe", bu)
       bu.use oa
   of mOf:
     var typ = tree[tree.argument(n, 1)].typ
@@ -1845,6 +1847,7 @@ proc genCall(c; env: var MirEnv; tree; n; dest: Expr, stmts; withEnv = false) =
     if tree[n, 1].kind == mnkProc:
       # a static call
       typ = env.types.add(env[tree[n, 1].prc].typ)
+      bu.add c.genProcType(env, typ, false)
       bu.add node(Proc, c.registerProc(tree[n, 1].prc))
     else:
       # a dynamic call
@@ -2035,7 +2038,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         bu.useLvalue dest
         bu.add node(Immediate, 1)
       bu.subTree Call:
-        bu.add c.compilerProc(env, "newSeqPayload")
+        c.emitCompilerProcCallee(env, "newSeqPayload", bu)
         bu.add node(IntVal, c.lit.pack(tree.len(n)))
         bu.add node(IntVal, c.lit.pack(size(elem, env.types)))
         bu.add node(IntVal, c.lit.pack(elem.align))
@@ -2183,7 +2186,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       let desc = env.types.headerFor(dest.typ, Lowered)
       if desc.kind == tkArray:
         stmts.addStmt Call:
-          bu.add compilerProc(c, env, "skullyIncl")
+          c.emitCompilerProcCallee(env, "skullyIncl", bu)
           takeAddr(dest, bu)
           bu.use elem
       else:
@@ -2469,7 +2472,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
             bu.use ex
 
       stmts.putInto ex, Call:
-        bu.add compilerProc(c, env, "nimBorrowCurrentException")
+        c.emitCompilerProcCallee(env, "nimBorrowCurrentException", bu)
 
       for it in tree.items(n, 1, ^2):
         stmts.join(els)
