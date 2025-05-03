@@ -209,6 +209,11 @@ proc genCheckedBinary(c; tree; op: NodeIndex, opc: Opcode) =
   c.instr(opc, int8(parseType(tree, typ).size * 8))
   c.instr(opcPopLocal, tree[op, 3].id)
 
+proc prepareConvOp(c; tree; n: NodeIndex): (Type0, Type0) =
+  let (dst, src, x) = triplet(tree, n)
+  c.genExpr(tree, x)
+  (parseType(tree, dst), parseType(tree, src))
+
 proc loadLocal(c; local: int32) =
   c.instr(opcGetLocal, local)
   # TODO: merge opcPopLocal + opcGetLocal into opcSetLocal, if there's no
@@ -359,43 +364,51 @@ proc genExpr(c; tree; val: NodeIndex) =
       of 4: c.instr(opcReinterpF32)
       else: unreachable()
   of Conv:
-    # numeric conversion
     let
-      dtyp = parseType(tree, tree.child(val, 0))
-      styp = parseType(tree, tree.child(val, 1))
+      (dtyp, styp) = c.prepareConvOp(tree, val)
+      width = int8(dtyp.size * 8)
 
-    c.genExpr(tree, tree.child(val, 2))
     case dtyp.kind
     of t0kInt:
-      case styp.kind
-      of t0kInt, t0kUInt:
-        c.signExtend(dtyp)
-      of t0kFloat:
-        c.instr(opcFloatToSInt, int8(dtyp.size * 8))
+      assert styp.kind == t0kFloat
+      c.instr(opcFloatToSInt, width)
     of t0kUInt:
-      case styp.kind
-      of t0kInt:
-        c.mask(dtyp)
-      of t0kUInt:
-        # the upper bits can only be set if the source type has larger bit-
-        # width than the destination
-        if dtyp.size < styp.size:
-          c.mask(dtyp)
-      of t0kFloat:
-        c.instr(opcFloatToUInt, int8(dtyp.size * 8))
+      assert styp.kind == t0kFloat
+      c.instr(opcFloatToUInt, width)
     of t0kFloat:
       case styp.kind
       of t0kInt:
-        c.instr(opcSIntToFloat, int8(dtyp.size * 8))
+        c.instr(opcSIntToFloat, width)
       of t0kUInt:
-        c.instr(opcUIntToFloat, int8(dtyp.size * 8))
+        c.instr(opcUIntToFloat, width)
       of t0kFloat:
-        if styp.size == 8 and dtyp.size == 4:
-          # demote 64-bit float to 32-bit float value. Reinterpret the bits as
-          # a 32-bit integer (which internally converts to a 32-bit float
-          # first) and then reinterpret the result as a 32-bit float
-          c.instr(opcReinterpI32)
-          c.instr(opcReinterpF32)
+        unreachable()
+      # TODO: demote the result when the destination type is a 32-bit float
+  of Sext:
+    let (dtyp, styp) = c.prepareConvOp(tree, val)
+    c.signExtend(styp)
+    if dtyp.kind == t0kUInt:
+      c.mask(dtyp)
+  of Zext:
+    let (_, styp) = c.prepareConvOp(tree, val)
+    if styp.kind == t0kInt:
+      c.mask(styp) # zero all leading bits
+  of Trunc:
+    let (dtyp, _) = c.prepareConvOp(tree, val)
+    if dtyp.kind == t0kInt:
+      c.signExtend(dtyp)
+    else:
+      c.mask(dtyp)
+  of Demote:
+    # demote 64-bit float to 32-bit float value. Reinterpret the bits as
+    # a 32-bit integer (which internally converts to a 32-bit float
+    # first) and then reinterpret the result as a 32-bit float
+    c.genExpr(tree, tree.child(val, 2))
+    c.instr(opcReinterpI32)
+    c.instr(opcReinterpF32)
+  of Promote:
+    c.genExpr(tree, tree.child(val, 2))
+    # a no-op
   of Call:
     c.genCall(tree, val, 0, ^1)
   else:
