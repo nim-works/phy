@@ -27,71 +27,71 @@ discard """
         (Drop
           (Add (Int 4)
             (Copy (Local 1))
-            (Call (Proc 0) (Copy (Local 0)))))
+            (Call (Type 1) (Proc 0) (Copy (Local 0)))))
         (Drop
           (Sub (Int 4)
             (Copy (Local 1))
-            (Call (Proc 0) (Copy (Local 0)))))
+            (Call (Type 1) (Proc 0) (Copy (Local 0)))))
         (Drop
           (Mul (Int 4)
             (Copy (Local 1))
-            (Call (Proc 0) (Copy (Local 0)))))
+            (Call (Type 1) (Proc 0) (Copy (Local 0)))))
         (Drop
           (Div (Int 4)
             (Copy (Local 1))
-            (Call (Proc 0) (Copy (Local 0)))))
+            (Call (Type 1) (Proc 0) (Copy (Local 0)))))
         (Drop
           (Mod (Int 4)
             (Copy (Local 1))
-            (Call (Proc 0) (Copy (Local 0)))))
+            (Call (Type 1) (Proc 0) (Copy (Local 0)))))
         (Drop
           (AddChck (Int 4)
             (Copy (Local 1))
-            (Call (Proc 0) (Copy (Local 0)))
+            (Call (Type 1) (Proc 0) (Copy (Local 0)))
             (Local 1)))
         (Drop
           (SubChck (Int 4)
             (Copy (Local 1))
-            (Call (Proc 0) (Copy (Local 0)))
+            (Call (Type 1) (Proc 0) (Copy (Local 0)))
             (Local 1)))
         (Drop
           (BitAnd (Int 4)
             (Copy (Local 1))
-            (Call (Proc 0) (Copy (Local 0)))))
+            (Call (Type 1) (Proc 0) (Copy (Local 0)))))
         (Drop
           (BitOr (Int 4)
             (Copy (Local 1))
-            (Call (Proc 0) (Copy (Local 0)))))
+            (Call (Type 1) (Proc 0) (Copy (Local 0)))))
         (Drop
           (BitXor (Int 4)
             (Copy (Local 1))
-            (Call (Proc 0) (Copy (Local 0)))))
+            (Call (Type 1) (Proc 0) (Copy (Local 0)))))
         (Drop
           (Eq (Int 4)
             (Copy (Local 1))
-            (Call (Proc 0) (Copy (Local 0)))))
+            (Call (Type 1) (Proc 0) (Copy (Local 0)))))
         (Drop
           (Lt (Int 4)
             (Copy (Local 1))
-            (Call (Proc 0) (Copy (Local 0)))))
+            (Call (Type 1) (Proc 0) (Copy (Local 0)))))
         (Drop
           (Le (Int 4)
             (Copy (Local 1))
-            (Call (Proc 0) (Copy (Local 0)))))
+            (Call (Type 1) (Proc 0) (Copy (Local 0)))))
         (Drop
           (Shl (Int 4)
             (Copy (Local 1))
-            (Call (Proc 0) (Copy (Local 0)))))
+            (Call (Type 1) (Proc 0) (Copy (Local 0)))))
         (Drop
           (Shr (Int 4)
             (Copy (Local 1))
-            (Call (Proc 0) (Copy (Local 0)))))
+            (Call (Type 1) (Proc 0) (Copy (Local 0)))))
 
         (Blit
           (Copy (Local 1))
           (Copy (Local 1))
-          (Call (Proc 0) (Copy (Local 0))))
+          (Call (Type 1) (Proc 0) (Copy (Local 0))))
         (Clear
           (Copy (Local 1))
-          (Call (Proc 0) (Copy (Local 0))))
+          (Call (Type 1) (Proc 0) (Copy (Local 0))))
         (Return)))))

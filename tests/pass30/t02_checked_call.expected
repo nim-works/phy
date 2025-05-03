@@ -7,5 +7,5 @@
     (Stmts (Return)))
   (ProcDef (Type 0) (Params) (Locals)
     (Stmts
-      (CheckedCall (Proc 0) (Unwind))
+      (CheckedCall (Type 0) (Proc 0) (Unwind))
       (Return))))

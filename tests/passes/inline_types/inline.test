@@ -30,5 +30,5 @@ discard """
     (List
       (Block (Params)
         (Drop
-          (Call (Type 3) (ProcVal 0) (FloatVal 2.0)))
+          (Call (Type 3) (Proc 0) (FloatVal 2.0)))
         (Return)))))

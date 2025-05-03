@@ -36,7 +36,7 @@ discard """
         (Asgn
           (Path (Int 4) (Local 1)
             (Copy (Local 3)))
-          (Call (Proc 0)
+          (Call (Type 3) (Proc 0)
             (Copy (Local 0))))
 
         (Asgn
@@ -46,16 +46,16 @@ discard """
                 (Path (Type 0) (Local 2)
                   (Copy (Local 3)))))
             0)
-          (Call (Proc 0)
+          (Call (Type 3) (Proc 0)
             (Copy (Local 0))))
 
         (Store (Int 4)
           (Addr
             (Path (Int 4) (Local 1)
               (Copy (Local 3))))
-          (Call (Proc 0) (Copy (Local 0))))
+          (Call (Type 3) (Proc 0) (Copy (Local 0))))
 
-        (Call (Proc 1)
+        (Call (Type 4) (Proc 1)
           (Addr
             (Path (Int 4) (Local 1)
               (Copy (Local 3))))

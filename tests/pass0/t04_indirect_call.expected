@@ -4,7 +4,10 @@
   Ret
 .end
 .start t0 p1
+.local lo0 int
   LdImmInt 1
+  PopLocal lo0
+  GetLocal lo0
   IndCall t0 0
   Ret
 .end

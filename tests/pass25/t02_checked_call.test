@@ -8,5 +8,5 @@
       (Return)))
   (ProcDef (Type 1) (Params) (Locals)
     (Stmts
-      (CheckedCall (Proc 0) (Unwind))
+      (CheckedCall (Type 1) (Proc 0) (Unwind))
       (Return))))

@@ -13,10 +13,12 @@ discard """
       )
     )
   )
-  (ProcDef (Type 0) 0 (Locals)
+  (ProcDef (Type 0) 0
+    (Locals (Int 8))
     (List
       (Block (Params)
-        (Return (Call (Type 0) (ProcVal 0)))
+        (Asgn (Local 0) (Proc 0))
+        (Return (Call (Type 0) (Copy (Local 0))))
       )
     )
   )

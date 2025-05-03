@@ -11,7 +11,7 @@ discard """
   ))
   (ProcDef (Type 0) 0 (Locals) (List
     (Block (Params)
-      (Call (Proc 0))
+      (Call (Type 0) (Proc 0))
       (Return)
     )
   ))

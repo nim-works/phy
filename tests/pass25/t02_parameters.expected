@@ -16,5 +16,5 @@
   (ProcDef (Type 2) (Locals)
     (List
       (Block (Params)
-        (Call (Proc 0) (IntVal 100) (IntVal 200))
+        (Call (Type 1) (Proc 0) (IntVal 100) (IntVal 200))
         (Return)))))

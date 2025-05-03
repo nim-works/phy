@@ -13,7 +13,7 @@ discard """
     (Locals (Int 8))
     (List
       (Block (Params)
-        (CheckedCallAsgn (Local 0) (Proc 0) (Goto 1) (Unwind)))
+        (CheckedCallAsgn (Local 0) (Type 0) (Proc 0) (Goto 1) (Unwind)))
       (Block (Params)
         (Return
           (Copy (Local 0)))))))
