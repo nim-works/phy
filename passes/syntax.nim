@@ -31,7 +31,7 @@ type
     BitAnd, BitNot, BitXor, BitOr
     Shl, Shr
 
-    Conv, Reinterp
+    Conv, Reinterp, Zext, Sext, Trunc, Demote, Promote
 
     Goto, Loop, Raise, Unreachable, Select, Branch
     CheckedCall, CheckedCallAsgn, Unwind, Choice
