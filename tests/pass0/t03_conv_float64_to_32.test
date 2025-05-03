@@ -9,4 +9,4 @@ discard """
     (List
       (Block (Params)
         (Return
-          (Conv (Float 4) (Float 8) (FloatVal 0.5000000149)))))))
+          (Demote (Float 4) (Float 8) (FloatVal 0.5000000149)))))))
