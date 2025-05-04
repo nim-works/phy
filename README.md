@@ -16,4 +16,5 @@ nim c --outdir:bin -r koch.nim all
 The above will:
 - compile `koch`, the build command
 - place that within the local `bin/` directory
-- finally, it'll build all programs in this repository
+- finally, it'll build all programs in this repository and place their
+  executables in the local `bin/` directory
