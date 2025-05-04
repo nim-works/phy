@@ -7,8 +7,7 @@ otherwise noted, installed and on the path.
 
 ## Build Instructions
 
-This command will get everything built
-(N.B.: Windows users replace `nim` with `nim.exe` in the command below)
+To get everything built, run the following from the command line
 
 ```cmd
 nim c --outdir:bin -r koch.nim all
