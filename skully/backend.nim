@@ -1055,11 +1055,75 @@ proc genLength(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
   else:
     unreachable()
 
+proc genNumericConv(c; env; val: Expr, to: TypeId, bu) =
+  ## If the types are equal (at the IL level), emits an *unchecked* numeric
+  ## conversion for `val` to type `to`.
+  proc skip(env; t: TypeId): TypeId =
+    result = env.types.canonical(t)
+    # treat imported types as their underlying representation
+    if env.types.headerFor(t, Lowered).kind == tkImported:
+      result = env.skip(env.types.headerFor(t, Lowered).elem)
+
+  let dst = env.types.headerFor(env.skip(to), Lowered)
+  let src = env.types.headerFor(env.skip(val.typ), Lowered)
+
+  template convOp(kind: NodeKind) =
+    bu.subTree kind:
+      bu.add typeRef(c, env, to)
+      bu.add typeRef(c, env, val.typ)
+      bu.use val
+
+  template sizedConv(widen, narrow: NodeKind) =
+    if dst.size(env.types) < src.size(env.types):
+      convOp narrow
+    elif dst.size(env.types) > dst.size(env.types):
+      convOp widen
+    else:
+      # nothing to do
+      bu.use val
+
+  const
+    uints = {tkUInt, tkChar, tkBool}
+    ints  = {tkInt}
+
+  case dst.kind
+  of uints:
+    case src.kind
+    of ints, uints:
+      # conversion to uint is the same as casting to uint
+      sizedConv Trunc, Zext
+    of tkFloat:
+      convOp Conv
+    else:
+      unreachable(src.kind)
+  of ints:
+    case src.kind
+    of ints:    sizedConv Trunc, Sext
+    of uints:   sizedConv Trunc, Zext
+    of tkFloat: convOp Conv
+    else:
+      unreachable(src.kind)
+  of tkFloat:
+    case src.kind
+    of ints, uints:
+      convOp Conv
+    of tkFloat:
+      sizedConv Promote, Demote
+    else:
+      unreachable()
+  of tkPtr, tkPointer, tkProc, tkCstring:
+    # a conversion between pointer types is a no-op. These conversion aren't
+    # really numeric conversions, but it's easier to also include them here
+    bu.use val
+  else:
+    unreachable(dst.kind)
+
 proc genSetElem(c; env; tree; n; styp: TypeId, bu) =
   ## Emits the expression for loading a value for use in a set-related
   ## operation. This means turning the value into one relative to the start of
   ## the set's value range. The resulting value is always of uint16 type.
-  proc aux(c; env; tree; n; styp: TypeId, bu) =
+  let val = makeExpr tree[n].typ:
+    # shift the operand's value so that its range starts at 0
     assert env.types[styp].kind == tySet
     let first = c.graph.config.firstOrd(env.types[styp])
     if first != Zero:
@@ -1070,16 +1134,8 @@ proc genSetElem(c; env; tree; n; styp: TypeId, bu) =
     else:
       c.translateValue(env, tree, n, true, bu)
 
-  let typ = env.types.canonical(tree[n].typ)
-  let desc = env.types.headerFor(typ, Lowered)
-  if desc.kind != tkUInt or desc.size(env.types) != 2:
-    # sets cannot have more than 2^16 elements, hence a uint16
-    bu.subTree Conv:
-      bu.add node(UInt, 2)
-      bu.add typeRef(c, env, typ)
-      aux(c, env, tree, n, styp, bu)
-  else:
-    aux(c, env, tree, n, styp, bu)
+  # sets cannot have more than 2^16 elements, hence a uint16
+  c.genNumericConv(env, val, UInt16Type, bu)
 
 proc genSetOp(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   ## Generates and emits the IL code for a binary set operation.
@@ -1381,10 +1437,10 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     wrapAsgn:
       value(tree.argument(n, 0))
   of mChr:
-    wrapAsgn Conv:
-      bu.add typeRef(c, env, tree[n].typ)
-      bu.add typeRef(c, env, tree[tree.argument(n, 0)].typ)
-      value(tree.argument(n, 0))
+    # it's a conversion, nothing more
+    let input = c.gen(env, tree, NodePosition(tree.argument(n, 0)), true)
+    wrapAsgn:
+      c.genNumericConv(env, input, tree[n].typ, bu)
   of mIncl, mExcl, mLtSet, mLeSet, mEqSet, mMinusSet, mPlusSet, mMulSet,
      mInSet:
     c.genSetOp(env, tree, n, dest, stmts)
@@ -1408,7 +1464,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       # also use countBits32, but widen the operand first
       wrapAsgn Call:
         bu.add compilerProc(c, env, "countBits32")
-        bu.subTree Conv:
+        bu.subTree Zext:
           bu.add node(UInt, 4)
           bu.add typeRef(c, env, tree[a].typ)
           value a
@@ -1934,10 +1990,11 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     wrapAsgn:
       value(n)
   of mnkConv, mnkStdConv:
-    wrapAsgn Conv:
-      bu.add typeRef(c, env, tree[n].typ)
-      bu.add typeRef(c, env, tree[n, 0].typ)
-      value(tree.child(n, 0))
+    # the high-level MIR conversions are lowered into the more specific
+    # operations of the target IL
+    let input = c.gen(env, tree, tree.child(n, 0), true)
+    wrapAsgn:
+      c.genNumericConv(env, input, tree[n].typ, bu)
   of mnkCopy, mnkMove, mnkSink:
     wrapAsgn:
       value(tree.child(n, 0))
@@ -2254,10 +2311,6 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         takeAddr tree.child(n, 0)
         bu.add node(IntVal, c.lit.pack(size))
     else:
-      template isUnsigned(id: TypeId): bool =
-        env.types.headerFor(id, Lowered).kind in
-          {tkPtr, tkPointer, tkRef, tkUInt, tkChar, tkBool}
-
       let a = env.types.headerFor(dst, Lowered).size(env.types)
       let b = env.types.headerFor(src, Lowered).size(env.types)
       # for the implementation, keep in mind that Reinterp only supports
@@ -2271,40 +2324,16 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
           bu.add typeRef(c, env, dst)
           bu.add typeRef(c, env, src)
           value tree.child(n, 0)
-      elif isUnsigned(dst):
-        if isUnsigned(src):
-          # a simple conversion (i.e., a zero extension) is enough
-          wrapAsgn Conv:
-            bu.add typeRef(c, env, dst)
-            bu.add typeRef(c, env, src)
-            value tree.child(n, 0)
-        else:
-          wrapAsgn Conv:
-            bu.add typeRef(c, env, dst)
-            bu.add node(UInt, b.uint32)
-            bu.subTree Reinterp:
-              bu.add node(UInt, b.uint32)
-              bu.add typeRef(c, env, src)
-              value tree.child(n, 0)
-      elif isUnsigned(src):
-        wrapAsgn Reinterp:
+      elif a < b:
+        wrapAsgn Trunc:
           bu.add typeRef(c, env, dst)
-          bu.add node(UInt, a.uint32)
-          bu.subTree Conv:
-            bu.add node(UInt, a.uint32)
-            bu.add typeRef(c, env, src)
-            value tree.child(n, 0)
+          bu.add typeRef(c, env, src)
+          value tree.child(n, 0)
       else:
-        wrapAsgn Reinterp:
+        wrapAsgn Zext:
           bu.add typeRef(c, env, dst)
-          bu.add node(UInt, a.uint32)
-          bu.subTree Conv:
-            bu.add node(UInt, a.uint32)
-            bu.add node(UInt, b.uint32)
-            bu.subTree Reinterp:
-              bu.add node(UInt, b.uint32)
-              bu.add typeRef(c, env, src)
-              value tree.child(n, 0)
+          bu.add typeRef(c, env, src)
+          value tree.child(n, 0)
   else:
     unreachable()
 

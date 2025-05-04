@@ -1,0 +1,12 @@
+discard """
+  output: "(Done (18446744073709551613 or -3))"
+"""
+(TypeDefs
+  (ProcTy (Int 2)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0) 0 (Locals)
+    (List
+      (Block (Params)
+        (Return
+          (Sext (Int 2) (Int 1) (IntVal -3)))))))
