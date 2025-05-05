@@ -2,8 +2,12 @@
 
 ## Build Pre-requisites
 
-The build instructions assume you have NimSkull, latest preferred unless
-otherwise noted, installed and on the path.
+The build instructions assume you have NimSkull installed and on the path,
+with the minimum required version found [here](https://github.com/nim-works/phy/blob/main/nimskull.version#L1).
+
+> Important: the `skully` program imports internal compiler modules, which
+> means that using a more recent compiler version might cause the program to
+> not work correctly.
 
 ## Build Instructions
 
