@@ -28,6 +28,24 @@ defaults:
     shell: bash
 
 jobs:
+  context:
+    # a job that gathers some commonly needed information and provides it
+    # as outputs
+    name: "Establish job context"
+    runs-on: ubuntu-latest
+    outputs:
+      nimskull-version: "${{ steps.version.outputs.version }}"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # sparse checkout; we're only interested in the head commit
+          fetch-depth: 0
+          filter: tree:0
+
+      # read the compiler version from the local file
+      - id: version
+        run: echo "version=$(<$GITHUB_WORKSPACE/nimskull.version)" >> "$GITHUB_OUTPUT"
+
   binaries:
     strategy:
       fail-fast: false
@@ -44,7 +62,7 @@ jobs:
 
     # run the language-related chores first, so that language definition errors
     # are reported early and only once
-    needs: [languages]
+    needs: [languages, context]
 
     name: "Build binaries (${{ matrix.target.name }})"
     runs-on: ${{ matrix.target.runner }}
@@ -56,10 +74,9 @@ jobs:
           fetch-depth: 0
           filter: tree:0
 
-      # use a pinned version in order to make CI runs reproducible
       - uses: nim-works/setup-nimskull@0.1.2
         with:
-          nimskull-version: "0.1.0-dev.21466"
+          nimskull-version: "${{ needs.context.outputs.nimskull-version }}"
 
       - name: Build koch
         run: nim c -d:nimStrictMode --outdir:bin koch.nim
@@ -82,16 +99,17 @@ jobs:
     name: "Check and generate languages"
     runs-on: ubuntu-22.04
 
+    needs: context
+
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           filter: tree:0
 
-      # use a pinned version in order to make CI runs reproducible
       - uses: nim-works/setup-nimskull@0.1.2
         with:
-          nimskull-version: "0.1.0-dev.21466"
+          nimskull-version: "${{ needs.context.outputs.nimskull-version }}"
 
       - name: Build koch
         run: nim c -d:nimStrictMode --outdir:bin koch.nim
@@ -114,16 +132,17 @@ jobs:
     # use the M1 runner because it's the fastest
     runs-on: macos-14
 
+    needs: context
+
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           filter: tree:0
 
-      # use a pinned version in order to make CI runs reproducible
       - uses: nim-works/setup-nimskull@0.1.2
         with:
-          nimskull-version: "0.1.0-dev.21466"
+          nimskull-version: "${{ needs.context.outputs.nimskull-version }}"
 
       - name: Build koch
         run: nim c -d:nimStrictMode --outdir:bin koch.nim
