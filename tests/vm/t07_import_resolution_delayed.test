@@ -1,0 +1,31 @@
+discard """
+  description: "Test import resolution where the procedure doesn't yet exists"
+  output: "(Done 1)"
+"""
+#.module
+.type P1 () -> int
+.import P1 test "p.exported"
+.start P1 other
+  Call test 0
+  Ret
+.end
+.export proc other "other"
+.close
+
+.module
+.type P1 () -> int
+
+.start P1 test
+  LdImmInt 1
+  Ret
+.end
+.export proc test "p.exported"
+
+.import P1 other "other"
+.start P1 main
+  Call other 0
+  Ret
+.end
+.close
+
+# 'main' calls 'other' from module 1 which calls 'test' from module 2
