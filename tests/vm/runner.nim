@@ -55,7 +55,10 @@ if errors.len > 0:
     stderr.writeLine(it)
   quit(1)
 
-link(env, toTable({"test": test}), [module])
+var ltab = LinkTable()
+if not load(env, ltab, module):
+  stderr.write("failed to load module")
+  quit(1)
 
 if env.procs.len == 0:
   # there's nothing to execute, but don't treat this as an error
@@ -66,6 +69,8 @@ var
   res: YieldReason
   # use 1KB for the in-memory stack
   thread = env.initThread(env.procs.high.ProcIndex, 1024, @[])
+
+load(env, ltab, toTable({"test": test}))
 
 # run the thread until execution cannot resume anymore:
 while true:
