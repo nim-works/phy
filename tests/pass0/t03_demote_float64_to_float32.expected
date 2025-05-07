@@ -1,5 +1,5 @@
 .type t0 () -> float
-.const c0 0.5000000149
+.const c0 float 0.5000000149
 .start t0 p0
   LdConst c0
   ReinterpI32

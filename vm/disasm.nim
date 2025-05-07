@@ -132,7 +132,7 @@ proc disassemble*(m: VmModule): string =
 
   # emit the constants:
   for i, val in m.constants.pairs:
-    result.add &".const c{i} {val}\n"
+    result.add &".const c{i} {val.typ} {val}\n"
 
   # emit the globals:
   for i, val in m.globals.pairs:
