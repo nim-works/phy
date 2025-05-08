@@ -69,10 +69,11 @@ proc translate*(a: VmAllocator, p: VirtualAddr): HostPointer {.inline.} =
   cast[HostPointer](addr a.host[uint64(p) - AddressBias])
 
 proc grow*(a: var VmAllocator, size: uint): bool =
-  ## Grows the VM's available memory. In case of an error, nothing is modified
-  ## and false is returned.
-  if size > a.hostSize:
-    a.host = cast[HostPointer](realloc0(a.host, size, a.hostSize))
+  ## Grows the VM's memory to `size`. If `size` is less than the current size,
+  ## or greater than the maximum allowed size, nothing changes and `false`
+  ## is returned.
+  if size in a.hostSize..a.maxHost:
+    a.host = cast[HostPointer](realloc0(a.host, a.hostSize, size))
     a.hostSize = size
     true
   else:
