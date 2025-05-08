@@ -1,0 +1,22 @@
+discard """
+  description: "Ensure that region initializers work"
+  output: "(Done 48)"
+"""
+.type P1 () -> int
+.memory 4096
+.init 0 "\x10\x00\x00\x00"
+.init 4 "\x20\x00\x00\x00"
+
+.global g0 int 0
+.global g1 int 4
+.reloc g0
+.reloc g1
+
+.start P1 p
+  GetGlobal g0
+  LdInt32 0
+  GetGlobal g1
+  LdInt32 0
+  AddInt       # 16 + 32
+  Ret
+.end
