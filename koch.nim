@@ -12,8 +12,8 @@ Options:
   --nim:path                  use the specified NimSkull compiler
 
 Commands:
-  build <target> [<arg> ...]  builds a program with the given arguments. 'all'
-                              builds all programs
+  build <program> [<arg> ...] builds a program, using the given compiler args
+  build all [<arg> ...]       builds all programs
   generate <dir>              generates the various language-related modules
   build-defs                  verifies the language definitions and generates
                               the textual representation for them
