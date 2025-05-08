@@ -1,0 +1,35 @@
+discard """
+  description: "
+    Test import resolution where a procedure is imported multiple times before
+    being resolved.
+  "
+  output: "(Done 2)"
+"""
+#.module
+.type P1 () -> int
+.import P1 a "p.exported"
+.import P1 b "p.exported"
+.start P1 other
+  Call a 0
+  Call b 0
+  AddInt
+  Ret
+.end
+.export proc other "other"
+.close
+
+.module
+.type P1 () -> int
+
+.start P1 test
+  LdImmInt 1
+  Ret
+.end
+.export proc test "p.exported"
+
+.import P1 other "other"
+.start P1 main
+  Call other 0
+  Ret
+.end
+.close

@@ -5,7 +5,7 @@
 ## by *linking* them, producing a self-contained `VmEnv <vmenv.html#VmEnv>`_
 
 import
-  std/tables,
+  std/[options, tables],
   vm/[vmenv, vmspec, vmtypes]
 
 type
@@ -44,9 +44,17 @@ type
     lkKeep       ## keep the procedure entry
     lkRedirect   ## redirect to another entry
     lkImportHost ## turn into a host procedure entry
+    lkRelocate   ## move the procedure entry
     lkStub       ## turn into a stub entry
 
-  LinkTable = seq[tuple[action: LinkAction, val: uint32]]
+  LinkTable* = object
+    ## Keeps track of various state that's needed for linking modules into
+    ## a ``VmEnv``.
+    exported: Table[string, ProcIndex]
+    unresolved: Table[string, ProcIndex]
+      ## not-yet-resolved entries awaiting resolution
+
+  Action = tuple[action: LinkAction, val: uint32]
 
 template appendAndModify(list: untyped, frm: untyped, body: untyped) =
   let start = list.len
@@ -59,9 +67,9 @@ proc patchInstr(instr: Instr, a: int32): Instr =
   result = Instr(instr.InstrType and not(instrAMask shl instrAShift))
   result = Instr(result.InstrType or (InstrType(a) shl instrAShift))
 
-proc append(env: var VmEnv, tab: LinkTable, m: VmModule) =
-  ## Appends all code and resources part of `m` to `env` while updating
-  ## the references within.
+proc append(env: var VmEnv, tab: seq[Action], m: VmModule) =
+  ## Appends all code and resources part of `m` to `env` while updating the
+  ## references within.
   let
     codeOffset = env.code.len
     localsOffset = env.locals.len
@@ -99,9 +107,11 @@ proc append(env: var VmEnv, tab: LinkTable, m: VmModule) =
     #        indistinguishable from normal integers. A new opcode for
     #        loading a procedure handle is needed
     if it.opcode == opcCall:
-      let (action, pos) = tab[it.imm32 + procOffset]
-      if action == lkRedirect:
+      let (action, pos) = tab[it.imm32]
+      if action in {lkRedirect, lkRelocate}:
         it = patchInstr(it, int32(pos))
+      else:
+        it = patchInstr(it, int32(it.imm32 + procOffset))
 
   appendAndModify env.ehTable, m.ehTable:
     it.src += codeOffset.uint32
@@ -109,77 +119,105 @@ proc append(env: var VmEnv, tab: LinkTable, m: VmModule) =
 
   appendAndModify env.procs, m.procs:
     let
-      entry = tab[i + procOffset]
+      entry = tab[i]
       typ = TypeId(it.typ.ord + typeOffset)
     case entry.action
     of lkImportHost:
       it = ProcHeader(kind: pkCallback, typ: typ)
       it.code.a = entry.val
-    of lkKeep:
+    of lkKeep, lkRelocate:
       it.typ = typ
       # update the offsets
       it.code.a += codeOffset.uint32
       it.code.b += codeOffset.uint32
       it.locals.a += localsOffset.uint32
       it.locals.b += localsOffset.uint32
+      if entry.action == lkRelocate:
+        # move the patched-up entry to the designated destination:
+        env.procs[entry.val] = move it
+        it = ProcHeader(kind: pkStub, typ: it.typ)
     of lkStub, lkRedirect:
       # redirected procedures (i.e., resolved imported ones) are turned into
       # stubs, which keeps the linking simpler, as IDs don't have to be
       # shifted around
       it = ProcHeader(kind: pkStub, typ: it.typ)
 
-proc link*(env: var VmEnv, host: Table[string, VmCallback],
-           modules: openArray[VmModule]) =
-  ## Creates a VM instance with the code from all given modules. If an imported
-  ## procedure resolves to neither a regular procedure nor host procedure
-  ## provided by `host`, it stays as a stub.
-  var
-    lookup: Table[string, int]
-      ## keeps track of the already registered callbacks. Callbacks are only
-      ## added to the environment when actually referenced
-    exported: Table[string, uint32]
-    tab: LinkTable
-
-  # first pass: collect the IDs corresponding to interface names
-  block:
-    var offset = 0'u32
-    for m in modules.items:
-      for e in m.exports.items:
-        if e.kind == expProc:
-          # if there exists more than one export with the same interface name,
-          # the last one prevails
-          exported[m.names[e.name]] = offset + e.id
-
-      offset += m.procs.len.uint32
-
-    tab.newSeq(offset)
-
-  var i = 0
-  # second pass: compute the link action for each procedure
-  for m in modules.items:
-    for p in m.procs.items:
-      if p.kind == pkCallback:
-        let name {.cursor.} = m.names[p.code.a]
-        if name in exported:
-          # the import imports a regular procedure
-          tab[i] = (lkRedirect, exported[name])
-        elif name in host:
+proc load*(env: var VmEnv, ltab: var LinkTable, m: VmModule): bool =
+  ## Loads `m` into `env`, relocating the former's resources and resolving
+  ## imports where possible. If an imported procedure cannot be resolved, it
+  ## stays as a stub and is registerd in `ltab` for future resolution.
+  # compute the link actions
+  var actions = newSeq[Action](m.procs.len)
+  for i, p in m.procs.pairs:
+    case p.kind
+    of pkCallback:
+      let name {.cursor.} = m.names[p.code.a]
+      ltab.exported.withValue name, val:
+        case env[val[]].kind
+        of pkCallback:
           # the import imports a host procedure
-          let cb = lookup.mgetOrPut(name, env.callbacks.len)
-          if cb == env.callbacks.len: # is it a new table entry?
-            env.callbacks.add host[name]
+          actions[i] = (lkImportHost, env[val[]].code.a)
+        of pkDefault:
+          # the import imports a regular bytecode procedure
+          actions[i] = (lkRedirect, val[].uint32)
+        of pkStub:
+          unreachable("stubs shouldn't be exported")
+      do:
+        # make sure multiple imports of the same procedure all point to the
+        # same entry in the end
+        ltab.unresolved.withValue name, val:
+          actions[i] = (lkRedirect, val[].uint32)
+        do:
+          # becomes a stub which may be resolved later
+          actions[i] = (lkStub, 0'u32)
+          ltab.unresolved[name] = ProcIndex(env.procs.len + i)
 
-          tab[i] = (lkImportHost, cb.uint32)
-        else:
-          # the import cannot be resolved, turn the procedure entry into
-          # a stub
-          tab[i] = (lkStub, 0'u32)
+    of pkDefault:
+      actions[i] = (lkKeep, 0'u32)
+    of pkStub:
+      unreachable()
+
+  # resolve unresolved procedures using this module's exports:
+  for e in m.exports.items:
+    if e.kind == expProc:
+      var target: ProcIndex
+      if pop(ltab.unresolved, m.names[e.name], target):
+        # the procedure takes over the existing stub entry, so that already
+        # present code doesn't have to be patched
+        actions[e.id] = (lkRelocate, target.uint32)
       else:
-        tab[i] = (lkKeep, 0'u32)
+        target = ProcIndex(env.procs.len.uint32 + e.id)
 
-      inc i
+      ltab.exported[m.names[e.name]] = target
 
-  reset lookup # free the memory eagerly, it's not needed anymore
+  append(env, actions, m)
 
-  for m in modules.items:
-    append(env, tab, m)
+  result = true
+
+proc load*(env: var VmEnv, ltab: var LinkTable,
+           host: Table[string, VmCallback]) =
+  ## Loads the given host procedures into the environment. They're
+  ## automatically marked as exported.
+  # XXX: this has little to do with VM modules. Move it to a separate module in
+  #      the future
+  for name, cb in host.pairs:
+    let idx = env.callbacks.len.uint32
+    env.callbacks.add cb
+
+    # take over stub entries:
+    var target: ProcIndex
+    if ltab.unresolved.pop(name, target):
+      env.procs[ord target] = ProcHeader(kind: pkCallback, code: idx..0'u32)
+    else:
+      target = env.procs.len.ProcIndex
+      env.procs.add ProcHeader(kind: pkCallback, code: idx..0'u32)
+
+    ltab.exported[name] = target
+
+proc get*(ltab: LinkTable, name: string): Option[ProcIndex] =
+  ## Returns the procedure index for the exported procedure with `name`,
+  ## if present.
+  if name in ltab.exported:
+    some ltab.exported[name]
+  else:
+    none ProcIndex

@@ -437,6 +437,12 @@ proc main(args: openArray[string]) =
       else:
         error "invalid memory configuration"
 
+      # setup the VM instance and load all modules (currently only one):
+      var env = initVm(mem.total, mem.total)
+      var ltab = LinkTable()
+      if not load(env, ltab, module):
+        error "loading the VM module failed"
+
       # look for the procedure to start evaluation with:
       var entry = none ProcIndex
       if source == langSource:
@@ -456,9 +462,9 @@ proc main(args: openArray[string]) =
         else:
           error "there's nothing to run"
 
-      # reserve the maximum amount of memory up-front
-      var env = initVm(mem.total, mem.total)
-      link(env, hostProcedures(gRunner), [module])
+      # import the host procedure's only now, so that the above module-level
+      # references are also valid program-level references
+      load(env, ltab, hostProcedures(gRunner))
       let stack = hoSlice(mem.stackStart, mem.stackStart + mem.stackSize)
 
       if source == langSource:
