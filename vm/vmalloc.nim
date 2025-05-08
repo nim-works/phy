@@ -59,6 +59,10 @@ proc initAllocator*(initial, maxHost: uint): VmAllocator =
   result.host = cast[HostPointer](alloc0(initial))
   result.hostSize = initial
 
+func currSpace*(a: VmAllocator): uint =
+  ## Returns the currently allocated number of bytes.
+  a.hostSize
+
 proc translate*(a: VmAllocator, p: VirtualAddr): HostPointer {.inline.} =
   ## Translate `p` to a host address. This is an *unsafe* operation, no checks
   ## are performed.
