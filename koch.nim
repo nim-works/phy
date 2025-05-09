@@ -12,23 +12,22 @@ Options:
   --nim:path                  use the specified NimSkull compiler
 
 Commands:
-  all [args]                  builds all programs
-  single <name> [args]        builds the single program with the given name
-  generate [dir]              generates the various language-related modules
+  build <program> [<arg> ...] builds a program, using the given compiler args
+  build all [<arg> ...]       builds all programs
+  generate <dir>              generates the various language-related modules
   build-defs                  verifies the language definitions and generates
                               the textual representation for them
 """
-  Programs: seq[(string, string, bool, bool)] = @[
-    ("tester", "tools/tester.nim", true, true),
-    ("passtool", "tools/passtool/passtool.nim", true, true),
-    ("queryshell", "phy/queryshell.nim", true, true),
-    ("repl", "phy/repl.nim", false, true),
-    ("phy", "phy/phy.nim", false, true),
-    ("skully", "skully/skully.nim", true, false)
-    # ^^ excluded from 'all' because the program takes too long to compile
-  ]
-    ## program name, module path, whether the program doesn't depend on
-    ## generated modules, and whether the program is built with 'all'
+  Programs = {
+    "tester" : ("tools/tester.nim", true),
+    "passtool" : ("tools/passtool/passtool.nim", true),
+    "queryshell" : ("phy/queryshell.nim", true),
+    "repl" : ("phy/repl.nim", false),
+    "phy" : ("phy/phy.nim", false),
+    "skully" : ("skully/skully.nim", true),
+  }.toOrderedTable
+    ## program name, module path, and whether the program doesn't depend on
+    ## generated modules
 
   DefaultGenerated = "generated"
     ## the default path for the generated modules
@@ -86,52 +85,43 @@ proc generateModules(dir: string) =
   require run(passtool, "gen-checks", "languages", "specification",
               "passes/syntax_source", dir / "source_checks.nim")
 
-proc buildSingle(args: string): bool
+proc build(name: string, args: openArray[string])
 
 proc regenerate() =
   ## Makes sure the generated modules are up-to-date.
   if not dirExists(DefaultGenerated):
     # assume that the 'generated' folder existing means that it's up-to-date.
-    # This is usually *not* correct, but it's the simplest heuristic we have
-    discard buildSingle("passtool -d:release")
+    # This is usually *not* correct, but it's the simplest heuristic there is
+    build("passtool", ["-d:release"])
     generateModules(DefaultGenerated)
 
 # command implementations:
 
-proc buildSingle(args: string): bool =
-  ## Builds the single program specified by `args`.
-  var args = args.saneSplit()
-  if args.len == 0:
-    return false # not enough arguments, show the help
+proc build(name: string, args: openArray[string]) =
+  ## Builds the program identified by `name`, passing `args` along to
+  ## the compiler.
+  if name in Programs:
+    let (path, standalone) = Programs[name]
+    if not standalone:
+      # depends on some generated modules; first make sure they're
+      # up-to-date
+      regenerate()
 
-  let progName = args[0]
-  args.delete(0)
+    if not compile(getCurrentDir() / path, name, args):
+      echo "Failure"
+      quit(1)
+  else:
+    # report a "not found" error
+    echo "no program with name: '", name, "' exists. Candidates are:"
+    echo "  ", toSeq(Programs.keys).join(", ")
+    quit(1)
 
-  result = true
-
-  for (name, path, standalone, _) in Programs.items:
-    if name == progName:
-      if not standalone:
-        # depends on some generated modules; first make sure they're
-        # up-to-date
-        regenerate()
-
-      if not compile(getCurrentDir() / path, name, args):
-        echo "Failure"
-        quit(1)
-      return
-
-  # report a "not found" error
-  echo "no program with name: '", progName, "' exists. Candidates are:"
-  echo "  ", mapIt(Programs, it[0]).join(", ")
-  quit(1)
-
-proc buildAll(args: string): bool =
+proc build(names, extra: openArray[string]) =
   ## Builds all programs, passing `args` along to the compiler.
-  let extra = args.saneSplit()
   # build all standalone programs first:
-  for (name, path, standalone, inAll) in Programs.items:
-    if standalone and inAll:
+  for name in names.items:
+    let (path, standalone) = Programs[name]
+    if standalone:
       if not compile(getCurrentDir() / path, name, extra):
         echo "Failure"
         quit(1)
@@ -140,11 +130,28 @@ proc buildAll(args: string): bool =
   generateModules(DefaultGenerated)
 
   # finally, build the remaining programs:
-  for (name, path, standalone, inAll) in Programs.items:
-    if not standalone and inAll:
+  for name in names.items:
+    let (path, standalone) = Programs[name]
+    if not standalone:
       if not compile(getCurrentDir() / path, name, extra):
         echo "Failure"
         quit(1)
+
+proc build(args: string): bool =
+  ## Implements the `build` command.
+  let args = args.saneSplit()
+  if args.len == 0:
+    return false
+
+  case args[0]
+  of "all":
+    build(toSeq(Programs.keys), args.toOpenArray(1, args.high))
+  of "all-ws":
+    # ws = without skully
+    build(toSeq(Programs.keys).filterIt(it != "skully"),
+          args.toOpenArray(1, args.high))
+  else:
+    build(args[0], args.toOpenArray(1, args.high))
 
   result = true
 
@@ -156,9 +163,7 @@ proc generate(args: string): bool =
     return false
 
   # the passtool binary might be out-of-date; it's better to always compile it
-  result = buildSingle("passtool -d:release")
-  if not result:
-    return
+  build("passtool", ["-d:release"])
 
   generateModules():
     if args.len == 1: args[0] else: DefaultGenerated
@@ -202,10 +207,8 @@ while true:
   of cmdArgument:
     success =
       case normalize(opts.key)
-      of "all":
-        buildAll(opts.cmdLineRest)
-      of "single":
-        buildSingle(opts.cmdLineRest)
+      of "build":
+        build(opts.cmdLineRest)
       of "generate":
         generate(opts.cmdLineRest)
       of "build-defs":
