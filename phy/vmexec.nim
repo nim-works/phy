@@ -24,7 +24,11 @@ import vm/vmtypes except tkVoid, tkInt, tkFloat, tkProc
 type
   MemoryConfig* = object
     ## The guest memory configuration.
-    total*: uint
+    initial*: uint
+      ## the number of bytes that must be allocated at VM setup
+    maximum*: uint
+      ## the number of bytes of VM memory required to have all modules
+      ## loaded at the same time
     stackStart*: uint
     stackSize*: uint
 
@@ -130,6 +134,8 @@ proc readMemConfig*(m: VmModule): Option[MemoryConfig] =
     stackSize  = 1024'u64
     total      = stackSize
 
+  # XXX: for temporary backwards compatibility, stack_start and total_memory
+  #      are still supported. They count towards the initial VM memory region
   for it in m.exports.items:
     if it.kind == expGlobal and m.globals[it.id].typ == vtInt:
       case m.names[it.name]
@@ -141,11 +147,22 @@ proc readMemConfig*(m: VmModule): Option[MemoryConfig] =
         total = m.globals[it.id].val.uintVal
 
   if stackStart >= total or stackStart + stackSize > total or
-      stackStart + stackSize < stackStart or
-      total > high(uint):
+     stackStart + stackSize < stackStart:
+    return none(MemoryConfig) # stack region is out of bounds
+
+  # round total up to be a multiple of 4096, as that's the expected alignment
+  # of a module's memory region
+  if total + 4095 < total:
+    return none(MemoryConfig) # integer overflow
+
+  total = (total + 4095) and not 4095'u64 # round up
+
+  if total + m.memory < total or
+     total + m.memory > high(uint):
     none MemoryConfig
   else:
-    some MemoryConfig(total: uint(total),
+    some MemoryConfig(initial: uint(total),
+                      maximum: uint(total + m.memory),
                       stackStart: uint(stackStart),
                       stackSize: uint(stackSize))
 

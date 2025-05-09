@@ -376,3 +376,21 @@ proc validate*(m: VmModule): seq[string] =
     of expProc:
       if not test(m.procs, it.id):
         result.add fmt"invalid export {i}: procedure {it.id} doesn't exist"
+
+  if m.memory mod 4096 != 0:
+    result.add "memory size must be a multiple of 4096"
+
+  for i, it in m.init.pairs:
+    if it.data.len == 0:
+      result.add fmt"invalid init {i}: data must not be empty"
+    if it.at + it.data.len.uint64 > m.memory:
+      result.add fmt"invalid init {i}: destination outside allowed region"
+
+  for i, it in m.relocations.pairs:
+    if not test(m.globals, it):
+      result.add fmt"invalid relocation {i}: global doesn't exist"
+    elif m.globals[it].typ != vtInt:
+      result.add fmt"invalid relocation {i}: global must have type 'int'"
+    elif m.globals[it].val.uintVal > m.memory:
+      result.add fmt"invalid relocation {i}: the global's local address is" &
+                    " out of bounds"

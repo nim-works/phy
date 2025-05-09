@@ -106,7 +106,7 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
     else:
       unreachable("memory config invalid; there's probably a bug in source2il")
 
-    var env = initVm(mem.total, mem.total)
+    var env = initVm(mem.initial, mem.maximum)
     var ltab = LinkTable()
     if not load(env, ltab, module):
       echo "Error: couldn't load module"

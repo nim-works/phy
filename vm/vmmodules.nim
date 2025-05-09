@@ -6,7 +6,7 @@
 
 import
   std/[options, tables],
-  vm/[vmenv, vmspec, vmtypes]
+  vm/[vmalloc, vmenv, vmspec, vmtypes]
 
 type
   ExportKind* = enum
@@ -20,6 +20,15 @@ type
     name*: uint32
       ## the external name under which the entity is exported. An index into
       ## the module's `names` list
+
+  InitKind* = enum
+    ikZero ## initialize with zero
+    ikData ## initialize with provided byte string
+
+  DataInit* = object
+    ## Describes the initializer for a local memory fragment.
+    at*: uint64
+    data*: string
 
   VmModule* = object
     ## A module is code plus information about imports and exports.
@@ -36,6 +45,11 @@ type
     types*: TypeEnv
     # ---- end of core fields
 
+    memory*: uint64
+      ## size-in-bytes of the module's memory region. May be zero
+    relocations*: seq[int32]
+      ## set of globals storing local address values that need to be relocated
+    init*: seq[DataInit]
     exports*: seq[Export]
     names*: seq[string]
       ## interface names stored out-of-place
@@ -146,6 +160,13 @@ proc load*(env: var VmEnv, ltab: var LinkTable, m: VmModule): bool =
   ## Loads `m` into `env`, relocating the former's resources and resolving
   ## imports where possible. If an imported procedure cannot be resolved, it
   ## stays as a stub and is registerd in `ltab` for future resolution.
+  let memStart = env.allocator.currSpace()
+
+  # make space for the module's requested memory region:
+  if memStart + m.memory < memStart or
+     not env.allocator.grow(uint(memStart + m.memory)):
+    return false # out of memory
+
   # compute the link actions
   var actions = newSeq[Action](m.procs.len)
   for i, p in m.procs.pairs:
@@ -190,7 +211,20 @@ proc load*(env: var VmEnv, ltab: var LinkTable, m: VmModule): bool =
 
       ltab.exported[m.names[e.name]] = target
 
+  let gstart = env.globals.len
   append(env, actions, m)
+
+  # update the address-storing globals:
+  for g in m.relocations.items:
+    let idx = gstart + g
+    env.globals[idx].val =
+      cast[Value](toVirt(memStart + env.globals[idx].val.uintVal.uint))
+
+  # initialize the memory with the data fragments:
+  for it in m.init.items:
+    copyMem(env.allocator.translate(toVirt(memStart + it.at.uint)),
+            addr it.data[0],
+            it.data.len)
 
   result = true
 

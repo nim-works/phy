@@ -59,6 +59,9 @@ type
     dirConst  = "const"  ## define a constant
     dirGlobal = "global" ## define a global
     dirType   = "type"   ## define a type
+    dirMemory = "memory" ## set the module memory's size
+    dirInit   = "init"   ## add a memory region initializer
+    dirReloc  = "reloc"  ## add a relocation entry
     dirExport = "export" ## mark a procedure or global as exported
     dirImport = "import" ## add an imported procedure
     dirLocal  = "local"  ## define a local
@@ -195,6 +198,24 @@ proc parseInterface(s: Stream): string =
     result.add c
 
   expect c == '"', "expected closing '\"'"
+
+proc parseString(s: Stream): string =
+  ## Parses a quoted character string.
+  expect s.readChar() == '"', "expected '\"'"
+  result.add '"'
+  var c: char
+  while (c = s.readChar(); c != '\0'):
+    if c == '\\' and s.peekChar() == '\"':
+      # it's an escaped double-tick quote
+      result.add '\\'
+      c = '"'
+    elif c == '"':
+      break # end of string
+    result.add c
+
+  # add the trailing double-tick
+  result.add c
+  result = unescape(result)
 
 proc prc(a: var AssemblerState): var ProcState {.inline.} =
   a.stack[a.stack.len - 1]
@@ -346,6 +367,22 @@ proc process*(a: var AssemblerState, line: sink string) =
       s.space()
       let t = parseType(s, a.module.types, a)
       a.types[name] = t
+    of dirMemory:
+      # .memory <int>
+      s.space()
+      a.module.memory = s.parseIntLike(uint64)
+    of dirInit:
+      # .init <int> <string>
+      s.space()
+      let at = s.parseIntLike(uint64)
+      s.space()
+      let data = s.parseString()
+      a.module.init.add DataInit(at: at, data: data)
+    of dirReloc:
+      # .reloc <name>
+      s.space()
+      let target = a.globals[s.ident()]
+      a.module.relocations.add(target)
     of dirExport:
       # .export <kind> <name> <interface>
       s.space()

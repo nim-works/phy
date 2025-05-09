@@ -438,7 +438,7 @@ proc main(args: openArray[string]) =
         error "invalid memory configuration"
 
       # setup the VM instance and load all modules (currently only one):
-      var env = initVm(mem.total, mem.total)
+      var env = initVm(mem.initial, mem.maximum)
       var ltab = LinkTable()
       if not load(env, ltab, module):
         error "loading the VM module failed"

@@ -1,0 +1,14 @@
+discard """
+  description: "Ensure that address relocation for globals works"
+  output: "(Done 5128)"
+"""
+.type P1 () -> int
+.memory 4096
+
+.global g0 int 8 # a local memory address
+.reloc g0
+
+.start P1 p
+  GetGlobal g0
+  Ret
+.end
