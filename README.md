@@ -14,7 +14,7 @@ with the minimum required version found [here](https://github.com/nim-works/phy/
 To get everything built, run the following from the command line
 
 ```cmd
-nim c --outdir:bin -r koch.nim all
+nim c --outdir:bin -r koch.nim build all
 ```
 
 The above will:
