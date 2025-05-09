@@ -1,0 +1,18 @@
+discard """
+  description: "
+    Inductive data type values are destructured via `Match`. A rule must be
+    present for each constructor. Nullary constructors use `(Constr ...)`
+    for matching.
+  "
+  output: "1 : (IntTy)"
+"""
+(Module
+  (DataTypeDecl typ
+    (Constr a)
+    (Constr b))
+  (ProcDecl test (IntTy) (Params)
+    (Exprs
+      (Decl x a)
+      (Match x
+        (Rule (Constr a) 1)
+        (Rule (Constr b) 2)))))

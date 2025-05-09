@@ -1,0 +1,12 @@
+discard """
+  description: "
+    Unary constructors are functions, with a signature derived from the
+    constructors shape.
+  "
+  reject: true
+"""
+(Module
+  (DataTypeDecl typ
+    (Constr val (IntTy)))
+  (ProcDecl test val (Params)
+    (Call val 1)))
