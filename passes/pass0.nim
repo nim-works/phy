@@ -49,6 +49,10 @@ type
     ehTable: seq[EhMapping]
     constants: seq[TypedValue]
 
+const
+  Type2Value = [t0kInt: vtInt, t0kUInt: vtInt, t0kFloat: vtFloat]
+    ## maps an L0 type to the corresponding VM value type
+
 # shorten some common parameter definitions:
 using
   c: var PassCtx
@@ -640,16 +644,50 @@ proc translate*(module: PackedTree[NodeKind]): VmModule =
     else:
       unreachable()
 
+  var position = 0'u64
+    ## where to place the next memory region at
+
   # add all globals to the environment:
   for def in module.items(globals):
-    let (typ, val) = module.pair(def)
+    let (typ, init) = module.pair(def)
+    var val: Value
+    case module[init].kind
+    of Data:
+      let (align, content) = module.pair(init)
+      let mask = module.getUInt(align) - 1
+      assert mask <= 4095, "alignment too large"
+      position = (position + mask) and not mask # align the offset
+
+      # the actual address value is only known once the module is linked
+      # into the program; use a relocation
+      result.relocations.add(result.globals.len.int32)
+      val = cast[Value](position)
+
+      case module[content].kind
+      of Immediate:
+        # no explicit content
+        position += module.getUInt(content)
+      of StringVal:
+        result.init.add DataInit(at: position, data: module.getString(content))
+        position += module.getString(content).len.uint64
+      else:
+        unreachable()
+    of IntVal:
+      # signedness doesn't matter here
+      # FIXME: ^^ nonsense! For integer types with a width less than 8 bytes,
+      #        it does matter
+      val = cast[Value](module.getUInt(init))
+    of FloatVal:
+      val = cast[Value](module.getFloat(init))
+    else:
+      unreachable()
+
     result.globals.add:
-      case parseType(module, typ).kind
-      of t0kFloat:
-        TypedValue(val: cast[Value](getFloat(module, val)), typ: vtFloat)
-      of t0kInt, t0kUInt:
-        # signedness doesn't matter here
-        TypedValue(val: cast[Value](getUInt(module, val)), typ: vtInt)
+      TypedValue(val: val, typ: Type2Value[parseType(module, typ).kind])
+
+  # now we know the total size of the module's memory. Make it a multiple
+  # of 4096
+  result.memory = (position + 4095) and not 4095'u64
 
   # generate the code for the procedures and add them to the environment:
   for i, def in module.pairs(procs):

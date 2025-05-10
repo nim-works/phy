@@ -1,0 +1,26 @@
+discard """
+  description: "
+    Make sure lowering for `Copy` with a global as the operand works.
+  "
+"""
+(TypeDefs
+  (ProcTy (Void))
+  (Record 16 4
+    (Field 0 (Int 4))
+    (Field 4 (Int 4))
+    (Field 8 (Int 4))
+    (Field 12 (Int 4))))
+(GlobalDefs
+  (GlobalLoc (Int 4)  (Data (Int 4)))
+  (GlobalLoc (Type 1) (Data (Type 1))))
+(ProcDefs
+  (ProcDef (Type 0)
+    (Locals (Int 4) (Type 1))
+    (List
+      (Block (Params)
+        (Asgn (Local 0) (Copy (Global 0)))
+        (Asgn (Local 1) (Copy (Global 1)))
+        (Asgn (Local 0)
+          (Copy
+            (Field (Global 1) 1)))
+        (Return)))))

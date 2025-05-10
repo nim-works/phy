@@ -37,7 +37,8 @@ type
     CheckedCall, CheckedCallAsgn, Unwind, Choice
 
     Module, TypeDefs, ProcDefs, ProcDef, Locals,
-    Except, Params, GlobalDefs, GlobalDef, Import, Export
+    Except, Params, GlobalDefs, GlobalDef, GlobalLoc, Import, Export
+    Data
 
     Break, Return, Case, If, Block, Stmts
 

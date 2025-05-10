@@ -1,0 +1,10 @@
+.type t0 () -> int
+.global g0 int 0
+.memory 4096
+.init 0 "@\x00\x00\x00"
+.reloc g0
+.start t0 p0
+  GetGlobal g0
+  LdInt32 0
+  Ret
+.end

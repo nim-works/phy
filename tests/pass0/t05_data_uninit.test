@@ -1,0 +1,14 @@
+discard """
+  output: "(Done 0)"
+"""
+(TypeDefs
+  (ProcTy (Int 8)))
+(GlobalDefs
+  (GlobalDef (UInt 8) (Data 1 8)))
+(ProcDefs
+  (ProcDef (Type 0) 0 (Locals)
+    (List
+      (Block (Params)
+        (Return
+          (Load (Int 8)
+            (Copy (Global 0))))))))

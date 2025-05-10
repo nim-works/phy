@@ -1,0 +1,19 @@
+discard """
+  description: "Make sure lowering for globals section works"
+"""
+(TypeDefs
+  (Array 16 4 4 (Int 4))
+  (Record 32 8
+    (Field 0 (Type 0))
+    (Field 16 (Type 0)))
+  (Union 1 2 (Int 1) (UInt 1)))
+(GlobalDefs
+  (GlobalDef (Int 8) (IntVal 100))
+  (GlobalDef (Int 4) (IntVal 200))
+  (GlobalLoc (Int 8) (Data (Int 8)))
+  (GlobalLoc (Int 4) (Data (Int 4) (StringVal "abcd")))
+  (GlobalLoc (Type 0) (Data (Type 0)))
+  (GlobalLoc (Type 1) (Data (Type 1)))
+  (GlobalLoc (Type 2) (Data (Type 2)))
+)
+(ProcDefs)

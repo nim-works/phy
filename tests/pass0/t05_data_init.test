@@ -1,0 +1,14 @@
+discard """
+  output: "(Done 64)"
+"""
+(TypeDefs
+  (ProcTy (UInt 4)))
+(GlobalDefs
+  (GlobalDef (UInt 8) (Data 4 (StringVal "\x40\x00\x00\x00"))))
+(ProcDefs
+  (ProcDef (Type 0) 0 (Locals)
+    (List
+      (Block (Params)
+        (Return
+          (Load (UInt 4)
+            (Copy (Global 0))))))))

@@ -106,8 +106,10 @@ stmt ::= (Asgn <local> <expr>)
 bblock ::= (Block  (Params <local>*) <stmt>* <exit>)
         |  (Except (Params <local>)  <stmt>* <exit>)
 
-int_or_float ::= <intVal> | <floatVal>
-globaldef ::= (GlobalDef <type> <int_or_float>)
+dataInit   ::= (Data align:<int> size:<int>)
+            |  (Data align:<int> content:(StringVal <string>))
+globalInit ::= <dataInit> | <intVal> | <floatVal>
+globaldef  ::= (GlobalDef <type> <globalInit>)
 ```
 
 ```grammar

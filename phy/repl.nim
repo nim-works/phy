@@ -18,6 +18,7 @@ import
     pass0,
     pass_aggregateParams,
     pass_aggregatesToBlob,
+    pass_globalsToPointer,
     pass_legalizeBlobOps,
     pass_inlineTypes,
     pass_stackAlloc,
@@ -82,6 +83,7 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
     # lower to L0:
     m = m.apply(pass30.lower(m))
     m = m.apply(pass25.lower(m))
+    m = m.apply(pass_globalsToPointer.lower(m, 8))
     m = m.apply(pass_flattenPaths.lower(m))
     m = m.apply(pass_aggregateParams.lower(m, 8))
     m = m.apply(pass_aggregatesToBlob.lower(m, 8))
