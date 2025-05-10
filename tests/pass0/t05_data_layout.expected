@@ -1,0 +1,11 @@
+.type t0 () -> void
+.global g0 int 0
+.global g1 int 32
+.global g2 int 40
+.memory 4096
+.reloc g0
+.reloc g1
+.reloc g2
+.start t0 p0
+  Ret
+.end
