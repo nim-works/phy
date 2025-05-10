@@ -38,6 +38,7 @@ type
 
     Module, TypeDefs, ProcDefs, ProcDef, Locals,
     Except, Params, GlobalDefs, GlobalDef, Import, Export
+    Data
 
     Break, Return, Case, If, Block, Stmts
 
