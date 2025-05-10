@@ -20,6 +20,7 @@ import
     lang3_checks,
     lang4_checks,
     lang5_checks,
+    lang6_checks,
     lang25_checks,
     lang30_checks,
     source_checks
@@ -32,6 +33,7 @@ import
     pass_aggregateParams,
     pass_aggregatesToBlob,
     pass_flattenPaths,
+    pass_globalsToPointer,
     pass_inlineTypes,
     pass_legalizeBlobOps,
     pass_localsToBlob,
@@ -76,6 +78,7 @@ type
     lang3 = "L3"
     lang4 = "L4"
     lang5 = "L5"
+    lang6 = "L6"
     lang25 = "L25"
     lang30 = "L30"
     langSource = "source"
@@ -172,6 +175,7 @@ proc syntaxCheck(code: PackedTree[syntax.NodeKind], lang: Language) =
   of lang3:  syntaxCheck(code, lang3_checks, module)
   of lang4:  syntaxCheck(code, lang4_checks, module)
   of lang5:  syntaxCheck(code, lang5_checks, module)
+  of lang6:  syntaxCheck(code, lang6_checks, module)
   of lang25: syntaxCheck(code, lang25_checks, module)
   of lang30: syntaxCheck(code, lang30_checks, module)
   else:      unreachable()
@@ -281,11 +285,16 @@ proc compile(tree: var PackedTree[syntax.NodeKind], source, target: Language) =
       measure "pass:flatten-paths":
         tree = tree.apply(pass_flattenPaths.lower(tree))
       current = lang4
+    of lang6:
+      syntaxCheck(tree, lang6_checks, module)
+      measure "pass:globals-to-pointer":
+        tree = tree.apply(pass_globalsToPointer.lower(tree, PointerSize))
+      current = lang5
     of lang25:
       syntaxCheck(tree, lang25_checks, module)
       measure "pass:basic-blocks":
         tree = tree.apply(pass25.lower(tree))
-      current = lang5
+      current = lang6
     of lang30:
       syntaxCheck(tree, lang30_checks, module)
       measure "pass:goto-rep":
