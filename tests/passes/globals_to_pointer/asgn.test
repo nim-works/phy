@@ -1,0 +1,26 @@
+discard """
+  description: "
+    Make sure lowering for `Asgn` with a global as the destination works.
+  "
+"""
+(TypeDefs
+  (ProcTy (Void))
+  (Record 16 4
+    (Field 0 (Int 4))
+    (Field 4 (Int 4))
+    (Field 8 (Int 4))
+    (Field 12 (Int 4))))
+(GlobalDefs
+  (GlobalLoc (Int 4)  (Data (Int 4)))
+  (GlobalLoc (Type 1) (Data (Type 1))))
+(ProcDefs
+  (ProcDef (Type 0)
+    (Locals (Type 1))
+    (List
+      (Block (Params)
+        (Asgn (Global 0) (IntVal 100))
+        (Asgn (Global 1) (Copy (Local 0)))
+        (Asgn
+          (Field (Global 1) 0)
+          (IntVal 200))
+        (Return)))))
