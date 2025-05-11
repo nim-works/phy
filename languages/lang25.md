@@ -1,7 +1,7 @@
 ## L25 Language
 
 ```grammar
-.extends lang5
+.extends lang6
 ```
 
 Procedure bodies are not subdivided into basic-blocks, but instead consist of
