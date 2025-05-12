@@ -126,43 +126,32 @@ proc valueToSexp(env: var VmEnv, a: VirtualAddr, typ: SemType): SexpNode =
 
 proc readMemConfig*(m: VmModule): Option[MemoryConfig] =
   ## Reads the guest memory configuration from `m` by looking for the
-  ## `stack_start`, `stack_size`, and `total_memory` global variables.
-  ## A default is used for the values where the respective global is
-  ## not present. If the configuration is invalid, ``none`` is returned.
+  ## `stack_start` global variable, with a default value used if not present.
+  ## If the configuration is invalid, ``none`` is returned.
   var
     stackStart = 0'u64
     stackSize  = 1024'u64
-    total      = stackSize
 
-  # XXX: for temporary backwards compatibility, stack_start and total_memory
-  #      are still supported. They count towards the initial VM memory region
   for it in m.exports.items:
     if it.kind == expGlobal and m.globals[it.id].typ == vtInt:
       case m.names[it.name]
-      of "stack_start":
-        stackStart = m.globals[it.id].val.uintVal
       of "stack_size":
         stackSize = m.globals[it.id].val.uintVal
-      of "total_memory":
-        total = m.globals[it.id].val.uintVal
+        break
 
-  if stackStart >= total or stackStart + stackSize > total or
-     stackStart + stackSize < stackStart:
-    return none(MemoryConfig) # stack region is out of bounds
-
-  # round total up to be a multiple of 4096, as that's the expected alignment
-  # of a module's memory region
-  if total + 4095 < total:
+  # round the initial size up to be a multiple of 4096, as that's the expected
+  # alignment of a module's memory region
+  if stackSize + 4095 < stackSize:
     return none(MemoryConfig) # integer overflow
 
-  total = (total + 4095) and not 4095'u64 # round up
+  let initial = (stackSize + 4095) and not 4095'u64 # round up
 
-  if total + m.memory < total or
-     total + m.memory > high(uint):
+  if initial + m.memory < initial or
+     initial + m.memory > high(uint):
     none MemoryConfig
   else:
-    some MemoryConfig(initial: uint(total),
-                      maximum: uint(total + m.memory),
+    some MemoryConfig(initial: uint(stackSize),
+                      maximum: uint(stackSize + m.memory),
                       stackStart: uint(stackStart),
                       stackSize: uint(stackSize))
 

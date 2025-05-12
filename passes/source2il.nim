@@ -13,7 +13,6 @@ import
   vm/[utils]
 
 from std/strutils import `%`
-from vm/vmalloc import AddressBias
 
 import passes/syntax_source except NodeKind
 
@@ -1832,41 +1831,38 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   const
     StackSize = 1024 * 4        # 4 KiB
     HeapSize  = 1024 * 1024 * 4 # 4 MiB
-    HeapStart = AddressBias + StackSize + 8
 
-  # note: the virtual address range below ``AddressBias`` is reserved.
-  # Memory layout:
-  # +----------+-------+------+------+
-  # | reserved | stack | mgmt | heap |
-  # +----------+-------+------+------+
-  # The 'mgmt' section stores the data necessary for managing the heap.
+  let heapType = c.addType Array:
+    c.types.add Node(kind: Immediate, val: HeapSize) # size-in-bytes
+    c.types.add Node(kind: Immediate, val: 8)        # alignment
+    c.types.add Node(kind: Immediate, val: HeapSize) # count
+    c.types.add Node(kind: UInt, val: 1)
 
   # globals and their meaning:
-  # * 0: size of the stack size
-  # * 1: address of the start of the heap
-  # * 2: address of the end of the heap
-  # * 3: address of the heap management data
+  # * 0: size of the stack (a constant)
+  # * 1: size of the heap (a constant)
+  # * 2: the heap region, represented as an array of bytes
+  # * 3: heap management data
   c.globals.subTree GlobalDef:
     c.globals.add Node(kind: UInt, val: 8)
     c.globals.add Node(kind: IntVal, val: StackSize)
   c.globals.subTree GlobalDef:
-    c.globals.add Node(kind: UInt, val: 8)
-    c.globals.add Node(kind: IntVal, val: HeapStart)
-  c.globals.subTree GlobalDef:
-    c.globals.add Node(kind: UInt, val: 8)
-    c.globals.add Node(kind: IntVal, val: HeapStart + HeapSize)
-  c.globals.subTree GlobalDef:
-    c.globals.add Node(kind: UInt, val: 8)
-    c.globals.add Node(kind: IntVal, val: HeapStart - 8)
+    c.globals.add Node(kind: Int, val: 8)
+    c.globals.add Node(kind: IntVal, val: HeapSize)
+  c.globals.subTree GlobalLoc:
+    c.globals.add Node(kind: Type, val: heapType)
+    c.globals.subTree Data:
+      c.globals.add Node(kind: Type, val: heapType)
+  c.globals.subTree GlobalLoc:
+    c.globals.add Node(kind: Int, val: 8)
+    c.globals.subTree Data:
+      c.globals.add Node(kind: Int, val: 8)
+  # XXX: the heap managment data and heap size should both use UInt, but
+  #      pointer arithmetic in the target IL is a bit fuzzy at the moment
 
   c.exports.subTree Export:
     c.exports.add Node(kind: StringVal, val: c.literals.pack("stack_size"))
     c.exports.add Node(kind: Global, val: 0)
-  # the end-of-heap pointer is taken to also represent the amount of total
-  # guest memory (which is not entirely correct, due to the address bias)
-  c.exports.subTree Export:
-    c.exports.add Node(kind: StringVal, val: c.literals.pack("total_memory"))
-    c.exports.add Node(kind: Global, val: 2)
 
   # add the built-in allocator and seq procedures
   # XXX: these need to be provided by a system-like module in the future
@@ -1882,9 +1878,7 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
       (Params (Local 0) (Local 2))
       (Locals (Type $2) (Type $2) (Type $2))
       (Stmts
-        (If (Eq (Type $2) (Load (Type $2) (Copy (Global 3))) (IntVal 0))
-          (Asgn (Local 1) (Copy (Global 1)))
-          (Asgn (Local 1) (Load (Type $2) (Copy (Global 3)))))
+        (Asgn (Local 1) (Copy (Global 3)))
         (Asgn (Local 1)
           (BitAnd (Type $2)
             (Add (Type $2)
@@ -1901,14 +1895,17 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
             (Add (Type $2)
               (Copy (Local 0))
               (Copy (Local 1)))
-            (Copy (Global 2)))
+            (Copy (Global 1)))
           (Stmts
-            (Store (Type $2)
-              (Copy (Global 3))
+            (Asgn (Global 3)
               (Add (Type $2)
                 (Copy (Local 1))
                 (Copy (Local 0))))
-            (Return (Copy (Local 1))))
+            (Return
+              (Add (Type $2)
+                (Reinterp (Type $2) (UInt 8)
+                  (Addr (Global 2)))
+                (Copy (Local 1)))))
           (Raise (IntVal 0)))))
   """
   var procTy = SemType(kind: tkProc,
