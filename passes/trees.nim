@@ -1,44 +1,23 @@
 ## Implements the ``PackedTree`` storage type, for space efficient storage of
-## arbitrary trees.
+## arbitrary trees. A packed tree is just a sequence of nodes, with each node
+## either being a leaf or subtree node.
 
 import
-  std/strutils,
-  experimental/sexp
+  std/strutils
 
 type
-  TreeNode*[T] = object
-    ## A single node. How the val field is interpreted depends on the kind. For
-    ## leaf nodes, the field's meaning is decided externally, while for non-
-    ## leaf nodes, `val` stores how many child nodes the node has.
-    kind*: T
-    val*: uint32
-
-  Numbers* = seq[uint64]
-
-  Literals* = object
-    numbers: Numbers
-    strings: seq[string]
-    # TODO: use a BiTable for both numbers and strings
-
   PackedTree*[T] = object
     ## Stores a node tree packed together in a single sequence.
-    nodes*: seq[TreeNode[T]]
-    literals: Literals
+    nodes*: seq[T]
 
   NodeIndex* = distinct uint32
 
-const
-  ExternalFlag = 0x8000_0000'u32
-    ## use the most significant bit to flag whether the value is larger than an
-    ## `max(int32)` and overflows into `PackedTree.numbers`.
-
 func `==`*(a, b: NodeIndex): bool {.borrow.}
 
-proc initTree*[T](nodes: sink seq[TreeNode[T]],
-                  literals: sink Literals): PackedTree[T] =
-  PackedTree[T](nodes: nodes, literals: literals)
+proc initTree*[T](nodes: sink seq[T]): PackedTree[T] =
+  PackedTree[T](nodes: nodes)
 
-proc `[]`*[T](t: PackedTree[T], at: NodeIndex): TreeNode[T] {.inline.} =
+proc `[]`*[T](t: PackedTree[T], at: NodeIndex): T {.inline.} =
   t.nodes[ord at]
 
 proc contains*(t: PackedTree, n: NodeIndex): bool {.inline.} =
@@ -78,8 +57,7 @@ proc child*(t: PackedTree, i: Natural): NodeIndex =
   ## Returns the index of the `i`th subnode of the top-level node.
   child(t, NodeIndex(0), i)
 
-proc `[]`*[T](t: PackedTree[T], i: NodeIndex, child: Natural
-             ): TreeNode[T] {.inline.} =
+proc `[]`*[T](t: PackedTree[T], i: NodeIndex, child: Natural): T {.inline.} =
   t.nodes[ord t.child(i, child)]
 
 proc len*(t: PackedTree, i: NodeIndex): int =
@@ -134,8 +112,8 @@ iterator flat*(t: PackedTree, at: NodeIndex): NodeIndex =
       last += t.nodes[i].val
     inc i
 
-iterator filter*[T](t: PackedTree[T], at: NodeIndex,
-                    filter: static set[T]): NodeIndex =
+iterator filter*[T, U](t: PackedTree[T], at: NodeIndex,
+                       filter: static set[U]): NodeIndex =
   ## Returns all nodes matching `filter` in the tree at `at`. The returned
   ## nodes/trees are *not* recursed into.
   # a static set is used for the sake of run-time efficiency; the sets can
@@ -168,72 +146,3 @@ func triplet*(tree: PackedTree, n: NodeIndex): (NodeIndex, NodeIndex, NodeIndex)
   result[0] = tree.child(n, 0)
   result[1] = tree.next(result[0])
   result[2] = tree.next(result[1])
-
-proc getInt*(tree: PackedTree, n: NodeIndex): int64 =
-  ## Returns the number stored by `n` as a signed integer.
-  let val = tree[n].val
-  if (val and ExternalFlag) != 0:
-    cast[int64](tree.literals.numbers[val and not(ExternalFlag)])
-  else:
-    int64(val)
-
-proc getUInt*(tree: PackedTree, n: NodeIndex): uint64 =
-  ## Returns the number stored by `n` as an unsigned integer.
-  let val = tree[n].val
-  if (val and ExternalFlag) != 0:
-    tree.literals.numbers[val or not(ExternalFlag)]
-  else:
-    val
-
-proc getFloat*(tree: PackedTree, n: NodeIndex): float64 =
-  ## Returns the number stored by `n` as a float.
-  cast[float64](tree.literals.numbers[tree[n].val])
-
-proc getString*(tree: PackedTree, n: NodeIndex): lent string =
-  ## Returns the string value stored by `n`.
-  tree.literals.strings[tree[n].val]
-
-proc pack*(db: var Literals, i: int64): uint32 =
-  ## Packs `i` into a ``uint32`` value that can be stored in a ``TreeNode``.
-  if i >= 0 and i < int64(ExternalFlag):
-    result = uint32(i) # fits into a uint32
-  else:
-    result = db.numbers.len.uint32 or ExternalFlag
-    db.numbers.add(cast[uint64](i))
-
-proc pack*(db: var Literals, f: float64): uint32 =
-  ## Packs `f` into a ``uint32`` value that can be stored in a ``TreeNode``.
-  result = db.numbers.len.uint32
-  db.numbers.add(cast[uint64](f))
-
-proc pack*(db: var Literals, s: sink string): uint32 =
-  result = db.strings.len.uint32
-  db.strings.add(s)
-
-func literals*(tree: PackedTree): lent Literals {.inline.} =
-  ## Returns the storage for the literal data.
-  tree.literals
-
-proc pack*(tree: var PackedTree, i: int64): uint32 {.inline.} =
-  ## Packs `i` into a ``uint32`` value that can be stored in a ``TreeNode``.
-  pack(tree.literals, i)
-
-proc pack*(tree: var PackedTree, f: float64): uint32 {.inline.} =
-  ## Packs `f` into a ``uint32`` value that can be stored in a ``TreeNode``.
-  pack(tree.literals, f)
-
-proc pack*(tree: var PackedTree, s: sink string): uint32 {.inline.} =
-  ## Packs `s` into a ``uint32`` value that can be stored in a ``TreeNode``.
-  pack(tree.literals, s)
-
-# TODO: move the S-expression serialization/deserialization elsewhere
-
-proc toSexp*[T](tree: PackedTree[T], at: NodeIndex): SexpNode =
-  mixin isAtom, toSexp
-  if isAtom(tree[at].kind):
-    result = toSexp(tree, at, tree[at])
-  else:
-    result = newSList()
-    result.add newSSymbol($tree[at].kind)
-    for it in tree.items(at):
-      result.add toSexp(tree, it)
