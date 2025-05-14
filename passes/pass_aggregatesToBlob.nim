@@ -28,11 +28,12 @@ proc resolve(tree; n): NodeIndex =
   else:
     n
 
-proc size(tree; n: NodeIndex): uint =
+proc size(c; tree; n: NodeIndex): uint =
   ## `n` must be the node index of a type description.
   case tree[n].kind
   of Record, Union, Array: tree[n, 0].val.uint
   of Int, UInt, Float:     tree[n].val.uint
+  of Ptr:                  c.ptrSize.uint
   else:                    unreachable()
 
 proc alignment(tree; n: NodeIndex): uint =
@@ -41,12 +42,12 @@ proc alignment(tree; n: NodeIndex): uint =
   of Record, Union, Array: tree[n, 1].val.uint
   else:                    unreachable()
 
-proc elementOffset(tree; n: NodeIndex, elem: uint32): uint =
+proc elementOffset(c; tree; n: NodeIndex, elem: uint32): uint =
   ## `n` must be the node index of a type description.
   case tree[n].kind
   of Union:  0'u
   of Record: tree[tree.child(n, elem + 2), 0].val
-  of Array:  size(tree, tree.resolve(tree.child(n, 3))) * elem
+  of Array:  size(c, tree, tree.resolve(tree.child(n, 3))) * elem
   else:      unreachable()
 
 proc typeOfElem(tree; n: NodeIndex, elem: uint32): NodeIndex =
@@ -75,11 +76,11 @@ proc lowerPath(c; tree; n; bu): VirtualTree =
   for it in tree.items(n, 2):
     if tree[it].kind == Immediate:
       # a static field or array access
-      offset += elementOffset(tree, typ, tree[it].val)
+      offset += elementOffset(c, tree, typ, tree[it].val)
       typ = tree.resolve(typeOfElem(tree, typ, tree[it].val))
     elif tree[it].kind == IntVal:
       # a static array access
-      offset += elementOffset(tree, typ, tree.getInt(it).uint32)
+      offset += elementOffset(c, tree, typ, tree.getInt(it).uint32)
       typ = tree.resolve(typeOfElem(tree, typ, 0))
     else:
       # an array access with a dynamic index
@@ -101,7 +102,7 @@ proc lowerPath(c; tree; n; bu): VirtualTree =
         tree(Offset,
           embed(result),
           embed(c.loweredExpr(tree, it, bu)),
-          node(IntVal, size(tree, typ).uint32))
+          node(IntVal, size(c, tree, typ).uint32))
 
   if offset > 0:
     result = bu.buildTree:
@@ -160,10 +161,11 @@ proc lower*(tree; ptrSize: Positive): ChangeSet[NodeKind] =
   # turn all aggregate types into blob types:
   for it in tree.items(tree.child(0)):
     if tree[it].kind in {Record, Union, Array}:
+      let c = Context(ptrSize: ptrSize)
       result.replace it:
         result.buildTree:
           tree(Blob,
-            node(Immediate, uint32 size(tree, it)),
+            node(Immediate, uint32 size(c, tree, it)),
             node(Immediate, uint32 alignment(tree, it)))
 
   # lower the procedures:
