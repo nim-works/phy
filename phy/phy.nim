@@ -271,7 +271,7 @@ proc compile(tree: var PackedTree[syntax.NodeKind], source, target: Language) =
       measure "pass:aggregates-to-blob":
         tree = tree.apply(pass_aggregatesToBlob.lower(tree, PointerSize))
       measure "pass:locals-to-blob":
-        tree = tree.apply(pass_localsToBlob.lower(tree))
+        tree = tree.apply(pass_localsToBlob.lower(tree, PointerSize))
       measure "pass:legalize-blobs":
         tree = tree.apply(pass_legalizeBlobOps.lower(tree))
       current = lang2
