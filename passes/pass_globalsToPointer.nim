@@ -7,9 +7,10 @@ import
   passes/[changesets, syntax, trees]
 
 type
+  Node = TreeNode[NodeKind]
   Context = object
-    ptrSize: int
-    globals: Table[uint32, TreeNode[NodeKind]]
+    ptrSize: uint32
+    globals: Table[uint32, Node]
       ## global ID -> global's type. Only keeps a mapping for globals that
       ## refer to addressable locations
 
@@ -19,14 +20,16 @@ using
   n: NodeIndex
   bu: var ChangeSet[NodeKind]
 
-proc sizeAndAlignment(tree; n): tuple[size, align: uint32] =
+proc sizeAndAlignment(c: Context; tree; n): tuple[size, align: uint32] =
   case tree[n].kind
   of Type:
-    sizeAndAlignment(tree, tree.child(tree.child(0), tree[n].val))
+    sizeAndAlignment(c, tree, tree.child(tree.child(0), tree[n].val))
   of Union, Record, Array:
     (tree[n, 0].val, tree[n, 1].val)
   of Int, UInt, Float:
     (tree[n].val, tree[n].val)
+  of Ptr:
+    (c.ptrSize, c.ptrSize)
   else:
     unreachable()
 
@@ -81,12 +84,12 @@ proc lowerGlobal(c; tree; n; bu) =
   let data = tree.child(n, 1)
 
   assert tree[data].kind == Data
-  let (s, a) = sizeAndAlignment(tree, tree.child(data, 0))
+  let (s, a) = sizeAndAlignment(c, tree, tree.child(data, 0))
   if tree.len(data) == 1:
     # (Data <typ>) -> (Data <align> <size>)
     bu.replace(n, bu.buildTree(
       tree(GlobalDef,
-        node(UInt, c.ptrSize.uint32),
+        node(Node(kind: Ptr)),
         tree(Data,
           # TODO: use packed values once supported, so that the full integer
           #       range works
@@ -96,15 +99,15 @@ proc lowerGlobal(c; tree; n; bu) =
     # (Data <typ> <content>) -> (Data <align> <content>)
     bu.replace(n, bu.buildTree(
       tree(GlobalDef,
-        node(UInt, c.ptrSize.uint32),
+        node(Node(kind: Ptr)),
         tree(Data,
           node(Immediate, a),
           node(tree[data, 1]))))) # the string value stays
 
-proc lower*(tree; ptrSize: int): ChangeSet[NodeKind] =
+proc lower*(tree; ptrSize: Positive): ChangeSet[NodeKind] =
   ## Computes the changeset representing the lowering for a whole module
   ## (`tree`). `ptrSize` is the size-in-bytes of a pointer.
-  var c = Context(ptrSize: ptrSize)
+  var c = Context(ptrSize: ptrSize.uint32)
   let (_, globals, procs) = tree.triplet(NodeIndex(0))
 
   for i, it in tree.pairs(globals):
