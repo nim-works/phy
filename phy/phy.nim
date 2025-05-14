@@ -15,6 +15,7 @@ import
   ],
   generated/[
     lang0_checks,
+    langPtr_checks,
     lang1_checks,
     lang2_checks,
     lang3_checks,
@@ -37,6 +38,7 @@ import
     pass_inlineTypes,
     pass_legalizeBlobOps,
     pass_localsToBlob,
+    pass_ptrToInt,
     pass_stackAlloc,
     pass25,
     pass30,
@@ -73,6 +75,7 @@ type
   Language = enum
     langBytecode = "vm"
     lang0 = "L0"
+    langPtr = "LPtr"
     lang1 = "L1"
     lang2 = "L2"
     lang3 = "L3"
@@ -170,6 +173,7 @@ proc syntaxCheck(code: PackedTree[syntax.NodeKind], lang: Language) =
   ## error if they don't succeed.
   case lang
   of lang0:  syntaxCheck(code, lang0_checks, module)
+  of langPtr:syntaxCheck(code, langPtr_checks, module)
   of lang1:  syntaxCheck(code, lang1_checks, module)
   of lang2:  syntaxCheck(code, lang2_checks, module)
   of lang3:  syntaxCheck(code, lang3_checks, module)
@@ -256,11 +260,15 @@ proc compile(tree: var PackedTree[syntax.NodeKind], source, target: Language) =
     case current
     of lang0, langBytecode, langSource:
       assert false, "cannot be handled here: " & $current
+    of langPtr:
+      measure "pass:ptr-to-int":
+        tree = tree.apply(pass_ptrToInt.lower(tree, PointerSize))
+      current = lang0
     of lang1:
       syntaxCheck(tree, lang1_checks, module)
       measure "pass:inline-types":
         tree = tree.apply(pass_inlineTypes.lower(tree))
-      current = lang0
+      current = langPtr
     of lang2:
       syntaxCheck(tree, lang2_checks, module)
       measure "pass:stack-alloc":
