@@ -9,8 +9,9 @@ import
 
 type
   NodeKind* = enum
-    Immediate, IntVal, FloatVal, StringVal, ProcVal, Proc, Type, Local, Global
-    Int, UInt, Float
+    Immediate, IntVal, FloatVal, StringVal, ProcVal, Nil,
+    Proc, Type, Local, Global
+    Int, UInt, Float, Ptr
 
     List
 
@@ -24,7 +25,7 @@ type
     Deref, Field, At, Path
     Copy
 
-    Neg, Add, Sub, Mul, Div, Mod
+    Neg, Add, Sub, Mul, Div, Mod, Offset
     AddChck, SubChck, MulChck
 
     Not, Eq, Le, Lt
@@ -48,7 +49,7 @@ using
   lit: var Literals
 
 template isAtom*(x: NodeKind): bool =
-  ord(x) <= ord(Float)
+  ord(x) <= ord(Ptr)
 
 proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
              n: TreeNode[NodeKind]): SexpNode =
@@ -58,6 +59,7 @@ proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
   of FloatVal:  sexp([newSSymbol("FloatVal"), sexp tree.getFloat(idx)])
   of StringVal: sexp([newSSymbol("StringVal"), sexp tree.getString(idx)])
   of ProcVal:   sexp([newSSymbol("ProcVal"), sexp n.val.int])
+  of Nil:       sexp([newSSymbol("Nil")])
   of Proc:      sexp([newSSymbol("Proc"), sexp n.val.int])
   of Type:      sexp([newSSymbol("Type"), sexp n.val.int])
   of Local:     sexp([newSSymbol("Local"), sexp n.val.int])
@@ -65,10 +67,15 @@ proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
   of Int:       sexp([newSSymbol("Int"), sexp n.val.int])
   of UInt:      sexp([newSSymbol("UInt"), sexp n.val.int])
   of Float:     sexp([newSSymbol("Float"), sexp n.val.int])
+  of Ptr:       sexp([newSSymbol("Ptr")])
   else:         unreachable()
 
 proc fromSexp*(kind: NodeKind): Node =
-  raise ValueError.newException($kind & " node is missing operand")
+  case kind
+  of Nil, Ptr:
+    Node(kind: kind)
+  else:
+    raise ValueError.newException($kind & " node is missing operand")
 
 proc fromSexp*(kind: NodeKind, val: BiggestInt, lit): Node =
   case kind

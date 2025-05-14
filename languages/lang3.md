@@ -56,3 +56,9 @@ expr += (Addr <path>)
       | (Copy <path>)
 stmt += (Asgn <path> <expr>)
 ```
+
+Pointer arithmetic is not allowed anymore.
+
+```grammar
+expr -= (Offset <expr> <expr> <intVal>)
+```
