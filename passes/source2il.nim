@@ -357,6 +357,8 @@ proc typeToIL(c; typ: SemType): uint32 =
     c.addType Node(kind: Int, val: 8)
   of tkFloat:
     c.addType Node(kind: Float, val: 8)
+  of tkPointer:
+    c.addType Node(kind: Ptr)
   of tkArray:
     let elem = c.typeToIL(typ.elem[0])
     c.addType Array:
