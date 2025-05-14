@@ -15,13 +15,15 @@
         (Drop
           (Addr (Local 0)))
         (Drop
-          (Add (UInt 8)
+          (Offset
             (Addr (Local 0))
-            (IntVal 4)))
+            (IntVal 4)
+            (IntVal 1)))
         (Drop
-          (Add (UInt 8)
+          (Offset
             (Addr (Local 0))
-            (IntVal 4)))
+            (IntVal 4)
+            (IntVal 1)))
         (Drop
           (Addr (Local 2)))
         (Drop
@@ -31,46 +33,48 @@
         (Drop
           (Addr (Local 3)))
         (Drop
-          (Add (UInt 8)
+          (Offset
             (Addr (Local 3))
+            (IntVal 8)
+            (IntVal 1)))
+        (Drop
+          (Offset
+            (Addr (Local 3))
+            (IntVal 16)
+            (IntVal 1)))
+        (Drop
+          (Offset
+            (Addr (Local 3))
+            (Copy (Local 5))
             (IntVal 8)))
         (Drop
-          (Add (UInt 8)
+          (Offset
             (Addr (Local 3))
-            (IntVal 16)))
+            (IntVal 12)
+            (IntVal 1)))
         (Drop
-          (Add (UInt 8)
-            (Addr (Local 3))
-            (Mul (UInt 8)
-              (Copy (Local 5))
-              (IntVal 8))))
-        (Drop
-          (Add (UInt 8)
-            (Addr (Local 3))
-            (IntVal 12)))
-        (Drop
-          (Add (UInt 8)
-            (Add (UInt 8)
+          (Offset
+            (Offset
               (Addr (Local 3))
-              (Mul (UInt 8)
-                (Copy (Local 5))
-                (IntVal 8)))
-            (IntVal 4)))
+              (Copy (Local 5))
+              (IntVal 8))
+            (IntVal 4)
+            (IntVal 1)))
         (Drop
-          (Add (UInt 8)
-            (Add (UInt 8)
-              (Add (UInt 8)
+          (Offset
+            (Offset
+              (Offset
                 (Addr (Local 4))
-                (IntVal 4))
-              (Mul (UInt 8)
-                (Copy (Local 5))
-                (IntVal 8)))
-            (IntVal 4)))
+                (IntVal 4)
+                (IntVal 1))
+              (Copy (Local 5))
+              (IntVal 8))
+            (IntVal 4)
+            (IntVal 1)))
         (Drop
-          (Add (UInt 8)
+          (Offset
             (Addr (Local 3))
-            (Mul (UInt 8)
-              (Load (Int 4)
-                (Addr (Local 0)))
-              (IntVal 8))))
+            (Load (Int 4)
+              (Addr (Local 0)))
+            (IntVal 8)))
         (Return)))))
