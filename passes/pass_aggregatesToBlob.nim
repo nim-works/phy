@@ -5,9 +5,8 @@ import
   passes/[changesets, syntax, trees]
 
 type
-  Node = TreeNode[NodeKind]
   Context = object
-    addrType: Node
+    ptrSize: int
     # per-procedure state:
     locals: NodeIndex
 
@@ -89,26 +88,27 @@ proc lowerPath(c; tree; n; bu): VirtualTree =
         #       adding new packed numbers
         # add the static offset computed so far:
         result = bu.buildTree:
-          tree(Add, node(c.addrType),
+          tree(Offset,
             embed(result),
-            node(IntVal, offset.uint32))
+            node(IntVal, offset.uint32),
+            node(IntVal, 1))
         offset = 0
 
       typ = tree.resolve(typeOfElem(tree, typ, 0))
 
       # apply the dynamic array element offset:
       result = bu.buildTree:
-        tree(Add, node(c.addrType),
+        tree(Offset,
           embed(result),
-          tree(Mul, node(c.addrType),
-            embed(c.loweredExpr(tree, it, bu)),
-            node(IntVal, size(tree, typ).uint32)))
+          embed(c.loweredExpr(tree, it, bu)),
+          node(IntVal, size(tree, typ).uint32))
 
   if offset > 0:
     result = bu.buildTree:
-      tree(Add, node(c.addrType),
+      tree(Offset,
         embed(result),
-        node(IntVal, offset.uint32))
+        node(IntVal, offset.uint32),
+        node(IntVal, 1))
 
 proc lowerExpr(c; tree; n; bu) =
   case tree[n].kind
@@ -153,7 +153,7 @@ proc lowerStmt(c; tree; n; bu) =
     # no statement-specific transformation, just lower the expressions within
     c.lowerExpr(tree, n, bu)
 
-proc lower*(tree; ptrSize: int): ChangeSet[NodeKind] =
+proc lower*(tree; ptrSize: Positive): ChangeSet[NodeKind] =
   ## Computes the changeset representing the lowering for a whole module
   ## (`tree`). `ptrSize` is the size-in-bytes of a pointer value.
 
@@ -171,8 +171,7 @@ proc lower*(tree; ptrSize: int): ChangeSet[NodeKind] =
     if tree[it].kind == ProcDef:
       let
         (_, locals, body) = tree.triplet(it)
-        c = Context(locals: locals,
-                    addrType: Node(kind: UInt, val: uint32 ptrSize))
+        c = Context(ptrSize: ptrSize, locals: locals)
 
       for blk in tree.items(body):
         for s in tree.items(blk, 1):
