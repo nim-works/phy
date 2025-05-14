@@ -169,7 +169,7 @@ proc lowerOperand(c; tree; n; reference: int, bu) =
     # code and/or more work for later passes (more locals usually equals more
     # work and bookkeeping).
     case tree[n].kind
-    of IntVal, FloatVal, ProcVal:
+    of IntVal, FloatVal, ProcVal, Nil:
       discard "nothing to do"
     of Addr:
       c.lowerAddr(tree, n, reference, bu)
@@ -221,7 +221,7 @@ proc lowerCallArgs(c; tree; n; start: int, last: BackwardsIndex; bu) =
 
 proc lowerExpr(c; tree; n, bu) =
   case tree[n].kind
-  of IntVal, FloatVal, ProcVal:
+  of IntVal, FloatVal, ProcVal, Nil:
     discard "nothing to do"
   of Copy:
     let x = tree.child(n, 0)
