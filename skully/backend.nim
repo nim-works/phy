@@ -173,6 +173,9 @@ iterator items(tree: MirTree, n: NodePosition, start: int,
 template node(k: NodeKind, v: uint32): Node =
   Node(kind: k, val: v)
 
+template node(k: NodeKind): Node =
+  Node(kind: k)
+
 proc makeExpr(nodes: sink seq[Node], typ: TypeId): Expr {.inline.} =
   Expr(nodes: nodes, typ: typ)
 
@@ -382,7 +385,7 @@ proc translate(c; env: TypeEnv, id: TypeId, bu) =
   of tkUInt:
     bu.add node(UInt, desc.size(env).uint32)
   of tkPointer:
-    bu.add node(UInt, desc.size(env).uint32)
+    bu.add node(Ptr)
   of tkBool, tkChar:
     bu.add node(UInt, 1)
   of tkArray:
@@ -664,7 +667,7 @@ proc genConst(c; env; tree; n; dest: Expr, stmts) =
       # terminator
       if str.len == 0:
         # an empty cstring is represented as a nil pointer
-        putIntoDest node(IntVal, 0)
+        putIntoDest node(Nil)
       else:
         stmts.putInto dest, Addr:
           bu.add node(Global, c.genStrLiteral(env, tree[n].strVal))
@@ -835,7 +838,7 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition,
     wrapCopy:
       bu.add node(Global, c.globalsMap[tree[n].global])
   of mnkNilLit:
-    bu.add node(IntVal, 0)
+    bu.add node(Nil)
   of mnkIntLit, mnkUIntLit:
     bu.add node(IntVal, c.lit.pack(env.getInt(tree[n].number)))
   of mnkFloatLit:
@@ -1079,7 +1082,7 @@ proc genLength(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
       bu.subTree Eq:
         bu.add typeRef(c, env, CstringType)
         c.translateValue(env, tree, n, true, bu)
-        bu.add node(IntVal, 0)
+        bu.add node(Nil)
       bu.goto els
       bu.goto then
     stmts.join then
@@ -1435,7 +1438,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         # must be a pointer-like type
         bu.add typeRef(c, env, tree[arg].typ)
         value(arg)
-      bu.add node(IntVal, 0)
+      bu.add node(Nil)
   of mAddU, mSubU, mMulU, mDivU, mModU:
     const Map = [mAddU: Add, mSubU: Sub, mMulU: Mul, mDivU: Div, mModU: Mod]
     wrapAsgn Map[tree[n, 1].magic]:
@@ -1785,7 +1788,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
           bu.subTree Field:
             lvalue(tree.argument(n, 0))
             bu.add node(Immediate, 0)
-        bu.add node(IntVal, 0)
+        bu.add node(Nil)
       bu.goto then
       bu.goto els
     stmts.join then
@@ -2349,29 +2352,44 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         takeAddr tree.child(n, 0)
         bu.add node(IntVal, c.lit.pack(size))
     else:
+      template isPointer(id: TypeId): bool =
+        env.types.headerFor(id, Lowered).kind in
+          {tkPointer, tkProc, tkRef, tkPtr, tkCstring}
+
       let a = env.types.headerFor(dst, Lowered).size(env.types)
       let b = env.types.headerFor(src, Lowered).size(env.types)
       # for the implementation, keep in mind that Reinterp only supports
-      # operands of the same size. "Cutting off" bits only works with uint
-      # values, requiring the operand to first be bitcast into a uint value of
-      # the same size
-      # XXX: translation for casts will become easier once the IL has more fine
-      #      grained conversion operators
+      # operands of the same size
       if a == b: # same size, only reinterpret
         wrapAsgn Reinterp:
           bu.add typeRef(c, env, dst)
           bu.add typeRef(c, env, src)
           value tree.child(n, 0)
-      elif a < b:
-        wrapAsgn Trunc:
-          bu.add typeRef(c, env, dst)
-          bu.add typeRef(c, env, src)
-          value tree.child(n, 0)
       else:
-        wrapAsgn Zext:
-          bu.add typeRef(c, env, dst)
-          bu.add typeRef(c, env, src)
-          value tree.child(n, 0)
+        let op = if a < b: Trunc else: Zext
+        # pointer values cannot be truncated/extended directly -- the operation
+        # has to happen on a uint
+        if isPointer(src):
+          wrapAsgn op:
+            bu.add typeRef(c, env, dst)
+            bu.add typeRef(c, env, env.types.usizeType)
+            bu.subTree Reinterp:
+              bu.add typeRef(c, env, env.types.usizeType)
+              bu.add typeRef(c, env, src)
+              value tree.child(n, 0)
+        elif isPointer(dst):
+          wrapAsgn Reinterp:
+            bu.add typeRef(c, env, dst)
+            bu.add typeRef(c, env, env.types.usizeType)
+            bu.subTree op:
+              bu.add typeRef(c, env, env.types.usizeType)
+              bu.add typeRef(c, env, src)
+              value tree.child(n, 0)
+        else:
+          wrapAsgn op:
+            bu.add typeRef(c, env, dst)
+            bu.add typeRef(c, env, dst)
+            value tree.child(n, 0)
   else:
     unreachable()
 
