@@ -278,7 +278,7 @@ proc compile(tree: var PackedTree[syntax.NodeKind], source, target: Language) =
     of lang4:
       syntaxCheck(tree, lang4_checks, module)
       measure "pass:lower-aggregate-params":
-        tree = tree.apply(pass_aggregateParams.lower(tree, PointerSize))
+        tree = tree.apply(pass_aggregateParams.lower(tree))
       current = lang3
     of lang5:
       syntaxCheck(tree, lang5_checks, module)
