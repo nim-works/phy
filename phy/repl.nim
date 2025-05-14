@@ -89,7 +89,7 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
     m = m.apply(pass_aggregatesToBlob.lower(m, 8))
     m = m.apply(pass_localsToBlob.lower(m))
     m = m.apply(pass_legalizeBlobOps.lower(m))
-    m = m.apply(pass_stackAlloc.lower(m, 8))
+    m = m.apply(pass_stackAlloc.lower(m))
     m = m.apply(pass_inlineTypes.lower(m))
 
     let module = translate(m)

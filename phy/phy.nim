@@ -264,7 +264,7 @@ proc compile(tree: var PackedTree[syntax.NodeKind], source, target: Language) =
     of lang2:
       syntaxCheck(tree, lang2_checks, module)
       measure "pass:stack-alloc":
-        tree = tree.apply(pass_stackAlloc.lower(tree, PointerSize))
+        tree = tree.apply(pass_stackAlloc.lower(tree))
       current = lang1
     of lang3:
       syntaxCheck(tree, lang3_checks, module)
