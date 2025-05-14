@@ -1,0 +1,15 @@
+discard """
+  description: "Make sure `Reinterp` involving pointers is lowered"
+"""
+(TypeDefs
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0) 0 (Locals)
+    (List
+      (Block (Params)
+        (Drop (Reinterp (Ptr) (Int 8) (IntVal 1)))
+        (Drop (Reinterp (Int 8) (Ptr) (Nil)))
+        (Drop (Reinterp (Ptr) (UInt 8) (IntVal 1)))
+        (Drop (Reinterp (UInt 8) (Ptr) (Nil)))
+        (Return))))))

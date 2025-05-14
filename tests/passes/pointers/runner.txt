@@ -1,0 +1,1 @@
+bin/phy --source:LPtr --show:L0 --runner ${args=e} ${file}
