@@ -18,9 +18,9 @@ expr += (Nil)
 ```
 
 Pointer arithmetic is done using the `Offset` operation, which applies an
-unsigned integer with the same byte-width as a pointer scaled by a non-zero,
-positive constant value.
+unsigned integer with the same byte-width as a pointer scaled by a positive,
+non-zero constant value.
 
 ```grammar
-expr += (Offset ptr:<expr> by:<expr> scale:<intVal>)
+expr += (Offset base:<expr> idx:<expr> scale:<intVal>)
 ```

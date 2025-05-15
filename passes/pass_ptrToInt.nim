@@ -17,23 +17,24 @@ using
 proc lowerExprs(c; tree; n; bu)
 
 proc lowerOffset(c; tree; n; bu) =
-  let (address, off, scale) = tree.triplet(n)
-  # turn (Offset addr off scale) into:
-  # * (Add typ addr off) when there's no scaling
-  # * (Add typ addr (Mul typ off scale)) when there's scaling
+  let (base, idx, scale) = tree.triplet(n)
+  # turn (Offset base idx scale) into:
+  # * (Add typ base idx) when there's no scaling
+  # * (Add typ base (Mul typ idx scale)) when there's scaling
   bu.modifyTree(tree, n, Add, m):
-    bu.insert(m, address, c.addrType)
-    c.lowerExprs(tree, address, bu)
+    bu.insert(m, base, c.addrType)
+    c.lowerExprs(tree, base, bu)
     if tree.getInt(scale) == 1:
       # no scaling is needed
-      c.lowerExprs(tree, off, bu)
+      c.lowerExprs(tree, idx, bu)
     else:
-      let t = bu.openTree(tree, off):
-        c.lowerExprs(tree, off, bu)
-      bu.replace(off, bu.buildTree(
-        tree(Mul, node(c.addrType),
-          embed(t),
-          node(tree[scale]))))
+      let t = bu.openTree(tree, idx):
+        c.lowerExprs(tree, idx, bu)
+      bu.replace(idx,
+        bu.buildTree(
+          tree(Mul, node(c.addrType),
+            embed(t),
+            node(tree[scale]))))
     bu.remove(m, scale)
 
 proc lowerExprs(c; tree; n; bu) =
