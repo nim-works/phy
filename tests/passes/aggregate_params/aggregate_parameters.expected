@@ -2,13 +2,13 @@
 (TypeDefs
   (Record 4 4
     (Field 0 (Int 4)))
-  (ProcTy (Void) (UInt 8))
-  (ProcTy (Void) (UInt 8))
+  (ProcTy (Void) (Ptr))
+  (ProcTy (Void) (Ptr))
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
   (ProcDef (Type 1)
-    (Locals (Type 0) (UInt 8))
+    (Locals (Type 0) (Ptr))
     (List
       (Block
         (Params (Local 1))
@@ -17,7 +17,7 @@
           (Copy (Local 0)))
         (Return))))
   (ProcDef (Type 2)
-    (Locals (UInt 8) (Type 0))
+    (Locals (Ptr) (Type 0))
     (List
       (Block
         (Params (Local 0))

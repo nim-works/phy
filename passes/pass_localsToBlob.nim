@@ -9,6 +9,8 @@ type
   LocalId = distinct uint32
 
   Context = object
+    ptrSize: int
+    # per-procedure context:
     locals: NodeIndex
     marker: PackedSet[LocalId]
 
@@ -32,9 +34,18 @@ proc resolve(tree; n: NodeIndex): NodeIndex =
 proc typeof(c; tree; id: LocalId): NodeIndex =
   tree.child(c.locals, ord id)
 
+proc sizeAndAlignment(c; tree; n): (uint32, uint32) =
+  case tree[n].kind
+  of Int, UInt, Float:
+    (tree[n].val, tree[n].val)
+  of Ptr:
+    (c.ptrSize.uint32, c.ptrSize.uint32)
+  else:
+    unreachable()
+
 proc isSimple(tree; n): bool =
   case tree[n].kind
-  of Int, UInt, Float: true
+  of Int, UInt, Float, Ptr: true
   of Blob: false
   of Type: isSimple(tree, tree.child(tree.child(0), tree[n].val))
   else:    unreachable()
@@ -111,18 +122,18 @@ proc lowerProc(c; tree; n; bu) =
     for it in c.marker.items:
       let
         slot = tree.child(c.locals, ord it)
-        size = tree[tree.resolve(slot)].val
+        (size, align) = sizeAndAlignment(c, tree, tree.resolve(slot))
       bu.replace slot:
-        bu.buildTree tree(Blob, node(Immediate, size), node(Immediate, size))
+        bu.buildTree tree(Blob, node(Immediate, size), node(Immediate, align))
 
     for it in newLocals.items:
       bu.insert m, tree.fin(c.locals), it
 
-proc lower*(tree): ChangeSet[NodeKind] =
+proc lower*(tree; ptrSize: Positive): ChangeSet[NodeKind] =
   ## Computes the changeset representing the lowering for a whole module
-  ## (`tree`). `ptrSize` is the size-in-bytes of a pointer value.
+  ## (`tree`).
 
-  var c = Context()
+  var c = Context(ptrSize: ptrSize)
   # lower the procedures:
   for it in tree.items(tree.child(2)):
     if tree[it].kind == ProcDef:

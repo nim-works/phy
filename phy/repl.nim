@@ -16,6 +16,7 @@ import
   passes/[
     changesets,
     pass0,
+    pass_ptrToInt,
     pass_aggregateParams,
     pass_aggregatesToBlob,
     pass_globalsToPointer,
@@ -85,12 +86,13 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
     m = m.apply(pass25.lower(m))
     m = m.apply(pass_globalsToPointer.lower(m, 8))
     m = m.apply(pass_flattenPaths.lower(m))
-    m = m.apply(pass_aggregateParams.lower(m, 8))
+    m = m.apply(pass_aggregateParams.lower(m))
     m = m.apply(pass_aggregatesToBlob.lower(m, 8))
-    m = m.apply(pass_localsToBlob.lower(m))
+    m = m.apply(pass_localsToBlob.lower(m, 8))
     m = m.apply(pass_legalizeBlobOps.lower(m))
-    m = m.apply(pass_stackAlloc.lower(m, 8))
+    m = m.apply(pass_stackAlloc.lower(m))
     m = m.apply(pass_inlineTypes.lower(m))
+    m = m.apply(pass_ptrToInt.lower(m, 8))
 
     let module = translate(m)
 

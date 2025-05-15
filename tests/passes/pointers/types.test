@@ -1,0 +1,14 @@
+discard """
+  description: "Make sure `Ptr` types are correctly lowered everywhere"
+"""
+(TypeDefs
+  (ProcTy (Ptr) (Ptr))
+  (ProcTy (Void)))
+(GlobalDefs
+  (GlobalDef (Ptr) (Data 8 8)))
+(ProcDefs
+  (ProcDef (Type 1) 0
+    (Locals (Ptr) (Ptr))
+    (List
+      (Block (Params)
+        (Return))))))

@@ -60,7 +60,7 @@ proc primToSexp(v: Value, typ: SemType): SexpNode =
     newSInt(v.intVal)
   of tkFloat:
     newSFloat(v.floatVal)
-  of ComplexTypes, tkError, tkVoid:
+  of ComplexTypes, tkError, tkVoid, tkPointer:
     unreachable()
 
 proc valueToSexp(env: var VmEnv, a: VirtualAddr, typ: SemType): SexpNode =
@@ -121,7 +121,7 @@ proc valueToSexp(env: var VmEnv, a: VirtualAddr, typ: SemType): SexpNode =
     for i in 0..<len:
       result.add valueToSexp(env, VirtualAddr(data + size(typ.elems[0]) * i),
                              typ.elems[0])
-  of tkVoid, tkError:
+  of tkVoid, tkPointer, tkError:
     unreachable()
 
 proc readMemConfig*(m: VmModule): Option[MemoryConfig] =

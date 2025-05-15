@@ -1,0 +1,51 @@
+;$sexp
+(TypeDefs
+  (ProcTy (Void))
+)
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0) 32
+    (Locals (UInt 8))
+    (List
+      (Block
+        (Params (Local 0))
+        (Drop
+          (Add (UInt 8)
+            (Copy (Local 0))
+            (IntVal 8)
+          )
+        )
+        (Drop
+          (Add (UInt 8)
+            (Copy (Local 0))
+            (Mul (UInt 8) (IntVal 8) (IntVal 2))
+          )
+        )
+        (Drop
+          (Add (UInt 8)
+            (Add (UInt 8)
+              (Copy (Local 0))
+              (Mul (UInt 8) (IntVal 8) (IntVal 2))
+            )
+            (Mul (UInt 8) (IntVal 8) (IntVal 2))
+          )
+        )
+        (Drop
+          (Add (UInt 8)
+            (Copy (Local 0))
+            (Mul (UInt 8)
+              (Load (UInt 8)
+                (Add (UInt 8)
+                  (Copy (Local 0))
+                  (IntVal 8)
+                )
+              )
+              (IntVal 2)
+            )
+          )
+        )
+        (Return)
+      )
+    )
+  )
+)

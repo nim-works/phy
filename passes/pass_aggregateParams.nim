@@ -25,7 +25,6 @@ type
   TypeId = uint32
 
   Context = object
-    addrType: Node
     cache: seq[NodeIndex]
       ## indexed by procedure IDs. Caches the signature type for every
       ## procedure. This greatly speeds up type computation of calls, as it
@@ -48,6 +47,8 @@ type
     hasOutParam: bool
     params: PackedSet[LocalId]
       ## the parameters that are turned into pointers
+
+const PtrType = Node(kind: Ptr)
 
 using
   c: var Context
@@ -101,7 +102,7 @@ proc typeof(c; tree; n): Node =
     unreachable()
 
 proc newLocal(c; typ: Node): Node =
-  assert typ.kind in {Type, UInt, Int, Float}
+  assert typ.kind in {Type, UInt, Int, Float, Ptr}
   result = Node(kind: Local, val: uint32(c.firstTemp + c.temps.len))
   c.temps.add typ
 
@@ -168,7 +169,7 @@ proc lowerOperand(c; tree; n; reference: int, bu) =
     # code and/or more work for later passes (more locals usually equals more
     # work and bookkeeping).
     case tree[n].kind
-    of IntVal, FloatVal, ProcVal:
+    of IntVal, FloatVal, ProcVal, Nil:
       discard "nothing to do"
     of Addr:
       c.lowerAddr(tree, n, reference, bu)
@@ -220,7 +221,7 @@ proc lowerCallArgs(c; tree; n; start: int, last: BackwardsIndex; bu) =
 
 proc lowerExpr(c; tree; n, bu) =
   case tree[n].kind
-  of IntVal, FloatVal, ProcVal:
+  of IntVal, FloatVal, ProcVal, Nil:
     discard "nothing to do"
   of Copy:
     let x = tree.child(n, 0)
@@ -362,7 +363,7 @@ proc lowerProc(c; tree; n; sig: NodeIndex, bu) =
 
   if isAggregate(tree, tree[sig, 0]):
     c.hasOutParam = true
-    c.outParam = c.newLocal(c.addrType)
+    c.outParam = c.newLocal(PtrType)
   else:
     c.hasOutParam = false
 
@@ -400,17 +401,17 @@ proc lowerProc(c; tree; n; sig: NodeIndex, bu) =
     bu.modifyTree tree, c.locals, list:
       # update the parameter locals:
       for it in c.params.items:
-        bu.replace tree.child(c.locals, it.ord), c.addrType
+        bu.replace tree.child(c.locals, it.ord), PtrType
 
       # append the new locals to the list of locals:
       let last = tree.fin(c.locals)
       for it in c.temps.items:
         bu.insert list, last, it
 
-proc lower*(tree; ptrSize: int): ChangeSet[NodeKind] =
+proc lower*(tree): ChangeSet[NodeKind] =
   ## Computes the changeset representing the lowering for a whole module
-  ## (`tree`). `ptrSize` is the size-in-bytes of a pointer value.
-  var c = Context(addrType: Node(kind: UInt, val: ptrSize.uint32))
+  ## (`tree`).
+  var c = Context()
 
   for it in tree.items(tree.child(0)):
     if tree[it].kind == ProcTy:
@@ -418,11 +419,11 @@ proc lower*(tree; ptrSize: int): ChangeSet[NodeKind] =
         # turn an aggregate return value into an out parameter:
         if isAggregate(tree, tree[it, 0]):
           result.replace tree.child(it, 0), result.buildTree(tree(Void))
-          result.insert m, tree.fin(it), c.addrType
+          result.insert m, tree.fin(it), PtrType
 
         for x in tree.items(it, 1):
           if isAggregate(tree, tree[x]):
-            result.replace x, c.addrType
+            result.replace x, PtrType
 
   let procs = tree.child(2)
 

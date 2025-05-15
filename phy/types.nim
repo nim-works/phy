@@ -24,6 +24,8 @@ type
     tkChar  ## UTF-8 byte
     tkInt
     tkFloat
+    tkPointer ## polymorphic pointer type. It's only meant for
+              ## internal usage
     tkArray
     tkTuple ## an anonymous product type
     tkRecord
@@ -35,7 +37,7 @@ type
     ## Represents a source-language type. The "Sem" prefix is there to prevent
     ## name conflicts with other types named `Type`.
     case kind*: TypeKind
-    of tkError, tkVoid, tkUnit, tkBool, tkChar, tkInt, tkFloat:
+    of tkError, tkVoid, tkUnit, tkBool, tkChar, tkInt, tkFloat, tkPointer:
       discard
     of tkTuple, tkUnion, tkProc, tkSeq:
       elems*: seq[SemType]
@@ -62,7 +64,7 @@ proc cmp*(a, b: SemType): int =
 
   # same kind, compare operands
   case a.kind
-  of tkError, tkVoid, tkUnit, tkBool, tkChar, tkInt, tkFloat:
+  of tkError, tkVoid, tkUnit, tkBool, tkChar, tkInt, tkFloat, tkPointer:
     result = 0 # equal
   of tkTuple, tkUnion, tkProc, tkSeq:
     result = a.elems.len - b.elems.len
@@ -117,7 +119,7 @@ proc `==`*(a, b: SemType): bool =
     return false
 
   case a.kind
-  of tkError, tkVoid, tkUnit, tkBool, tkChar, tkInt, tkFloat:
+  of tkError, tkVoid, tkUnit, tkBool, tkChar, tkInt, tkFloat, tkPointer:
     result = true
   of tkTuple, tkUnion, tkProc, tkSeq:
     result = a.elems == b.elems
@@ -148,7 +150,7 @@ proc size*(t: SemType): SizeUnit =
   of tkError: 8 # TODO: return a value indicating "unknown"
   of tkUnit, tkBool, tkChar: 1
   of tkInt, tkFloat: 8
-  of tkProc: 8 # size of a pointer
+  of tkPointer, tkProc: 8 # size of a pointer
   of tkArray:
     paddedSize(t.elem[0]) * t.length
   of tkTuple:
@@ -178,7 +180,7 @@ proc alignment*(t: SemType): SizeUnit =
   of tkError: 8
   of tkUnit, tkBool, tkChar: 1
   of tkInt, tkFloat: 8
-  of tkProc: 8
+  of tkPointer, tkProc: 8
   of tkArray:
     alignment(t.elem[0])
   of tkTuple:
@@ -232,7 +234,7 @@ proc isTriviallyCopyable*(typ: SemType): bool =
   ## Whether a value of `typ` can be trivially copied (that is, via a
   ## single block copy).
   case typ.kind
-  of tkError, tkUnit, tkBool, tkChar, tkInt, tkFloat, tkProc:
+  of tkError, tkUnit, tkBool, tkChar, tkInt, tkFloat, tkPointer, tkProc:
     true
   of tkSeq:
     false

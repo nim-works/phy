@@ -9,30 +9,35 @@
 (GlobalDefs)
 (ProcDefs
   (ProcDef (Type 5) 32
-    (Locals (UInt 8))
+    (Locals (Ptr))
     (List
       (Block
         (Params (Local 0))
         (Drop
           (Copy (Local 0)))
         (Drop
-          (Add (UInt 8)
+          (Offset
             (Copy (Local 0))
-            (IntVal 24)))
+            (IntVal 24)
+            (IntVal 1)))
         (Drop
-          (Add (UInt 8)
+          (Offset
             (Copy (Local 0))
-            (IntVal 25)))
+            (IntVal 25)
+            (IntVal 1)))
         (Drop
-          (Add (UInt 8)
+          (Offset
             (Copy (Local 0))
-            (IntVal 28)))
+            (IntVal 28)
+            (IntVal 1)))
         (Drop
-          (Add (UInt 8)
+          (Offset
             (Copy (Local 0))
-            (IntVal 29)))
+            (IntVal 29)
+            (IntVal 1)))
         (Drop
-          (Add (UInt 8)
+          (Offset
             (Copy (Local 0))
-            (IntVal 30)))
+            (IntVal 30)
+            (IntVal 1)))
         (Return)))))

@@ -65,6 +65,8 @@ proc typeToString*(typ: SemType): string =
     res
   of tkSeq:
     "seq(" & typeToString(typ.elems[0]) & ")"
+  of tkPointer:
+    unreachable("pointer types should never reach rendering")
   of tkError:
     # diagnostic messages should not show error types, therefore rendering is
     # not implemented for them. If control-flow reaches here, it usually means
@@ -111,5 +113,5 @@ proc typeToSexp*(typ: SemType): SexpNode =
     res
   of tkSeq:
     newSList(newSSymbol("SeqTy"), typeToSexp(typ.elems[0]))
-  of tkError:
+  of tkPointer, tkError:
     unreachable()
