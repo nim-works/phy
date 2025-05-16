@@ -13,7 +13,6 @@ import
   vm/[utils]
 
 from std/strutils import `%`
-from vm/vmalloc import AddressBias
 
 import passes/syntax_source except NodeKind
 
@@ -133,10 +132,6 @@ const
     ## the node representing the unitary value
   unitExpr = Expr(expr: UnitNode, typ: prim(tkUnit))
     ## the expression evaluating to the unitary value
-
-  pointerType = prim(tkInt)
-    ## the type inhabited by pointer values. The constant is used as a
-    ## placeholder until a dedicated pointer type is introduced
 
   # the allocator and generic seq procedures currently use static IDs
   AllocProc = 0
@@ -358,6 +353,8 @@ proc typeToIL(c; typ: SemType): uint32 =
     c.addType Node(kind: Int, val: 8)
   of tkFloat:
     c.addType Node(kind: Float, val: 8)
+  of tkPointer:
+    c.addType Node(kind: Ptr)
   of tkArray:
     let elem = c.typeToIL(typ.elem[0])
     c.addType Array:
@@ -402,12 +399,12 @@ proc typeToIL(c; typ: SemType): uint32 =
         c.types.add Node(kind: Type, val: inner)
   of tkProc:
     # a proc type is used to represent both procedure signatures and the type
-    # of procedural values. For values, the underlying storage type is a uint
-    c.addType Node(kind: UInt, val: 8)
+    # of procedural values. For values, the underlying storage type
+    # is a pointer
+    c.addType Node(kind: Ptr)
   of tkSeq:
     let
       lengthType  = c.typeToIL(prim(tkInt))
-      pointerType = c.typeToIL(pointerType)
     c.addType Record:
       c.types.add Node(kind: Immediate, val: paddedSize(typ).uint32)
       c.types.add Node(kind: Immediate, val: alignment(typ).uint32)
@@ -418,7 +415,7 @@ proc typeToIL(c; typ: SemType): uint32 =
       # the payload field:
       c.types.subTree Field:
         c.types.add Node(kind: Immediate, val: 8)
-        c.types.add Node(kind: Type, val: pointerType)
+        c.types.add Node(kind: Ptr)
 
 func numILParams(typ: SemType): int =
   ## Returns the number of parameters the IL signature type generated from
@@ -638,7 +635,8 @@ proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
     case typ.kind
     of tkSeq:
       # at(s: seq(T), index: int) -> pointer
-      procTy = SemType(kind: tkProc, elems: @[pointerType, typ, prim(tkInt)])
+      procTy = SemType(kind: tkProc,
+                       elems: @[prim(tkPointer), typ, prim(tkInt)])
       params.add 0
       params.add 1
       locals.add typ
@@ -658,10 +656,10 @@ proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
     of tkArray:
       # at(arr: pointer, index: int) -> pointer
       procTy = SemType(kind: tkProc,
-                       elems: @[pointerType, pointerType, prim(tkInt)])
+                       elems: @[prim(tkPointer), prim(tkPointer), prim(tkInt)])
       params.add 0
       params.add 1
-      locals.add pointerType
+      locals.add prim(tkPointer)
       locals.add prim(tkInt)
 
       let
@@ -679,13 +677,14 @@ proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
       # at(s: tuple, index: int, tmp: pointer) -> pointer
       let (ret, folded) = unionOf(typ.elems)
       procTy = SemType(kind: tkProc,
-                       elems: @[pointerType, typ, prim(tkInt), pointerType])
+                       elems: @[prim(tkPointer), typ, prim(tkInt),
+                                prim(tkPointer)])
       params.add 0
       params.add 1
       params.add 2
       locals.add typ
       locals.add prim(tkInt)
-      locals.add pointerType
+      locals.add prim(tkPointer)
       locals.add prim(tkBool) # temporary
       let
         tup = newLocal(0)
@@ -1521,7 +1520,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
         expr = newDeref(c.typeToIL(result.typ), res)
       else:
         # evaluate the access eagerly
-        let tmp = c.newTemp(pointerType)
+        let tmp = c.newTemp(prim(tkPointer))
         stmts.add newAsgn(tmp, res)
         expr = newDeref(c.typeToIL(result.typ), tmp)
     of tkTuple:
@@ -1707,7 +1706,7 @@ proc importIoProcedures(c) =
   # both 'write' and 'writeErr' need a wrapper procedure, as the external
   # procedure cannot take a seq as input (only a pointer and an int)
   var procTy = SemType(kind: tkProc,
-                       elems: @[prim(tkVoid), pointerType, prim(tkInt)])
+                       elems: @[prim(tkVoid), prim(tkPointer), prim(tkInt)])
   let writeHostPrc = c.addProc(procTy):
     buildTree Import:
       bu.add Node(kind: Type, val: c.genProcType(procTy))
@@ -1717,14 +1716,14 @@ proc importIoProcedures(c) =
       bu.add Node(kind: Type, val: c.genProcType(procTy))
       bu.add Node(kind: StringVal, val: c.literals.pack("core.writeErr"))
   procTy = SemType(kind: tkProc,
-                    elems: @[prim(tkInt), pointerType, prim(tkInt)])
+                    elems: @[prim(tkInt), prim(tkPointer), prim(tkInt)])
   let fileSizePrc = c.addProc(procTy):
     buildTree Import:
       bu.add Node(kind: Type, val: c.genProcType(procTy))
       bu.add Node(kind: StringVal, val: c.literals.pack("core.fileSize"))
   procTy = SemType(kind: tkProc,
-                   elems: @[prim(tkInt), pointerType, prim(tkInt),
-                            pointerType, prim(tkInt)])
+                   elems: @[prim(tkInt), prim(tkPointer), prim(tkInt),
+                            prim(tkPointer), prim(tkInt)])
   let readFileHostPrc = c.addProc(procTy):
     buildTree Import:
       bu.add Node(kind: Type, val: c.genProcType(procTy))
@@ -1832,41 +1831,38 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   const
     StackSize = 1024 * 4        # 4 KiB
     HeapSize  = 1024 * 1024 * 4 # 4 MiB
-    HeapStart = AddressBias + StackSize + 8
 
-  # note: the virtual address range below ``AddressBias`` is reserved.
-  # Memory layout:
-  # +----------+-------+------+------+
-  # | reserved | stack | mgmt | heap |
-  # +----------+-------+------+------+
-  # The 'mgmt' section stores the data necessary for managing the heap.
+  let heapType = c.addType Array:
+    c.types.add Node(kind: Immediate, val: HeapSize) # size-in-bytes
+    c.types.add Node(kind: Immediate, val: 8)        # alignment
+    c.types.add Node(kind: Immediate, val: HeapSize) # count
+    c.types.add Node(kind: UInt, val: 1)
 
   # globals and their meaning:
-  # * 0: size of the stack size
-  # * 1: address of the start of the heap
-  # * 2: address of the end of the heap
-  # * 3: address of the heap management data
+  # * 0: size of the stack (a constant)
+  # * 1: size of the heap (a constant)
+  # * 2: the heap region, represented as an array of bytes
+  # * 3: heap management data
   c.globals.subTree GlobalDef:
     c.globals.add Node(kind: UInt, val: 8)
     c.globals.add Node(kind: IntVal, val: StackSize)
   c.globals.subTree GlobalDef:
-    c.globals.add Node(kind: UInt, val: 8)
-    c.globals.add Node(kind: IntVal, val: HeapStart)
-  c.globals.subTree GlobalDef:
-    c.globals.add Node(kind: UInt, val: 8)
-    c.globals.add Node(kind: IntVal, val: HeapStart + HeapSize)
-  c.globals.subTree GlobalDef:
-    c.globals.add Node(kind: UInt, val: 8)
-    c.globals.add Node(kind: IntVal, val: HeapStart - 8)
+    c.globals.add Node(kind: Int, val: 8)
+    c.globals.add Node(kind: IntVal, val: HeapSize)
+  c.globals.subTree GlobalLoc:
+    c.globals.add Node(kind: Type, val: heapType)
+    c.globals.subTree Data:
+      c.globals.add Node(kind: Type, val: heapType)
+  c.globals.subTree GlobalLoc:
+    c.globals.add Node(kind: Int, val: 8)
+    c.globals.subTree Data:
+      c.globals.add Node(kind: Int, val: 8)
+  # XXX: the heap managment data and heap size should both use UInt, but
+  #      pointer arithmetic in the target IL is a bit fuzzy at the moment
 
   c.exports.subTree Export:
     c.exports.add Node(kind: StringVal, val: c.literals.pack("stack_size"))
     c.exports.add Node(kind: Global, val: 0)
-  # the end-of-heap pointer is taken to also represent the amount of total
-  # guest memory (which is not entirely correct, due to the address bias)
-  c.exports.subTree Export:
-    c.exports.add Node(kind: StringVal, val: c.literals.pack("total_memory"))
-    c.exports.add Node(kind: Global, val: 2)
 
   # add the built-in allocator and seq procedures
   # XXX: these need to be provided by a system-like module in the future
@@ -1882,9 +1878,7 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
       (Params (Local 0) (Local 2))
       (Locals (Type $2) (Type $2) (Type $2))
       (Stmts
-        (If (Eq (Type $2) (Load (Type $2) (Copy (Global 3))) (IntVal 0))
-          (Asgn (Local 1) (Copy (Global 1)))
-          (Asgn (Local 1) (Load (Type $2) (Copy (Global 3)))))
+        (Asgn (Local 1) (Copy (Global 3)))
         (Asgn (Local 1)
           (BitAnd (Type $2)
             (Add (Type $2)
@@ -1901,18 +1895,19 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
             (Add (Type $2)
               (Copy (Local 0))
               (Copy (Local 1)))
-            (Copy (Global 2)))
+            (Copy (Global 1)))
           (Stmts
-            (Store (Type $2)
-              (Copy (Global 3))
+            (Asgn (Global 3)
               (Add (Type $2)
                 (Copy (Local 1))
                 (Copy (Local 0))))
-            (Return (Copy (Local 1))))
+            (Return
+              (Addr
+                (At (Global 2) (Copy (Local 1))))))
           (Raise (IntVal 0)))))
   """
   var procTy = SemType(kind: tkProc,
-                       elems: @[pointerType, prim(tkInt), prim(tkInt)])
+                       elems: @[prim(tkPointer), prim(tkInt), prim(tkInt)])
   addProc procTy, AllocBody,
           [$c.genProcType(procTy), $c.typeToIL(prim(tkInt))]
 
@@ -1922,7 +1917,7 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
       (Locals (Type $2))
       (Return (IntVal 0)))
   """
-  procTy = SemType(kind: tkProc, elems: @[prim(tkUnit), pointerType])
+  procTy = SemType(kind: tkProc, elems: @[prim(tkUnit), prim(tkPointer)])
   addProc procTy, DeallocBody,
           [$c.genProcType(procTy), $c.typeToIL(prim(tkInt))]
 
@@ -1950,7 +1945,7 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
       )
   """
   procTy = SemType(kind: tkProc,
-                   elems: @[pointerType, pointerType, prim(tkInt),
+                   elems: @[prim(tkPointer), prim(tkPointer), prim(tkInt),
                             prim(tkInt), prim(tkInt)])
   addProc procTy, ReallocBody,
           [$c.genProcType(procTy), $c.typeToIL(prim(tkInt))]
@@ -1961,7 +1956,7 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   const GrowBody = """
     (ProcDef (Type $1)
       (Params (Local 0) (Local 1) (Local 2) (Local 3))
-      (Locals (Type $2) (Type $2) (Type $2) (Type $2))
+      (Locals (Ptr) (Type $2) (Type $2) (Type $2))
       (Stmts
         (If
           (Lt (Type $2)
@@ -1983,7 +1978,8 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
           (If
             (Not
               (Lt (Type $2)
-                (Copy (Local 0))
+                (Load (Type $2)
+                  (Copy (Local 0)))
                 (Copy (Local 1))))
             (Asgn (Local 0)
               (Call (Proc 2)
@@ -2016,7 +2012,7 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
   const PrepareAddBody = """
     (ProcDef (Type $1)
       (Params (Local 0) (Local 1) (Local 2) (Local 4))
-      (Locals (Type $2) (Type $2) (Type $2) (Type $2) (Type $2))
+      (Locals (Ptr) (Ptr) (Type $2) (Type $2) (Type $2))
       (Stmts
         (Asgn (Local 3)
           (Load (Type $2)
@@ -2026,24 +2022,26 @@ proc open*(reporter: sink(ref ReportContext[string])): ModuleCtx =
           (Add (Type $2)
             (Copy (Local 3))
             (IntVal 1)))
-        (Store (Type $2)
+        (Store (Ptr)
           (Copy (Local 1))
           (Call (Proc 3)
-            (Load (Type $2)
+            (Load (Ptr)
               (Copy (Local 1)))
             (Load (Type $2)
               (Copy (Local 0)))
             (Copy (Local 2))
             (Copy (Local 4))))
         (Return
-          (Add (Type $2)
+          (Reinterp (Ptr) (Type $2)
             (Add (Type $2)
-              (Load (Type $2)
-                (Copy (Local 1)))
-              (IntVal $3))
-            (Mul (Type $2)
-              (Copy (Local 3))
-              (Copy (Local 2)))))))
+              (Reinterp (Type $2) (Ptr)
+                (Load (Ptr)
+                  (Copy (Local 1))))
+              (Add (Type $2)
+                (IntVal $3)
+                (Mul (Type $2)
+                  (Copy (Local 3))
+                  (Copy (Local 2)))))))))
   """
   addProc procTy, PrepareAddBody,
           [$c.genProcType(procTy), $c.typeToIL(prim(tkInt)),

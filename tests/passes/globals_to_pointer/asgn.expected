@@ -1,0 +1,31 @@
+;$sexp
+(TypeDefs
+  (ProcTy (Void))
+  (Record 16 4
+    (Field 0 (Int 4))
+    (Field 4 (Int 4))
+    (Field 8 (Int 4))
+    (Field 12 (Int 4))))
+(GlobalDefs
+  (GlobalDef (Ptr)
+    (Data 4 4))
+  (GlobalDef (Ptr)
+    (Data 4 16)))
+(ProcDefs
+  (ProcDef (Type 0)
+    (Locals (Type 1))
+    (List
+      (Block (Params)
+        (Store (Int 4)
+          (Copy (Global 0))
+          (IntVal 100))
+        (Store (Type 1)
+          (Copy (Global 1))
+          (Copy (Local 0)))
+        (Asgn
+          (Field
+            (Deref (Type 1)
+              (Copy (Global 1)))
+            0)
+          (IntVal 200))
+        (Return)))))

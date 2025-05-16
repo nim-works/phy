@@ -2,8 +2,7 @@
 ## (|L3| -> |L3|).
 
 import
-  passes/[changesets, syntax, trees],
-  vm/utils
+  passes/[changesets, syntax, trees]
 
 using
   tree: PackedTree[NodeKind]
@@ -20,7 +19,7 @@ proc isBlob(tree; n): bool =
   case tree[n].kind
   of Blob: true
   of Type: tree[tree.child(0), tree[n].val].kind == Blob
-  of Int, UInt, Float: false
+  of Int, UInt, Float, Ptr: false
   else:    unreachable()
 
 proc prepareOperand(tree; n; bu): VirtualTree =

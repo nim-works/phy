@@ -5,12 +5,12 @@
 
 import
   experimental/sexp,
-  passes/trees,
-  vm/utils
+  passes/trees
 
 type
   NodeKind* = enum
-    Immediate, IntVal, FloatVal, StringVal, ProcVal, Proc, Type, Local, Global
+    Immediate, IntVal, FloatVal, StringVal, ProcVal, Nil,
+    Proc, Type, Local, Global
     Int, UInt, Float, Ptr
 
     List
@@ -25,20 +25,21 @@ type
     Deref, Field, At, Path
     Copy
 
-    Neg, Add, Sub, Mul, Div, Mod
+    Neg, Add, Sub, Mul, Div, Mod, Offset
     AddChck, SubChck, MulChck
 
     Not, Eq, Le, Lt
     BitAnd, BitNot, BitXor, BitOr
     Shl, Shr
 
-    Conv, Reinterp
+    Conv, Reinterp, Zext, Sext, Trunc, Demote, Promote
 
     Goto, Loop, Raise, Unreachable, Select, Branch
     CheckedCall, CheckedCallAsgn, Unwind, Choice
 
     Module, TypeDefs, ProcDefs, ProcDef, Locals,
-    Except, Params, GlobalDefs, GlobalDef, Import, Export
+    Except, Params, GlobalDefs, GlobalDef, GlobalLoc, Import, Export
+    Data
 
     Break, Return, Case, If, Block, Stmts
 
@@ -58,6 +59,7 @@ proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
   of FloatVal:  sexp([newSSymbol("FloatVal"), sexp tree.getFloat(idx)])
   of StringVal: sexp([newSSymbol("StringVal"), sexp tree.getString(idx)])
   of ProcVal:   sexp([newSSymbol("ProcVal"), sexp n.val.int])
+  of Nil:       sexp([newSSymbol("Nil")])
   of Proc:      sexp([newSSymbol("Proc"), sexp n.val.int])
   of Type:      sexp([newSSymbol("Type"), sexp n.val.int])
   of Local:     sexp([newSSymbol("Local"), sexp n.val.int])
@@ -70,8 +72,10 @@ proc toSexp*(tree: PackedTree[NodeKind], idx: NodeIndex,
 
 proc fromSexp*(kind: NodeKind): Node =
   case kind
-  of Ptr: Node(kind: Ptr)
-  else:raise ValueError.newException($kind & " node is missing operand")
+  of Nil, Ptr:
+    Node(kind: kind)
+  else:
+    raise ValueError.newException($kind & " node is missing operand")
 
 proc fromSexp*(kind: NodeKind, val: BiggestInt, lit): Node =
   case kind

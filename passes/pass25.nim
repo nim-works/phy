@@ -1,10 +1,9 @@
 ## A pass that turns the transforms the bodies of procedures into the
-## basic-block-oriented structure (|L25| -> |L5|).
+## basic-block-oriented structure (|L25| -> |L6|).
 
 import
   std/[tables],
-  passes/[builders, changesets, trees, syntax],
-  vm/utils
+  passes/[builders, changesets, trees, syntax]
 
 type
   Node = TreeNode[NodeKind]

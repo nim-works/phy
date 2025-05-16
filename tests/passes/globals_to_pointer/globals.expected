@@ -1,0 +1,21 @@
+;$sexp
+(TypeDefs
+  (Array 16 4 4 (Int 4))
+  (Record 32 8
+    (Field 0 (Type 0))
+    (Field 16 (Type 0)))
+  (Union 1 2 (Int 1) (UInt 1)))
+(GlobalDefs
+  (GlobalDef (Int 8) (IntVal 100))
+  (GlobalDef (Int 4) (IntVal 200))
+  (GlobalDef (Ptr)
+    (Data 8 8))
+  (GlobalDef (Ptr)
+    (Data 4 (StringVal "abcd")))
+  (GlobalDef (Ptr)
+    (Data 4 16))
+  (GlobalDef (Ptr)
+    (Data 8 32))
+  (GlobalDef (Ptr)
+    (Data 2 1)))
+(ProcDefs)

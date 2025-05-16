@@ -8,8 +8,7 @@
 ## translation.
 
 import
-  passes/[builders, syntax, trees],
-  vm/utils
+  passes/[builders, syntax, trees]
 
 type
   IrNode* = object

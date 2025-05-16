@@ -18,9 +18,6 @@ import
 
 type
   PassCtx = object
-    # inputs:
-    types: NodeIndex
-
     # productions:
     code: seq[Instr]
     locals: seq[ValueType]
@@ -29,11 +26,12 @@ type
 
     # per-procedure temporary state:
     current: int
-      ## index of the current continuation
+      ## index of the currently processed basic block (=BB)
     patch: seq[tuple[cont: int, instr: int]]
     ehPatch: seq[tuple[cont: int, instr: int]]
     starts: seq[int]
-      ## continuation index -> instruction offset
+      ## BB index -> instruction offset. Needed for implementing
+      ## backwards jumps
 
   Type0Kind = enum
     t0kInt
@@ -45,11 +43,15 @@ type
 
   ProcResult = object
     ## The code generated for a procedure, as well as the additional resources
-    ## needed for the procedure.
+    ## needed by the procedure.
     code: seq[Instr]
     locals: seq[ValueType]
     ehTable: seq[EhMapping]
     constants: seq[TypedValue]
+
+const
+  Type2Value = [t0kInt: vtInt, t0kUInt: vtInt, t0kFloat: vtFloat]
+    ## maps an L0 type to the corresponding VM value type
 
 # shorten some common parameter definitions:
 using
@@ -118,10 +120,9 @@ proc loadFloat(c; f: float) =
 
 proc prepareJump(c; target: int): int32 =
   ## Returns the operand to use for a jump instruction, where `target` is the
-  ## target continuation. The next emitted instruction must be the jump
-  ## instruction.
+  ## target BB. The next emitted instruction must be the jump instruction.
   if target <= c.current:
-    # backwards jump; the target continuation has a start already
+    # backwards jump; the target BB has a start already
     result = int32(c.starts[target] - c.code.len)
   else:
     # forward jump; fill in the target later
@@ -129,14 +130,12 @@ proc prepareJump(c; target: int): int32 =
     c.patch.add (target, c.code.len)
 
 proc jump(c; op: Opcode, target: int; extra = 0'i8) =
-  ## Emits a jump-like instruction targetting the given continuation
-  ## (`target`).
+  ## Emits a jump-like instruction targetting the given BB (`target`).
   let target = c.prepareJump(target)
   c.instr(op, target, extra)
 
 proc exit(c; target: int) =
-  ## Emits the jump at the end of a continuation. The jump is omitted when
-  ## unnecessary.
+  ## Emits the jump at the end of a BB. The jump is omitted when unnecessary.
   if target != c.current + 1:
     c.jump(opcJmp, target)
 
@@ -148,7 +147,8 @@ proc xjump(c; op: Opcode): int =
 
 proc join(c; pc: int) =
   # TODO: remove the jump/branch if it's unnecessary
-  c.code[pc] = Instr(c.code[pc].InstrType or (InstrType(c.code.len - pc) shl instrAShift))
+  c.code[pc] =
+    Instr(c.code[pc].InstrType or (InstrType(c.code.len - pc) shl instrAShift))
 
 proc genExpr(c; tree; val: NodeIndex)
 
@@ -209,14 +209,18 @@ proc genCheckedBinary(c; tree; op: NodeIndex, opc: Opcode) =
   c.instr(opc, int8(parseType(tree, typ).size * 8))
   c.instr(opcPopLocal, tree[op, 3].id)
 
+proc prepareConvOp(c; tree; n: NodeIndex): (Type0, Type0) =
+  let (dst, src, x) = triplet(tree, n)
+  c.genExpr(tree, x)
+  (parseType(tree, dst), parseType(tree, src))
+
 proc loadLocal(c; local: int32) =
   c.instr(opcGetLocal, local)
   # TODO: merge opcPopLocal + opcGetLocal into opcSetLocal, if there's no
   #       label between the two
 
 proc genExpr(c; tree; val: NodeIndex) =
-  ## Generates the code for an expression (`val`), which is ``value`` in the
-  ## grammar.
+  ## Generates the code for an expression (`val`).
   case tree[val].kind
   of IntVal:
     c.loadInt(tree.getInt(val))
@@ -359,50 +363,58 @@ proc genExpr(c; tree; val: NodeIndex) =
       of 4: c.instr(opcReinterpF32)
       else: unreachable()
   of Conv:
-    # numeric conversion
     let
-      dtyp = parseType(tree, tree.child(val, 0))
-      styp = parseType(tree, tree.child(val, 1))
+      (dtyp, styp) = c.prepareConvOp(tree, val)
+      width = int8(dtyp.size * 8)
 
-    c.genExpr(tree, tree.child(val, 2))
     case dtyp.kind
     of t0kInt:
-      case styp.kind
-      of t0kInt, t0kUInt:
-        c.signExtend(dtyp)
-      of t0kFloat:
-        c.instr(opcFloatToSInt, int8(dtyp.size * 8))
+      assert styp.kind == t0kFloat
+      c.instr(opcFloatToSInt, width)
     of t0kUInt:
-      case styp.kind
-      of t0kInt:
-        c.mask(dtyp)
-      of t0kUInt:
-        # the upper bits can only be set if the source type has larger bit-
-        # width than the destination
-        if dtyp.size < styp.size:
-          c.mask(dtyp)
-      of t0kFloat:
-        c.instr(opcFloatToUInt, int8(dtyp.size * 8))
+      assert styp.kind == t0kFloat
+      c.instr(opcFloatToUInt, width)
     of t0kFloat:
       case styp.kind
       of t0kInt:
-        c.instr(opcSIntToFloat, int8(dtyp.size * 8))
+        c.instr(opcSIntToFloat, width)
       of t0kUInt:
-        c.instr(opcUIntToFloat, int8(dtyp.size * 8))
+        c.instr(opcUIntToFloat, width)
       of t0kFloat:
-        if styp.size == 8 and dtyp.size == 4:
-          # demote 64-bit float to 32-bit float value. Reinterpret the bits as
-          # a 32-bit integer (which internally converts to a 32-bit float
-          # first) and then reinterpret the result as a 32-bit float
-          c.instr(opcReinterpI32)
-          c.instr(opcReinterpF32)
+        unreachable()
+      # TODO: demote the result when the destination type is a 32-bit float
+  of Sext:
+    let (dtyp, styp) = c.prepareConvOp(tree, val)
+    c.signExtend(styp)
+    if dtyp.kind == t0kUInt:
+      c.mask(dtyp)
+  of Zext:
+    let (_, styp) = c.prepareConvOp(tree, val)
+    if styp.kind == t0kInt:
+      c.mask(styp) # zero all leading bits
+  of Trunc:
+    let (dtyp, _) = c.prepareConvOp(tree, val)
+    if dtyp.kind == t0kInt:
+      c.signExtend(dtyp)
+    else:
+      c.mask(dtyp)
+  of Demote:
+    # demote 64-bit float to 32-bit float value. Reinterpret the bits as
+    # a 32-bit integer (which internally converts to a 32-bit float
+    # first) and then reinterpret the result as a 32-bit float
+    c.genExpr(tree, tree.child(val, 2))
+    c.instr(opcReinterpI32)
+    c.instr(opcReinterpF32)
+  of Promote:
+    c.genExpr(tree, tree.child(val, 2))
+    # a no-op
   of Call:
     c.genCall(tree, val, 0, ^1)
   else:
     unreachable()
 
 proc genChoice(c; tree; typ: Type0, val, choice: NodeIndex) =
-  ## Generates the code for ``Choice`` tree, where `val` is the selector and
+  ## Generates the code for a ``Choice``, where `val` is the selector and
   ## `typ` the selector's type.
   if tree.len(choice) == 2:
     c.genExpr(tree, val)
@@ -429,25 +441,26 @@ proc genChoice(c; tree; typ: Type0, val, choice: NodeIndex) =
     c.genExpr(tree, val)
     c.genExpr(tree, tree.child(choice, 1))
     c.instr(op)
-    # if in range, jump to the target continuation:
+    # if in range, jump to the target BB:
     c.jump(opcBranch, tree[tree.child(choice, 2), 0].imm, 1)
     # fall through to the next choice otherwise
     c.join(x)
 
 proc genEh(c; tree; exit: NodeIndex) =
-  ## Registers an EH table entry corresponding to `exit`, if necessary.
+  ## If the handler is a local exception handler, registers an EH table entry
+  ## for `exit`.
   case tree[exit].kind
   of Unwind:
     discard "attach nothing"
   of Goto:
-    # register an EH mapping:
+    # register an instruction-to-EH mapping:
     c.ehTable.add (c.code.high.uint32, 0'u32) # patched later
     c.ehPatch.add (tree[exit, 0].imm.int, c.ehTable.high)
   else:
     unreachable()
 
 proc genExit(c; tree; exit: NodeIndex) =
-  ## Generates the code for a continuation exit.
+  ## Emits the code for the exit of a BB.
   case tree[exit].kind
   of Goto:
     c.exit(tree[exit, 0].imm)
@@ -488,7 +501,8 @@ proc genExit(c; tree; exit: NodeIndex) =
     unreachable()
 
 proc start(c; idx: int) =
-  ## Called at the start of generating code for a continuation.
+  ## Called at the start of generating code for a BB. Patches all forward jumps
+  ## targeting the BB.
   var i = 0
   # patch jump instructions:
   while i < c.patch.len:
@@ -511,7 +525,7 @@ proc start(c; idx: int) =
   c.current = idx
 
 proc genStmt(c; tree; n: NodeIndex) =
-  ## Generates the bytecode for a statement (`n`).
+  ## Emits the bytecode for a statement (`n`).
   case tree[n].kind
   of Asgn:
     c.genExpr(tree, tree.child(n, 1))
@@ -557,7 +571,7 @@ proc genStmt(c; tree; n: NodeIndex) =
     unreachable()
 
 proc gen(c; tree; n: NodeIndex) =
-  ## Generates bytecode for the given continuation.
+  ## Emits the bytecode for the given BB.
   case tree[n].kind
   of Except:
     c.instr(opcExcept)
@@ -575,16 +589,15 @@ proc gen(c; tree; n: NodeIndex) =
 
   c.genExit(tree, tree.last(n))
 
-proc translate(tree; types, def: NodeIndex): ProcResult =
-  ## Translates the single procedure body `body` to VM bytecode. `types`
-  ## provides the type environment.
+proc translate(tree; def: NodeIndex): ProcResult =
+  ## Translates the single procedure body `body` to VM bytecode.
   let
     (_, stack, locals) = tree.triplet(def)
     blocks = tree.next(locals)
 
-  var c = PassCtx(types: types)
+  var c = PassCtx()
   # allocate and setup the local variables:
-  c.locals.setLen(tree.len(locals))
+  c.locals.newSeq(tree.len(locals))
   for i, it in tree.pairs(locals):
     let typ = parseType(tree, it)
     c.locals[i] = (if typ.kind == t0kFloat: vtFloat else: vtInt)
@@ -593,7 +606,7 @@ proc translate(tree; types, def: NodeIndex): ProcResult =
   if tree[stack].imm > 0:
     c.instr(opcStackAlloc, int32 tree[stack].imm)
 
-  # generate the code for the continuations. They're expected to be in correct
+  # generate the code for the basic blocks. They're expected to be in correct
   # order:
   c.starts.newSeq(tree.len(blocks))
   for i, it in tree.pairs(blocks):
@@ -618,11 +631,11 @@ proc translate*(module: PackedTree[NodeKind]): VmModule =
     case module[typ].kind
     of ProcTy:
       let start = result.types.params.len
-      # the first type (i.e., return type) needs special handling:
+      # the first operand (i.e., return type) needs special handling:
       if module[typ, 0].kind == Void:
         result.types.params.add(tkVoid)
 
-      # the rest must be type references:
+      # the rest must be anonymous types:
       for it in module.items(typ, result.types.params.len - start):
         const Map = [t0kInt: tkInt, t0kUInt: tkInt, t0kFloat: tkFloat]
         result.types.params.add Map[parseType(module, it).kind]
@@ -631,21 +644,55 @@ proc translate*(module: PackedTree[NodeKind]): VmModule =
     else:
       unreachable()
 
-  # add the defined globals to the environment:
+  var position = 0'u64
+    ## where to place the next memory region at
+
+  # add all globals to the environment:
   for def in module.items(globals):
-    let (typ, val) = module.pair(def)
+    let (typ, init) = module.pair(def)
+    var val: Value
+    case module[init].kind
+    of Data:
+      let (align, content) = module.pair(init)
+      let mask = module.getUInt(align) - 1
+      assert mask <= 4095, "alignment too large"
+      position = (position + mask) and not mask # align the offset
+
+      # the actual address value is only known once the module is linked
+      # into the program; use a relocation
+      result.relocations.add(result.globals.len.int32)
+      val = cast[Value](position)
+
+      case module[content].kind
+      of Immediate:
+        # no explicit content
+        position += module.getUInt(content)
+      of StringVal:
+        result.init.add DataInit(at: position, data: module.getString(content))
+        position += module.getString(content).len.uint64
+      else:
+        unreachable()
+    of IntVal:
+      # signedness doesn't matter here
+      # FIXME: ^^ nonsense! For integer types with a width less than 8 bytes,
+      #        it does matter
+      val = cast[Value](module.getUInt(init))
+    of FloatVal:
+      val = cast[Value](module.getFloat(init))
+    else:
+      unreachable()
+
     result.globals.add:
-      case parseType(module, typ).kind
-      of t0kFloat:
-        TypedValue(val: cast[Value](getFloat(module, val)), typ: vtFloat)
-      of t0kInt, t0kUInt:
-        # signedness doesn't matter here
-        TypedValue(val: cast[Value](getUInt(module, val)), typ: vtInt)
+      TypedValue(val: val, typ: Type2Value[parseType(module, typ).kind])
+
+  # now we know the total size of the module's memory. Make it a multiple
+  # of 4096
+  result.memory = (position + 4095) and not 4095'u64
 
   # generate the code for the procedures and add them to the environment:
   for i, def in module.pairs(procs):
     if module[def].kind == ProcDef:
-      var prc = translate(module, types, def)
+      var prc = translate(module, def)
 
       if prc.constants.len > 0:
         # patch the LdConst instructions:

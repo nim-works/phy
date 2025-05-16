@@ -21,19 +21,27 @@ identifiers to whom a value of the respective type was bound.
 
 Except for type constructors, all non-pattern expressions have a type.
 
-### Data Types
+### Custom Data Types
 
-Abstract data types are defined inductively via the `typ` declaration:
+Custom data types are introduced via the `typ` declaration:
 ```nim
 typ MyList:
   Nil
   Cons(z, MyList)
 ```
 
-`Nil` and `Cons` are *constructors* of `MyList`. `Cons(1, Cons(2, Nil))` is a
-*construction* and has type `MyList`. Multiple constructors may share the same
-name (i.e., they can be overloaded), but they must not have overlapping
-signatures. Constructor names can also be overloaded by other data types.
+`Nil` introduces, if not present already, a nominal unit type, which is
+inhabited by the single term `Nil`.
+
+`Cons` is a *constructor*; `Cons(z, MyList)` is a *pattern type*, inhabited by
+all terms matching the pattern (e.g., `Cons(1, Nil)`, `Cons(2, Nil)`,
+`Cons(3, Cons(1, Nil)))`, etc.). A *pattern type* appearing within a `typ`
+declaration automatically introduces, if not present already, the given
+constructor and pattern type.
+
+`MyList` is the sum between `Nil` and `Cons(z, MyList)`. There must be no
+overlap between the summands -- the set of terms inhabiting a summand must
+be disjoint from those inhabiting other summands.
 
 `subtype` is similar to the `typ` declaration, with the addition that it
 verifies that the defined type is a subtype of the specified base type. An

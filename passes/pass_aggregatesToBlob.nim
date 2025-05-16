@@ -2,13 +2,11 @@
 ## address value arithmetic (|L3| -> |L3|).
 
 import
-  passes/[changesets, syntax, trees],
-  vm/utils
+  passes/[changesets, syntax, trees]
 
 type
-  Node = TreeNode[NodeKind]
   Context = object
-    addrType: Node
+    ptrSize: int
     # per-procedure state:
     locals: NodeIndex
 
@@ -30,11 +28,12 @@ proc resolve(tree; n): NodeIndex =
   else:
     n
 
-proc size(tree; n: NodeIndex): uint =
+proc size(c; tree; n: NodeIndex): uint =
   ## `n` must be the node index of a type description.
   case tree[n].kind
   of Record, Union, Array: tree[n, 0].val.uint
   of Int, UInt, Float:     tree[n].val.uint
+  of Ptr:                  c.ptrSize.uint
   else:                    unreachable()
 
 proc alignment(tree; n: NodeIndex): uint =
@@ -43,12 +42,12 @@ proc alignment(tree; n: NodeIndex): uint =
   of Record, Union, Array: tree[n, 1].val.uint
   else:                    unreachable()
 
-proc elementOffset(tree; n: NodeIndex, elem: uint32): uint =
+proc elementOffset(c; tree; n: NodeIndex, elem: uint32): uint =
   ## `n` must be the node index of a type description.
   case tree[n].kind
   of Union:  0'u
   of Record: tree[tree.child(n, elem + 2), 0].val
-  of Array:  size(tree, tree.resolve(tree.child(n, 3))) * elem
+  of Array:  size(c, tree, tree.resolve(tree.child(n, 3))) * elem
   else:      unreachable()
 
 proc typeOfElem(tree; n: NodeIndex, elem: uint32): NodeIndex =
@@ -77,11 +76,11 @@ proc lowerPath(c; tree; n; bu): VirtualTree =
   for it in tree.items(n, 2):
     if tree[it].kind == Immediate:
       # a static field or array access
-      offset += elementOffset(tree, typ, tree[it].val)
+      offset += elementOffset(c, tree, typ, tree[it].val)
       typ = tree.resolve(typeOfElem(tree, typ, tree[it].val))
     elif tree[it].kind == IntVal:
       # a static array access
-      offset += elementOffset(tree, typ, tree.getInt(it).uint32)
+      offset += elementOffset(c, tree, typ, tree.getInt(it).uint32)
       typ = tree.resolve(typeOfElem(tree, typ, 0))
     else:
       # an array access with a dynamic index
@@ -90,26 +89,27 @@ proc lowerPath(c; tree; n; bu): VirtualTree =
         #       adding new packed numbers
         # add the static offset computed so far:
         result = bu.buildTree:
-          tree(Add, node(c.addrType),
+          tree(Offset,
             embed(result),
-            node(IntVal, offset.uint32))
+            node(IntVal, offset.uint32),
+            node(IntVal, 1))
         offset = 0
 
       typ = tree.resolve(typeOfElem(tree, typ, 0))
 
       # apply the dynamic array element offset:
       result = bu.buildTree:
-        tree(Add, node(c.addrType),
+        tree(Offset,
           embed(result),
-          tree(Mul, node(c.addrType),
-            embed(c.loweredExpr(tree, it, bu)),
-            node(IntVal, size(tree, typ).uint32)))
+          embed(c.loweredExpr(tree, it, bu)),
+          node(IntVal, size(c, tree, typ).uint32))
 
   if offset > 0:
     result = bu.buildTree:
-      tree(Add, node(c.addrType),
+      tree(Offset,
         embed(result),
-        node(IntVal, offset.uint32))
+        node(IntVal, offset.uint32),
+        node(IntVal, 1))
 
 proc lowerExpr(c; tree; n; bu) =
   case tree[n].kind
@@ -154,17 +154,18 @@ proc lowerStmt(c; tree; n; bu) =
     # no statement-specific transformation, just lower the expressions within
     c.lowerExpr(tree, n, bu)
 
-proc lower*(tree; ptrSize: int): ChangeSet[NodeKind] =
+proc lower*(tree; ptrSize: Positive): ChangeSet[NodeKind] =
   ## Computes the changeset representing the lowering for a whole module
   ## (`tree`). `ptrSize` is the size-in-bytes of a pointer value.
 
   # turn all aggregate types into blob types:
   for it in tree.items(tree.child(0)):
     if tree[it].kind in {Record, Union, Array}:
+      let c = Context(ptrSize: ptrSize)
       result.replace it:
         result.buildTree:
           tree(Blob,
-            node(Immediate, uint32 size(tree, it)),
+            node(Immediate, uint32 size(c, tree, it)),
             node(Immediate, uint32 alignment(tree, it)))
 
   # lower the procedures:
@@ -172,8 +173,7 @@ proc lower*(tree; ptrSize: int): ChangeSet[NodeKind] =
     if tree[it].kind == ProcDef:
       let
         (_, locals, body) = tree.triplet(it)
-        c = Context(locals: locals,
-                    addrType: Node(kind: UInt, val: uint32 ptrSize))
+        c = Context(ptrSize: ptrSize, locals: locals)
 
       for blk in tree.items(body):
         for s in tree.items(blk, 1):

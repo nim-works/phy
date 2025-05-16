@@ -1,10 +1,10 @@
 ## Temporary test orchestrator that runs all tests in the ``expr`` directory
-## using the reference implementation from ``languages/source.nim``. This
+## using the reference implementation from ``languages/core.nim``. This
 ## makes sure the reference implementation works as expected.
 
 import
   std/[os, strutils, strscans, streams, parsecfg, options, math],
-  languages/source,
+  languages/core,
   passes/[syntax_source, trees],
   phy/tree_parser,
   spec/[bignums, interpreter, langdefs, rationals]
@@ -31,87 +31,12 @@ const
        files: {:}))
     ## the initial dynamic context to pass to `cstep`
   issues = [ # tests that are currently expected to fail
-    "t03_array_at_eval_order_1.test",
-    "t03_array_at_eval_order_2.test",
-    "t03_array_type_cons.test",
-    "t03_array_type_cons_count_1_error.test",
-    "t03_array_type_cons_count_2_error.test",
-    "t03_array_type_cons_no_void_error.test",
-    "t03_tuple_at_eval_order_1.test",
-    "t03_tuple_at_eval_order_2.test",
-    "t04_empty_module.test",
-    "t04_proc_declaration.test",
-    "t04_type_declaration.test",
-    "t04_type_declaration_no_self_visibility.test",
-    "t05_empty_return_type_mismatch.test",
-    "t05_proc_with_bool_return_type.test",
-    "t05_proc_with_float_return_type.test",
-    "t05_proc_with_int_return_type.test",
-    "t05_proc_with_non_void_body.test",
-    "t05_proc_with_non_void_body_error.test",
-    "t05_proc_with_non_void_body_subtype.test",
-    "t05_proc_with_union_return_type.test",
-    "t05_return_operand_cannot_be_void.test",
-    "t05_return_type_mismatch.test",
-    "t05_unreachable_is_void.test",
-    "t06_call_lookup_error.test",
-    "t06_call_lookup_self_visible.test",
-    "t06_call_proc_with_bool_return_type.test",
-    "t06_call_proc_with_float_return_type.test",
-    "t06_call_proc_with_int_return_type.test",
-    "t06_call_proc_with_tuple_return_type.test",
-    "t06_call_proc_with_unit_return_type.test",
-    "t06_call_proc_with_void_return_type.test",
-    "t06_call_result_field_access.test",
-    "t06_declared_type_usage.test",
-    "t06_disallowed_void_in_union.test",
-    "t06_redeclaration_error_1.test",
-    "t06_redeclaration_error_2.test",
-    "t06_redeclaration_error_3.test",
-    "t09_decl_void_error.test",
-    "t11_scopes_local_cannot_shadow_error_1.test",
-    "t11_scopes_procdef.test",
-    "t13_proc_type_mismatch_error.test",
-    "t13_proc_type_void_parameter_error.test",
-    "t13_proc_value_1.test",
-    "t13_proc_value_2.test",
-    "t13_proc_value_3.test",
-    "t13_usage_in_return.test",
-    "t14_parameters_aggregate_1.test",
-    "t14_parameters_aggregate_2.test",
-    "t14_parameters_aggregate_3.test",
-    "t14_parameters_eval_order_1.test",
-    "t14_parameters_eval_order_2.test",
-    "t14_parameters_immutable_1_error.test",
-    "t14_parameters_immutable_2_error.test",
-    "t14_parameters_immutable_3_error.test",
-    "t14_parameters_primitive_1.test",
-    "t14_parameters_primitive_2.test",
-    "t14_parameters_redeclaration_1_error.test",
-    "t14_parameters_redeclaration_2_error.test",
-    "t14_parameters_void_error.test",
-    "t14_parameters_scoping.test",
-    "t15_while_true.test",
-    "t15_while_true_complex_error.test",
-    "t16_seq_construct_with_void_error.test",
-    "t16_seq_type_with_void_error.test",
-    "t17_seq_concat_to_empty.test",
-    "t17_seq_concat_to_non_empty.test",
-    "t17_seq_copy_4.test",
-    "t18_seq_character_string_1.test",
-    "t18_seq_character_string_2.test",
-    "t19_write.test",
-    "t19_writeErr.test",
     "t20_readFile.test",
     "t20_readFile_missing.test",
-    "t21_record_type_cons_1.test",
-    "t21_record_type_cons_2.test",
-    "t21_record_type_cons_duplicate_field_error.test",
-    "t21_record_type_cons_no_void_error.test",
     "t22_record_type_equality_1.test"
   ]
 
-var typesRel, cstepRel, desugarFnc = -1
+var typesRel, cstepRel, toplevelRel, desugarFnc, reduceModFnc = -1
 
 proc parseSpec(spec: sink string, path: string): TestSpec =
   ## Parses the test specification from `spec`; at least the parts relevant
@@ -147,7 +72,7 @@ template sym(s: string): Node = Node(kind: nkSymbol, sym: s)
 
 proc convertFloat(f: float): Node =
   ## Converts a floating-point value to the representation used by the
-  ## specification (refer to to the `float` type in ``source.nim``).
+  ## specification (refer to to the `float` type in ``core.nim``).
   # 1-bit sign, 11-bit biased exponent, 52-bit mantissa
   const Bias = 1022 + 53
   case classify(f)
@@ -174,7 +99,7 @@ proc convertFloat(f: float): Node =
   of fcNegZero:
     tree(nkConstr, sym("Zero"), Node(kind: nkTrue))
   of fcNan:
-    tree(nkConstr, sym("Nan"))
+    sym("Nan")
   of fcInf:
     tree(nkConstr, sym("Inf"), Node(kind: nkFalse))
   of fcNegInf:
@@ -192,6 +117,10 @@ proc convert(tree: PackedTree[syntax_source.NodeKind], n: NodeIndex): Node =
     tree(nkConstr,
       sym("FloatVal"),
       convertFloat(tree.getFloat(n)))
+  of StringVal:
+    tree(nkConstr,
+      sym("StringVal"),
+      Node(kind: nkString, sym: tree.getString(n)))
   of Ident:
     tree(nkConstr,
       sym("Ident"),
@@ -217,8 +146,6 @@ proc add(res: var string, n: Node) =
         res.add "-inf"
       else:
         res.add "inf"
-    elif n[0].sym == "Nan":
-      res.add "nan"
     elif n[0].sym == "Zero":
       if n[1].kind == nkTrue:
         res.add "-"
@@ -235,15 +162,20 @@ proc add(res: var string, n: Node) =
       res.add n[^1].sym
     else:
       res.add "("
-      for i, it in n.children.pairs:
-        if i > 0:
-          res.add ' '
-        res.add it
+      res.add n[0].sym
+      for i in 1..<n.len:
+        res.add ' '
+        res.add n[i]
       res.add ")"
   of nkNumber:
     res.addRat n.num
   of nkSymbol:
-    res.add n.sym
+    if n.sym == "Nan":
+      res.add "nan"
+    else:
+      res.add "("
+      res.add n.sym
+      res.add ")"
   of nkString:
     res.add escape(n.sym)
   else:
@@ -252,32 +184,69 @@ proc add(res: var string, n: Node) =
 proc `$`(n: Node): string =
   result.add(n)
 
-proc desugar(n: Node): Option[Node] =
-  ## Returns the desugared version of source language expression `n`.
-  let e = tree(nkCall, Node(kind: nkFunc, id: desugarFnc), n)
+proc applyFunc(id: int, n: sink Node): Option[Node] =
+  ## Generic function application.
+  let e = interpret(lang, tree(nkCall, Node(kind: nkFunc, id: id), n))
+  if e.kind == nkFail:
+    none(Node)
+  else:
+    some(e)
+
+proc applyRelation(id: int, n: sink Node): Option[Node] =
+  ## Generic relation application.
   try:
-    some(interpret(lang, e)[0])
-  except Failure:
+    let e = interpret(lang, tree(nkCall, Node(kind: nkRelation, id: id), n))
+    if e.kind == nkFail:
+      none(Node)
+    else:
+      some(e)
+  except KeyError:
     none(Node)
 
-proc types(n: Node): Option[Node] =
-  ## Searches for the type the `types` relation relates `n` to. Returns none
-  ## if there there exists no corresponding type.
-  let e = tree(nkCall, Node(kind: nkRelation, id: typesRel),
-               tree(nkTuple, defaultCtx, n))
-  try:
-    some(interpret(lang, e)[0])
-  except Failure, KeyError:
-    none(Node)
+proc runTest(e: sink Node, spec: TestSpec): string =
+  ## Implements the main testing. Returns an empty string on success.
+  template unpack(res: Option[Node], msg: string): Node =
+    var tmp = res
+    if tmp.isSome: move tmp.get()
+    else:          return msg
 
-proc eval(n: Node): Option[Node] =
-  ## Searches for and returns the irreducible expression `n` reduces to.
-  let e = tree(nkCall, Node(kind: nkRelation, id: cstepRel),
-               tree(nkTuple, defaultDynCtx, n))
-  try:
-    some(interpret(lang, e)[0][1])
-  except Failure, KeyError:
-    none(Node)
+  e = applyFunc(desugarFnc, e).unpack("cannot desugar")
+
+  let
+    isModule = e.kind == nkConstr and e[0].sym == "Module"
+    typ =
+      if isModule:
+        applyRelation(toplevelRel, tree(nkTuple, defaultCtx, e)).
+          map(proc(it: auto): auto = it[1])
+      else:
+        applyRelation(typesRel, tree(nkTuple, defaultCtx, e))
+
+  if spec.reject:
+    if typ.isSome:
+      return "expected type check failure, but got: " & $typ.get
+    else:
+      return ""
+  elif typ.isNone:
+    return "cannot deduce type"
+
+  if spec.deduceOnly:
+    return "" # we're done
+
+  if isModule:
+    e = applyFunc(reduceModFnc, e).unpack("cannot reduce module")
+
+  let val = applyRelation(cstepRel, tree(nkTuple, defaultDynCtx, e)).
+              unpack("cannot reduce")[1]
+  let got = $val & " : " & $typ.get
+  if spec.outputs.len == 0:
+    if isModule and got == "(Unreachable) : (VoidTy)":
+      # XXX: a temporary solution until spectest gets integrated into the
+      #      real test runner
+      discard "ignored"
+    else:
+      result = "an output specification is missing for the test"
+  elif spec.outputs[^1] != got:
+    result = "expected '" & spec.outputs[^1] & "', but got '" & got & "'"
 
 # gather the indices of the relations we need later:
 for i, it in lang.relations.pairs:
@@ -287,18 +256,26 @@ for i, it in lang.relations.pairs:
     typesRel = i
   of "cstep":
     cstepRel = i
+  of "toplevel":
+    toplevelRel = i
 
 for i, it in lang.functions.pairs:
   case it.name
   of "desugar":
     desugarFnc = i
+  of "reduceModule":
+    reduceModFnc = i
 
 if typesRel == -1:
   quit "missing 'mtypes' relation"
 if cstepRel == -1:
   quit "missing 'cstep' relation"
+if toplevelRel == -1:
+  quit "missing 'toplevel' relation"
 if desugarFnc == -1:
   quit "missing 'desugar' function"
+if reduceModFnc == -1:
+  quit "missing 'reduceModule' function"
 
 var total, successful = 0
 
@@ -321,41 +298,12 @@ for (kind, path) in walkDir(getAppDir(), relative=true):
 
     let
       e = convert(fromSexp[syntax_source.NodeKind](s.readAll()), NodeIndex(0))
-      desugared = desugar(e)
+      err = runTest(e, spec)
 
-    var success = false
-    var msg = ""
-    if desugared.isSome:
-      let
-        e {.cursor.} = desugared.get
-        typ = types(e)
-      if spec.reject:
-        success = typ.isNone
-        if not success:
-          msg = "expected type check failure, but got: " & $typ.get
-      else:
-        if typ.isSome:
-          if spec.deduceOnly:
-            success = true
-          else:
-            let val = eval(e)
-            if val.isSome:
-              let got = ($val.get & " : " & $typ.get)
-              if spec.outputs[^1] == got:
-                success = true
-              else:
-                msg = "expected '" & spec.outputs[^1] & "', but got '" & got & "'"
-            else:
-              msg = "cannot reduce"
-        else:
-          msg = "cannot deduce type"
-    else:
-      msg = "cannot desugar"
-
-    if not success:
+    if err != "":
       if path notin issues:
         echo "test failed: ", path
-        echo msg
+        echo err
         programResult = 1
       # else: failure is expected
     else:

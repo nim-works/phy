@@ -1,14 +1,14 @@
-## Provides a reference implementation of the source language, written using
-## Phy's meta-language. The formal definition is derived from the reference
+## Provides a reference implementation of the *core language*, written using
+## Phy's meta language. The formal definition is derived from the reference
 ## implementation.
 ##
-## This is the one and only authoritative definition of the source language.
+## This is the one and only authoritative definition of the core language.
 ##
 ## As with most language-related things, the reference implementation /
 ## definition is a **work in progress**.
 ##
-## **Important:** as is, the language definition **does not** match
-## the originally intended semantics. This'll be fixed eventually.
+## At the moment, the *core* language is still mixed with the *source*
+## language, but this is going to change.
 
 import
   spec/[langdefs]
@@ -73,6 +73,7 @@ const lang* = language:
     Decl(ident, expr)
 
     Let(ident, expr, expr)
+    Letrec(ident, expr, expr)
 
     # syntax not available at the source level:
     True
@@ -213,9 +214,25 @@ const lang* = language:
     of e_1:
       update(e_1, declToLet)
 
-  func desugar(a: expr) -> expr =
+  func desugarExpr(a: expr) -> expr =
     # first expand all sugar, then transform all decls
     declToLet(expand(a))
+
+  func desugarDecl(d: decl) -> decl =
+    case d
+    of ProcDecl(x_1, texpr_1, Params(*paramDecl_1), e_1):
+      ProcDecl(x_1, texpr_1, Params(...paramDecl_1), desugarExpr(e_1))
+    of TypeDecl(x_1, texpr_1):
+      TypeDecl(x_1, texpr_1)
+
+  func desugar(a: module+decl+expr) -> module+decl+expr =
+    case a
+    of e_1:
+      desugarExpr(e_1)
+    of decl_1:
+      Module(desugarDecl(decl_1))
+    of Module(*decl_1):
+      Module(...desugarDecl(decl_1))
 
   ## Type Relations
   ## --------------
@@ -426,7 +443,8 @@ const lang* = language:
 
     rule "S-seq-cons":
       premise ttypes(C_1, texpr_1, typ_1)
-      premise ...types(C_1, e_2, typ_2)
+      condition typ_1 != VoidTy()
+      premise ...mtypes(C_1, e_2, typ_2)
       condition ...(typ_2 <:= typ_1)
       conclusion C_1, Seq(texpr_1, *e_2), SeqTy(typ_1)
 
@@ -434,11 +452,12 @@ const lang* = language:
 
     rule "S-return":
       premise mtypes(C_1, e_1, typ_1)
+      condition typ_1 != VoidTy()
       condition typ_1 <:= C_1.ret
       conclusion C_1, Return(e_1), VoidTy()
 
     rule "S-return-unit":
-      condition C_1.ret == UnitTy()
+      condition UnitTy() <:= C_1.ret
       conclusion C_1, Return(), VoidTy()
 
     rule "S-field":
@@ -509,9 +528,25 @@ const lang* = language:
       condition string_1 notin C_1.symbols
       condition string_1 notin builtIn
       premise mtypes(C_1, e_1, typ_1)
+      condition typ_1 != VoidTy()
       let C_2 = C_1 + C(symbols: {string_1: mut(typ_1)})
       premise mtypes(C_2, e_2, typ_2)
       conclusion C_1, Let(Ident(string_1), e_1, e_2), typ_2
+
+    rule "S-letrec":
+      condition string_1 notin C_1.symbols
+      condition string_1 notin builtIn
+      condition ...(string_2 notin C_1.symbols)
+      condition ...(string_2 notin builtIn)
+      premise ttypes(C_1, texpr_1, typ_1)
+      premise ...ttypes(C_1, texpr_2, typ_2)
+      let typ_3 = ProcTy(typ_1, ...typ_2)
+      let C_2 = C_1 + C(symbols: {string_1: typ_3})
+      let C_3 = C_2 + C(symbols: map(zip(string_2, typ_2)), ret: typ_1)
+      # the procedure symbol is visible to the initializer expression
+      premise mtypes(C_3, e_1, typ)
+      premise mtypes(C_2, e_2, typ_4)
+      conclusion C_1, Letrec(Ident(string_1), `proc`(texpr_1, *[Ident(string_2), texpr_2], e_1), e_2), typ_4
 
     rule "S-exprs":
       premise ...mtypes(C_1, e_1, UnitTy())
@@ -548,13 +583,14 @@ const lang* = language:
     rule "S-while":
       premise mtypes(C_1, e_1, BoolTy())
       premise mtypes(C_1, e_2, typ_1)
+      condition not same(e_1, Ident("true"))
       condition typ_1 in {VoidTy(), UnitTy()}
       conclusion C_1, While(e_1, e_2), UnitTy()
 
-    rule "S-while":
+    rule "S-while-true":
       premise mtypes(C_1, e_1, typ_1)
       condition typ_1 in {VoidTy(), UnitTy()}
-      conclusion C_1, While(True, e_1), VoidTy()
+      conclusion C_1, While(Ident("true"), e_1), VoidTy()
 
     rule "S-builtin-not":
       premise mtypes(C_1, e_1, typ_1)
@@ -632,7 +668,7 @@ const lang* = language:
       premise mtypes(C_1, e_1, SeqTy(typ_1))
       premise mtypes(C_1, e_2, typ_2)
       condition typ_2 <:= typ_1
-      conclusion C_1, Call(Ident("concat"), e_1, e_2), UnitTy()
+      conclusion C_1, Call(Ident("concat"), e_1, e_2), SeqTy(typ_1)
 
     rule "S-builtin-write":
       premise mtypes(C_1, e_1, SeqTy(CharTy()))
@@ -676,14 +712,19 @@ const lang* = language:
       condition typ_2 <:= typ_3
       conclusion C_1, With(e_1, n_1, e_2), typ_3
 
-  inductive toplevel(inp C, inp (decl + module), out C):
+  inductive toplevel(inp C, inp (decl + module), out C, out typ):
     rule "S-type-decl":
+      condition string_1 notin C_1.symbols
+      condition string_1 notin builtIn
       premise ttypes(C_1, texpr_1, typ_1)
       where C_2, C_1 + C(symbols: {string_1: type(typ_1)})
-      conclusion C_1, TypeDecl(Ident(string_1), texpr_1), C_2
+      conclusion C_1, TypeDecl(Ident(string_1), texpr_1), C_2, VoidTy()
 
     rule "S-proc-decl":
       condition string_1 notin C_1.symbols
+      condition string_1 notin builtIn
+      condition ...(string_2 notin C_1.symbols)
+      condition ...(string_2 notin builtIn)
       condition unique(string_2) # all symbols must be unique
       condition string_1 notin string_2
       premise ttypes(C_1, texpr_1, typ_1)
@@ -694,14 +735,25 @@ const lang* = language:
       let C_3 = C_2 + C(ret: typ_1, symbols: map(zip(string_2, typ_2)))
       premise types(C_3, e_1, typ_4)
       condition typ_4 <:= typ_1
-      conclusion C_1, ProcDecl(Ident(string_1), texpr_1, Params(*ParamDecl(Ident(string_2), texpr_2)), e_1), C_2
+      conclusion C_1, ProcDecl(Ident(string_1), texpr_1, Params(*ParamDecl(Ident(string_2), texpr_2)), e_1), C_2, typ_3
 
-    axiom "S-empty-module", C_1, Module(), C_1
+    axiom "S-empty-module", C_1, Module(), C_1, VoidTy()
+
+    rule "S-module-single-proc":
+      # a trailing procedure must have no parameters
+      where ProcDecl(x, typ, Params(), e), decl_1
+      premise toplevel(C_1, decl_1, C_2, ProcTy(typ_1))
+      conclusion C_1, Module(decl_1), C_2, typ_1
+
+    rule "S-module-single-type":
+      where TypeDecl(x, texpr), decl_1
+      premise toplevel(C_1, decl_1, C_2, typ)
+      conclusion C_1, Module(decl_1), C_2, VoidTy()
 
     rule "S-module":
-      premise toplevel(C_1, decl_1, C_2)
-      premise toplevel(C_2, Module(...decl_2), C_3)
-      conclusion C_1, Module(decl_1, *decl_2), C_3
+      premise toplevel(C_1, decl_1, C_2, typ)
+      premise toplevel(C_2, Module(...decl_2), C_3, typ_1)
+      conclusion C_1, Module(decl_1, +decl_2), C_3, typ_1
 
   # TODO: the static semantics also needs to describe how a `(Module ...)` is
   #      reduced to a `(proc ...)` value, which is what a program is, in the
@@ -711,12 +763,6 @@ const lang* = language:
   ## -----------------
   ##
   ## The semantics describing how expressions reduce to values.
-  ##
-  ## It is assumed that all identifiers referring to procedures were replaced
-  ## with `(proc r [x p]* body)` prior to evaluation, where `x` and `p` are
-  ## the names and types of the procedure's parameters, `r` is the procedure's
-  ## return type, and `body` is the procedure's body.
-  # TODO: ^^ this must be made explicit in the semantics
 
   ## Auxiliary Functions
   ## ~~~~~~~~~~~~~~~~~~~
@@ -729,6 +775,8 @@ const lang* = language:
       Exprs(...(substitute(e_1, with)))
     of Let(ident_1, e_1, e_2):
       Let(ident_1, substitute(e_1, with), substitute(e_2, with))
+    of Letrec(ident_1, e_1, e_2):
+      Letrec(ident_1, substitute(e_1, with), substitute(e_2, with))
     of If(e_1, e_2, e_3):
       If(substitute(e_1, with), substitute(e_2, with), substitute(e_3, with))
     of Match(e_1, +Rule(As(x_1, texpr_1), e_2)):
@@ -755,6 +803,8 @@ const lang* = language:
       While(substitute(e_1, with), substitute(e_2, with))
     of Return(e_1):
       Return(substitute(e_1, with))
+    of `proc`(typ_1, *[x_2, typ_2], e_1):
+      `proc`(typ_1, ...[x_2, typ_2], substitute(e_1, with))
     of Ident(string_1):
       # the actual substitution
       if string_1 in with:
@@ -1140,11 +1190,6 @@ const lang* = language:
               files: ((string, z) -> val)} # name + time -> content
   ## `DC` is the dynamic context
 
-  func utf8Bytes(_: string) -> *z
-    # TODO: the function is mostly self-explanatory, but it should be defined in
-    #       a bit more detail nonetheless
-    ##
-
   ## Evaluation Contexts
   ## ~~~~~~~~~~~~~~~~~~~
 
@@ -1204,9 +1249,8 @@ const lang* = language:
     Return(hole)
 
   context B:
-    E
-    #E[B]
-    # FIXME: not allowed according to the new rules. Needs a workaround...
+    hole
+    E[B]
     Frame(typ, B)
 
   ## Reductions and Steps
@@ -1226,13 +1270,13 @@ const lang* = language:
     axiom "E-while", While(e_1, e_2), If(e_1, Exprs(e_2, While(e_1, e_2)), TupleCons())
 
     rule "E-match-success":
-      premise types(C(ret: VoidTy), val_1, typ_1)
+      premise types(C(ret: VoidTy()), val_1, typ_1)
       condition typ_1 == texpr_1
       conclusion Match(val_1, Rule(As(Ident(string_1), texpr_1), e_1), *any),
                  substitute(e_1, {string_1 : val_1})
 
     rule "E-match-next":
-      premise types(C(ret: VoidTy), val_1, typ_1)
+      premise types(C(ret: VoidTy()), val_1, typ_1)
       condition typ_1 != texpr_1
       conclusion Match(val_1, Rule(As(x, texpr_1), e), +rule_1),
                  Match(val_1, ...rule_1)
@@ -1254,6 +1298,10 @@ const lang* = language:
           Asgn(le_1, With(le_1, string_1, val_1))
 
     axiom "E-seq-cons", Seq(typ, *val_1), `array`(...val_1)
+
+    rule "E-string-cons":
+      let b = bytes(string_1)
+      conclusion Seq(StringVal(string_1)), array(...char(b))
 
     rule "E-at":
       condition 0 <= n_1
@@ -1383,10 +1431,6 @@ const lang* = language:
       conclusion Call(val_1, *val_2), Frame(typ_r, e_2)
 
   inductive reducesTo(inp DC, inp e, out DC, out e):
-    rule "E-string-cons":
-      # FIXME: doesn't need to be an impure reduction
-      where *z_1, utf8Bytes(string_1)
-      conclusion DC_1, Seq(StringVal(string_1)), DC_1, array(...IntVal(z_1))
 
     rule "E-let-introduce":
       let z_1 = DC_1.nloc
@@ -1399,6 +1443,13 @@ const lang* = language:
     #       first-class locations (e.g., pointers) in the source language.
     #       Removing the location from the store could be achieved via a new
     #       `(Pop x)` construct, where `(Let x val e)` reduces to `(Pop x e)`
+
+    rule "E-letrec":
+      let z_1 = DC_1.nloc
+      where val_2, substitute(val_1, {string_1: loc(z_1)})
+      let DC_2 = DC_1 + DC(locs: {z_1 : val_2}, nloc: z_1 + 1)
+      let e_2 = substitute(e_1, {string_1: loc(z_1)})
+      conclusion DC_1, Letrec(Ident(string_1), val_1, e_1), DC_2, e_2
 
     rule "E-asgn":
       let DC_2 = DC_1 + DC(locs: {z_1 : val_1})
@@ -1427,27 +1478,32 @@ const lang* = language:
   inductive step(inp DC, inp e, out DC, out e):
     rule "E-reduce-pure":
       premise pReducesTo(e_1, e_2)
-      conclusion DC_1, E_1[e_1], DC_1, E_1[e_2]
+      conclusion DC_1, B_1[e_1], DC_1, B_1[e_2]
 
     rule "E-reduce-impure":
       premise reducesTo(DC_1, e_1, DC_2, e_2)
-      conclusion DC_1, E_1[e_1], DC_2, E_1[e_2]
+      conclusion DC_1, B_1[e_1], DC_2, B_1[e_2]
 
     rule "E-load":
       # an automatic load only takes place:
       # * outside of lvalue positions
       # * in the root of otherwise fully evaluated lvalue expressions
-      conclusion DC_1, E_1[F_1[L_1[loc(z_1)]]],
-                 DC_1, E_1[F_1[L_1[DC_1.locs(z_1)]]]
+      conclusion DC_1, B_1[F_1[L_1[loc(z_1)]]],
+                 DC_1, B_1[F_1[L_1[DC_1.locs(z_1)]]]
     rule "E-load-top":
       # top-level version of E-load
       conclusion DC_1, L_1[loc(z_1)],
                  DC_1, L_1[DC_1.locs(z_1)]
 
     rule "E-return":
-      conclusion DC_1, B_1[Frame(typ, E_1[Return(val_1)])], DC_1, B_1[val_1]
+      conclusion DC_1, B_1[Frame(typ_1, E_1[Return(val_1)])],
+                 DC_1, B_1[Frame(typ_1, val_1)]
     rule "E-return-unit":
-      conclusion DC_1, B_1[Frame(typ, E_1[Return()])], DC_1, B_1[TupleCons()]
+      conclusion DC_1, B_1[Frame(typ_1, E_1[Return()])],
+                 DC_1, B_1[Frame(typ_1, TupleCons())]
+    rule "E-unwind":
+      conclusion DC_1, B_1[Frame(typ, val_1)],
+                 DC_1, B_1[val_1]
 
     rule "E-unreachable":
       conclusion DC_1, B_1[Unreachable()], DC_1, Unreachable()
@@ -1462,6 +1518,20 @@ const lang* = language:
     # ^^ progress. That is, a valid expression is either an irreducible value,
     # or it must be reducible
     ]#
+
+  func reduceModule(a: module) -> expr =
+    ## Describes how a module is reduced to an expression.
+    case a
+    of Module(ProcDecl(x_1, typ_1, Params(), e_1)):
+      # the trailing procedure declaration is the main procedure; it's called
+      # implicitly
+      Letrec(x_1, `proc`(typ_1, e_1), Call(x_1))
+    of Module(ProcDecl(x_1, typ_1, Params(*ParamDecl(x_2, typ_2)), e_1), *TypeDecl(x, texpr), +decl_1):
+      Letrec(x_1, `proc`(typ_1, ...[x_2, typ_2], e_1), reduceModule(Module(...decl_1)))
+    of Module(*TypeDecl(x, texpr)):
+      Unreachable()
+    of Module(+TypeDecl(x, texpr), +decl_1):
+      reduceModule(Module(...decl_1))
 
   inductive cstep(inp DC, inp e, out DC, out e):
     ## Transitive closure of `step`. Relates an expression to the irreducible

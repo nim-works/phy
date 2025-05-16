@@ -3,15 +3,12 @@
 ## (|L2| -> |L1|).
 
 import
-  passes/[changesets, syntax, trees],
-  vm/utils
+  passes/[changesets, syntax, trees]
 
 type
   Node = TreeNode[NodeKind]
 
   Context = object
-    addrType: Node
-
     # per-procedure state:
     locals: seq[tuple[onStack: bool, offset: uint32]]
       ## for stack locations, `offset` is the byte offset of the location.
@@ -32,7 +29,7 @@ func isBlob(tree; n): bool =
   case tree[n].kind
   of Blob: true
   of Type: tree[tree.child(0), tree[n].val].kind == Blob
-  of Int, UInt, Float: false
+  of Int, UInt, Float, Ptr: false
   else:    unreachable()
 
 func sizeAndAlign(tree, n): (uint32, uint32) =
@@ -60,13 +57,14 @@ proc lowerInExpr(c: Context; tree; n; bu) =
       bu.replace n:
         bu.buildTree tree(Copy, node(c.framePointer))
     else:
-      # XXX: the transformation introduces an unnecessary addition when the
-      #      Addr is used as the operand to a static addition
+      # XXX: it could make sense to try merging the offset computation into
+      #      an enclosing one, where possible
       bu.replace n:
         bu.buildTree:
-          tree(Add, node(c.addrType),
+          tree(Offset,
             tree(Copy, node(c.framePointer)),
-            node(IntVal, c.locals[local].offset))
+            node(IntVal, c.locals[local].offset),
+            node(IntVal, 1))
 
   else:
     for it in tree.filter(n, {Local, Addr}):
@@ -117,7 +115,7 @@ proc lowerProc(c: var Context; tree; n; bu) =
           bu.remove(t, it)
 
       # add the frame-pointer local to the list of locals:
-      bu.insert t, tree.fin(localsNode), c.addrType
+      bu.insert t, tree.fin(localsNode), Node(kind: Ptr)
 
     for i, blk in tree.pairs(blocks):
       let params = tree.child(blk, 0)
@@ -134,10 +132,10 @@ proc lowerProc(c: var Context; tree; n; bu) =
       for s in tree.items(blk, 1): # go over all statements
         c.lowerInExpr(tree, s, bu)
 
-proc lower*(tree; ptrSize: int): ChangeSet[NodeKind] =
+proc lower*(tree): ChangeSet[NodeKind] =
   ## Computes the changeset representing the lowering for a whole module
-  ## (`tree`). `ptrSize` is the size-in-bytes of a pointer value.
-  var c = Context(addrType: Node(kind: UInt, val: ptrSize.uint32))
+  ## (`tree`).
+  var c = Context()
 
   for it in tree.items(tree.child(2)):
     if tree[it].kind == ProcDef:

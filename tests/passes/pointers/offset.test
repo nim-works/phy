@@ -1,0 +1,39 @@
+discard """
+  description: "Make sure `Offset` and its operands are lowered correctly"
+"""
+(TypeDefs
+  (ProcTy (Void)))
+(GlobalDefs)
+(ProcDefs
+  (ProcDef (Type 0) 32
+    (Locals (Ptr))
+    (List
+      (Block (Params (Local 0))
+        (Drop
+          (Offset
+            (Copy (Local 0))
+            (IntVal 8)
+            (IntVal 1)))
+        (Drop
+          (Offset
+            (Copy (Local 0))
+            (IntVal 8)
+            (IntVal 2)))
+        (Drop
+          (Offset
+            (Offset
+              (Copy (Local 0))
+              (IntVal 8)
+              (IntVal 2))
+            (IntVal 8)
+            (IntVal 2)))
+        (Drop
+          (Offset
+            (Copy (Local 0))
+            (Load (UInt 8)
+              (Offset
+                (Copy (Local 0))
+                (IntVal 8)
+                (IntVal 1)))
+            (IntVal 2)))
+        (Return))))))

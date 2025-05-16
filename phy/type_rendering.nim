@@ -6,8 +6,7 @@ import
   ],
   phy/[
     types
-  ],
-  vm/utils
+  ]
 
 proc typeToString*(typ: SemType): string =
   ## Returns the text representation of `typ` meant for diagnostic messages
@@ -66,6 +65,8 @@ proc typeToString*(typ: SemType): string =
     res
   of tkSeq:
     "seq(" & typeToString(typ.elems[0]) & ")"
+  of tkPointer:
+    unreachable("pointer types should never reach rendering")
   of tkError:
     # diagnostic messages should not show error types, therefore rendering is
     # not implemented for them. If control-flow reaches here, it usually means
@@ -112,5 +113,5 @@ proc typeToSexp*(typ: SemType): SexpNode =
     res
   of tkSeq:
     newSList(newSSymbol("SeqTy"), typeToSexp(typ.elems[0]))
-  of tkError:
+  of tkPointer, tkError:
     unreachable()

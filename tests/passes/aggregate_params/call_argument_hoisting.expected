@@ -2,12 +2,12 @@
 (TypeDefs
   (Record 4 4
     (Field 0 (Int 4)))
-  (ProcTy (Void) (Int 4) (UInt 8) (Int 4))
+  (ProcTy (Void) (Int 4) (Ptr) (Int 4))
   (ProcTy (Void)))
 (GlobalDefs)
 (ProcDefs
   (ProcDef (Type 1)
-    (Locals (Int 4) (UInt 8) (Int 4))
+    (Locals (Int 4) (Ptr) (Int 4))
     (List
       (Block
         (Params (Local 0) (Local 1) (Local 2))

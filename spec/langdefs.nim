@@ -17,9 +17,8 @@ type
     # important: the ordinal values of the shared fields must be identical; the
     # conversion logic relies on it
     tkAll, tkVoid, tkBool, tkInt, tkRat, tkList, tkFunc, tkTuple, tkRecord,
-    tkData, tkSum
+    tkPat, tkSum
 
-    tkPat  ## type of a pattern-based constructor
     tkVar  ## type variable that's not fully resolved yet
     tkForall ## forall(t..., t) - a type with variables
     tkOr   ## an existential type. **Not a sum type**
@@ -28,12 +27,12 @@ type
     ## A ref type is used because the shared ownership makes the type checker
     ## much easier to implement.
     case kind: TypeKind
-    of tkAll, tkBool, tkInt, tkRat, tkPat, tkVoid:
+    of tkAll, tkBool, tkInt, tkRat, tkVoid:
       discard
     of tkVar:
       id: int
-    of tkData:
-      constr*: seq[types.Node[Type]]
+    of tkPat:
+      pat*: types.Node[Type]
     of tkFunc, tkTuple, tkSum, tkForall, tkList, tkOr:
       children: seq[Type]
     of tkRecord:
@@ -44,7 +43,8 @@ type
   SymKind = enum
     skDef
     skType
-    skConstr   ## type constructor
+    skConstr   ## value constructor
+    skValue    ## named value
     skContext
     skVar
     skFunc
@@ -58,7 +58,7 @@ type
       overloads: seq[Sym]
     of skDef:
       e: Node
-    of skConstr, skType, skContext, skFunc, skRelation, skVar:
+    of skConstr, skValue, skType, skContext, skFunc, skRelation, skVar:
       typ: Type
       id: int
 
@@ -99,7 +99,8 @@ using
   c: var Context
 
 const
-  InTuplePat = {nkTrue, nkFalse, nkNumber, nkString, nkType, nkTuple, nkConstr}
+  InTuplePat = {nkTrue, nkFalse, nkNumber, nkString, nkType, nkTuple,
+                nkConstr, nkSymbol}
   InConstrPat = InTuplePat + {nkGroup, nkZeroOrMore, nkOneOrMore}
   OfBranchPat = InConstrPat + {nkVar}
   AllPat = OfBranchPat + {nkPlug}
@@ -147,7 +148,6 @@ proc `$`(t: Type): string =
   of tkRat: "rat"
   of tkBool: "bool"
   of tkFunc: $t[0] & " -> " & $t[1]
-  of tkData: "data(...)"
   of tkList: "*" & $t[0]
   of tkPat:  "..."
   of tkVar:  "tvar:" & $t.id
@@ -256,11 +256,14 @@ proc toExpr(c; s: Sym): Node =
         it.incl s.id # register the variable with the unpack context
   of skContext:
     result = Node(kind: nkContext, id: s.id, typ: s.typ)
+  of skValue:
+    result = s.typ.pat
+    result.typ = s.typ
   of skConstr:
-    result = s.typ.constr[s.id][0]
+    result = s.typ.pat[0]
   of skOverload:
     let b = s.overloads[0]
-    result = b.typ.constr[b.id][0]
+    result = b.typ.pat[0]
 
 proc skip(c; a: Type): Type =
   ## Skips linked type variables, only returning type variables that never
@@ -353,7 +356,7 @@ proc fits(c; b, a: Type): TypeRel
 
 proc fitsC(c; b, a: Type): TypeRel =
   ## Cached version of ``fits``.
-  if b.kind != tkVar and a.kind in {tkFunc, tkRecord, tkTuple, tkData}:
+  if b.kind != tkVar and a.kind in {tkFunc, tkRecord, tkTuple, tkSum}:
     # don't cache type variable relations, as those aren't stable
     c.typerelCache.withValue (b, a), val:
       result = val[]
@@ -481,14 +484,14 @@ proc fits(c; b, a: Type): TypeRel =
       relSubtype
     else:
       relNone
-  of tkData:
-    if b.kind == tkData:
-      # every construction that's part of `b` must also be part of `a` (but
+  of tkPat:
+    if b.kind == tkPat:
+      # every value that's part of `b` must also be part of `a` (but
       # not the other way around)
-      for it in b.constr.items:
-        if not matchesType(c, a, it):
-          return relNone
-      relSubtype
+      if matchesType(c, a, b.pat):
+        relSubtype
+      else:
+        relNone
     else:
       relNone
   of tkSum:
@@ -640,23 +643,45 @@ proc matchesPattern(c; pat, term: Node): bool =
   else:
     unreachable()
 
+proc samePattern(a, b: Node): bool =
+  ## Returns whether `a` and `b` denote the exact same set of values.
+  if a.kind != b.kind:
+    return false
+
+  case a.kind
+  of nkSymbol:
+    a.sym == b.sym
+  of nkType:
+    a.typ == b.typ
+  of nkConstr, nkGroup, nkTuple:
+    # FIXME: the comparison isn't entirely correct. For example: "a a*" and
+    #        "a+" are considered not equal, even though they match exactly the
+    #        same set of sequences
+    if a.len == b.len:
+      for i in 0..<a.len:
+        if not samePattern(a[i], b[i]):
+          return false
+      true
+    else:
+      false
+  of nkZeroOrMore, nkOneOrMore:
+    samePattern(a[0], b[0])
+  else:
+    unreachable()
+
 proc matchesType(c; typ: Type, n: Node): bool =
   ## Answers the question: "does expression `n` inhabit `typ`".
-  if typ.kind == tkSum:
+  if typ.kind == tkSum and n.kind in {nkSymbol, nkConstr, nkTuple}:
     for it in typ.children.items:
       if matchesType(c, it, n):
         return true
     return false
 
   case n.kind
+  of nkSymbol:
+    typ.kind == tkPat and typ.pat.kind == nkSymbol and typ.pat.sym == n.sym
   of nkConstr:
-    if typ.kind == tkData:
-      for it in typ.constr.items:
-        if matchesPattern(c, it, n):
-          return true
-      false
-    else:
-      false
+    typ.kind == tkPat and matchesPattern(c, typ.pat, n)
   of nkTuple:
     if typ.kind == tkTuple and typ.children.len == n.len:
       for i, it in typ.children.pairs:
@@ -686,12 +711,12 @@ proc typeConstr(c; n: var Node, info: NimNode, isPattern: static[bool]) =
   let s = c.lookup[n[0].sym]
   case s.kind
   of skConstr:
-    if match(s.typ.constr[s.id], n):
+    if match(s.typ.pat, n):
       n.typ = s.typ
   of skOverload:
     var cand: seq[Type]
     for it in s.overloads.items:
-      if match(it.typ.constr[it.id], n):
+      if match(it.typ.pat, n):
         cand.add it.typ
     if cand.len == 1:
       n.typ = cand[0]
@@ -750,7 +775,9 @@ proc finishUnpack(body: Node, vars: HashSet[int], info: NimNode): Node =
     # order doesn't matter...
     result.add tree(nkBind, Node(kind: nkVar, id: it), Node(kind: nkVar, id: it))
   result.add body
-  result.typ = listT(body.typ)
+  # unpack expressions with no type are okay
+  if body.typ != nil:
+    result.typ = listT(body.typ)
 
 proc semBindingName(c; n: NimNode, typ: Type): Node =
   ## Makes sure `n` is a valid identifier for a binding and - if so -
@@ -786,9 +813,9 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
     result = toExpr(c, resolveIdent(c, n))
     if result.kind == nkType:
       error("cannot use type here", n)
-    elif result.typ.kind == tkPat and not isHead:
-      result = tree(nkConstr, result)
-      typeConstr(c, result, n, isPattern=false)
+    elif result.kind == nkSymbol:
+      if result.typ.isNil and not isHead:
+        error("cannot use constructor symbol here", n)
     elif result.typ.kind == tkForall:
       result.typ = c.instantiate(result.typ)
   of nnkIntLit:
@@ -850,7 +877,9 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
     let callee = semExpr(c, n[0], false, isHead=true)
     var call: Node
     var sig: Type
-    if callee.typ.kind == tkVar:
+    # TODO: there are too many separate but related 'if' statements
+    #       here -> refactor
+    if callee.typ != nil and callee.typ.kind == tkVar:
       # try to infer the type as a function type
       let t = skip(c, callee.typ)
       if c.tvars[t.id].curr.kind == tkFunc:
@@ -863,12 +892,13 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
     else:
       sig = callee.typ
 
-    var isConstr = false
     if callee.kind == nkSymbol:
-      # must be a construction expression, which is typed based on shape
-      call = Node(kind: nkConstr)
-      call.add callee
-      isConstr = true
+      if callee.typ.isNil:
+        # must be a construction expression, which is typed based on shape
+        call = Node(kind: nkConstr)
+        call.add callee
+      else:
+        error(fmt"'{callee.sym}' is not a value kind", n[0])
     elif sig.kind == tkFunc:
       call = Node(kind: nkCall)
       call.add callee
@@ -883,21 +913,29 @@ proc semExpr(c; n: NimNode; inConstr, isHead=false): Node =
         if not it.input:
           error("relations that bind are only allowed in a 'premise'", n)
 
-    for i in 1..<n.len:
-      let x = recurse(n[i], isConstr)
-      # function applications are type-checked right away
-      if sig.kind == tkFunc:
+    if sig != nil and sig.kind == tkFunc:
+      for i in 1..<n.len:
+        let x = recurse(n[i], false)
         check(c, getParam(sig, i - 1), x.typ, n[i])
-      call.add x
+        call.add x
 
-    if callee.kind == nkSymbol:
-      if not inConstr:
-        typeConstr(c, call, n, isPattern=false)
-      # else: only start typing from the top-level construction expression
+      call.typ = sig[1]
       result = call
     else:
-      # typed directly
-      call.typ = sig[1]
+      # it's a value construction expressions
+      for i in 1..<n.len:
+        if n[i].kind == nnkPrefix and n[i][0].eqIdent("...") and
+           n[i][1].kind == nnkBracket:
+          # group unpacking is allowed in constructions
+          c.unpacked.add initHashSet[int](0) # push an unpack context
+          var body = Node(kind: nkGroup)
+          for it in n[i][1].items:
+            body.add recurse(it, true)
+          call.add finishUnpack(body, c.unpacked.pop(), n[i])
+        else:
+          call.add recurse(n[i], true)
+
+      typeConstr(c, call, n, isPattern=false)
       result = call
   of nnkBracketExpr:
     let a = recurse(n[0])
@@ -974,7 +1012,7 @@ proc semPatternIdent(c; n: NimNode, accept: set[NodeKind]): Node =
   of nnkIdent:
     var name = n.strVal
     if name == "_":
-      return Node(kind: nkType, typ: Type(kind: tkAll))
+      return Node(kind: nkType, typ: Type(kind: tkVoid))
 
     let sub = name.find('_')
     if sub != -1:
@@ -985,7 +1023,8 @@ proc semPatternIdent(c; n: NimNode, accept: set[NodeKind]): Node =
     elif name in c.lookup:
       result = toExpr(c, c.lookup[name])
       if result.kind == nkSymbol:
-        result = tree(nkConstr, result) # auto-expand
+        if result.typ.isNil:
+          error("constructor symbol cannot be used as pattern", n)
       elif result.kind notin {nkContext, nkHole, nkType, nkTrue, nkFalse}:
         error("only contexts, values, and types may be used as a pattern", n)
 
@@ -1042,8 +1081,6 @@ proc semPattern(c; n: NimNode; accept: set[NodeKind], check = true): Node =
   case n.kind
   of nnkIdent, nnkAccQuoted:
     result = semPatternIdent(c, n, accept)
-    if result.kind == nkConstr and check:
-      typeConstr(c, result, n, isPattern=true)
   of nnkIntLit:
     require(nkNumber, "number not allowed in this context")
     result = Node(kind: nkNumber, num: rational(n.intVal.int),
@@ -1140,6 +1177,55 @@ proc checkRPattern(n: Node, info: NimNode) =
   if not foundHole:
     error("pattern is missing a hole", info)
 
+proc plugPattern(c: Context, into: int, n: Node): seq[Node] =
+  ## Tries to plug the hole of `into` with the or-pattern `hole` (which also
+  ## has a hole). This only works for purely self-recursive patterns.
+  # consider the following recursive pattern-with-a-hole:
+  #   E ::= . | A(E) | B(E)
+  # (the dot stands for a hole).
+  # Now there's second recursive pattern, looking like this:
+  #   E' ::= E[E'] | C(E')
+  # Plugging `E` with `E'` means replacing the hole in `E` with `E'`, which
+  # results in:
+  #   E[E'] = E' | A(E' | A(E[E']) | B(E[E'])) | B(E' | A(E[E']) | B(E[E']))
+  # (for demonstration purposes, E is inlined into the A and B patterns once).
+  # Inlining E' gets us:
+  #   E[E'] = E[E'] | C(E') | A(E[E']) | B(E[E'])
+  # `X ::= X | Y`` is equal to `X ::= Y`, so the simplified version is just:
+  #   E[E'] = C(E') | A(E[E']) | B(E[E'])
+  # putting this back into E' gets us:
+  #   E' ::= C(E') | A(E[E']) | B(E[E']) | C(E')
+  # `C(E')` appears twice, so the second appearance can be removed:
+  #   E' ::= C(E') | A(E[E']) | B(E[E'])
+  # `E'` is identical to `E[E']`! This allows for a final simplification:
+  #   E' ::= C(E') | A(E') | B(E')
+  # In other words, plugging a self-recursive pattern `x` with self-
+  # recursive pattern `y` can be achieved by just replacing all holes and
+  # self-references in `x` with `y` and merging the result into `y`.
+  proc plug(n: Node, id: int, with: Node): Node {.nimcall.} =
+    case n.kind
+    of nkContext:
+      if n.id == id:
+        with
+      else:
+        error("pattern is too complex")
+        unreachable()
+    of nkHole:
+      with
+    of withChildren:
+      var r = Node(kind: n.kind)
+      for it in n.children.items:
+        r.add plug(it, id, with)
+      r
+    else:
+      n
+
+  for it in c.matchers[into].patterns.items:
+    let x = plug(it, into, n)
+    # drop immediate self recursion
+    if x.kind != nkContext:
+      result.add x
+
 proc semPremise(c; n: NimNode): Node =
   var n = n
   # premises may be wrapped in an ellipsis, which designates them as being
@@ -1186,11 +1272,17 @@ proc semPredicate(c; n: NimNode): Node =
     n.expectLen 2
     semPremise(c, n[1])
   elif n[0].eqIdent("where"):
-    # it'd be much nicer if `where x, y` could be written as `let x = y`,
-    # but that syntax doesn't work for more complex pattern matching
     n.expectLen 3
-    let pat = semPattern(c, n[1], AllPat)
-    tree(nkMatches, pat, receive(c, n[2], pat.typ))
+    let
+      pat = semPattern(c, n[1], AllPat)
+      e = semExpr(c, n[2])
+    # the pattern and source only need to have some overlap, if the actual
+    # run-time value isn't matched by the pattern, a run-time error will be
+    # reported
+    if fitsC(c, e.typ, pat.typ) == relNone and
+       fitsC(c, pat.typ, e.typ) == relNone:
+      error(fmt"{pat.typ} and {e.typ} have no overlap", n[0])
+    tree(nkMatches, pat, e)
   elif n[0].eqIdent("condition"):
     n.expectLen 2
     let term = semExpr(c, n[1])
@@ -1387,28 +1479,50 @@ proc parseTypeUse(c: Context; n: NimNode): Type =
     error("not a type use", n)
     unreachable()
 
-proc addConstrSym(c; name: string, typ: Type, id: int, info: NimNode) =
-  ## Adds a symbol for a constructor with name `name` to the symbol table.
-  let sym = Sym(kind: skConstr, id: id, typ: typ)
+proc addConstrPattern(c; pat: Node, info: NimNode): Type =
+  ## Adds construction pattern `pat` to the context and symbol table, but only
+  ## if an equal pattern doesn't yet exist. Returns the type for the pattern.
+  assert pat.kind == nkConstr
+  let sym = Sym(kind: skConstr, typ: Type(kind: tkPat, pat: pat))
+  let name = pat[0].sym
   c.lookup.withValue name, prev:
     if prev.kind == skConstr:
-      prev[] = Sym(kind: skOverload, overloads: @[move prev[], sym])
+      if samePattern(prev.typ.pat, pat):
+        # pattern already exists
+        result = prev.typ
+      else:
+        result = sym.typ
+        prev[] = Sym(kind: skOverload, overloads: @[move prev[], sym])
     elif prev.kind == skOverload:
+      for it in prev.overloads.items:
+        if samePattern(it.typ.pat, pat):
+          # pattern already exists
+          return it.typ
+
+      # it's a new pattern
+      result = sym.typ
       prev.overloads.add sym
     else:
       error(fmt"{name} cannot be overloaded", info)
   do:
+    result = sym.typ
     c.lookup[name] = sym
 
-proc semConstrDef(c; n: NimNode, typ: Type): Node =
+proc semConstrDef(c; n: NimNode): Type =
   ## Parses a constructor definition, which use a subset of the available
   ## pattern syntax.
   case n.kind
   of nnkIdent, nnkAccQuoted:
-    # turn into a tree to make downstream processing easier
-    result = Node(kind: nkSymbol, sym: name(n), typ: Type(kind: tkPat))
-    result = tree(nkConstr, result)
-    result.typ = typ
+    let name = name(n)
+    c.lookup.withValue name, prev:
+      if prev.kind == skValue:
+        # named value already exists, reuse the type
+        result = prev.typ
+      else:
+        error(fmt"{name} cannot be overloaded with value", n)
+    do:
+      result = Type(kind: tkPat, pat: Node(kind: nkSymbol, sym: name))
+      c.lookup[result.pat.sym] = Sym(kind: skValue, typ: result)
   of nnkCall:
     proc addChecked(r: var Node, n: sink Node, info: NimNode) {.nimcall.} =
       if r.len > 0 and r.children[^1].kind in {nkOneOrMore, nkZeroOrMore} and
@@ -1438,19 +1552,15 @@ proc semConstrDef(c; n: NimNode, typ: Type): Node =
         for it in n.items:
           result.addChecked(semConstrSub(c, it), it)
       of nnkCall:
-        # treat the constructor as constructing a new anonymous data type
-        let typ = Type(kind: tkData)
-        typ.constr.add semConstrDef(c, n, typ)
-        c.addConstrSym(typ.constr[0][0].sym, typ, typ.constr.high, n[0])
-        result = Node(kind: nkType, typ: typ)
+        var pat = tree(nkConstr, Node(kind: nkSymbol, sym: name(n[0])))
+        for i in 1..<n.len:
+          pat.add semConstrSub(c, n[i])
+
+        result = Node(kind: nkType, typ: c.addConstrPattern(pat, n[0]))
       else:
         error("expected identifier or call syntax", n)
 
-    result = tree(nkConstr, Node(kind: nkSymbol, sym: name(n[0]),
-                                 typ: Type(kind: tkPat)))
-    for i in 1..<n.len:
-      result.add semConstrSub(c, n[i])
-    result.typ = typ
+    result = c.semConstrSub(n).typ
   else:
     error("expected identifier or call syntax", n)
 
@@ -1466,18 +1576,17 @@ proc semType(c; body: NimNode, self: Type; base = Type(nil)) =
     c.typerelCache[(self, base)] = relSubtype
 
   for it in body.items:
-    let pat = semConstrDef(c, it, self)
+    let d = semConstrDef(c, it)
 
     # make sure there's no equivalent pattern in the current type:
-    for p in self.constr.items:
-      if matchesPattern(c, p, pat) and matchesPattern(c, pat, p):
+    for p in self.children.items:
+      if matchesPattern(c, p.pat, d.pat) and matchesPattern(c, d.pat, p.pat):
         error("duplicate construction pattern", it)
 
-    if base != nil and not matchesType(c, base, pat):
+    if base != nil and not matchesType(c, base, d.pat):
       error("construction is not covered by the parent type", it)
 
-    self.constr.add pat
-    c.addConstrSym(pat[0].sym, self, self.constr.high, it)
+    self.children.add d
 
 proc semBody(c; n: NimNode, typ: Type, top: bool): Node
 
@@ -1530,7 +1639,9 @@ proc semCase(c; n: NimNode, typ: Type): Node =
             else:
               check(c, it.typ, dest[0], b[i])
         else:
-          check(c, p.typ, dest, b[i])
+          # the pattern must be a subtype of or equal to the matched
+          # expression's type
+          check(c, dest, p.typ, b[i])
         o.add p
     of nnkElse, nnkElseExpr:
       # turn into a "match all" branch
@@ -1697,8 +1808,7 @@ proc convertFrom(to: var types.TypeId, x: sink Type,
                  map: var Table[Type, types.TypeId],
                  types: var seq[TType]) =
   ## The interesting part of the conversion logic.
-  if x.isNil or x.kind == tkPat:
-    # pat types are only needed for the type checker; they're discarded here
+  if x.isNil:
     to = 0
   else:
     let id = map.mgetOrPut(x, types.len)
@@ -1757,6 +1867,8 @@ proc sem(body: NimNode): LangDef =
   c.builtin("trunc", fntype(ratType, intType))
   c.builtin("^", forall(1, fntype(tup(tvar(0), intType), tvar(0))))
   c.builtin("*", forall(1, fntype(tup(tvar(0), tvar(0)), tvar(0))))
+  c.builtin("bytes", fntype(listT(intType), listT(intType)))
+  # TODO: ^^ only accept string values as input, not arbitrary int lists
 
   # first pass: make sure the broad shape of `body` is correct and collect the
   # names of all symbols while looking for and reporting collisions
@@ -1773,11 +1885,11 @@ proc sem(body: NimNode): LangDef =
       of "typ":
         it.expectLen 3
         addSym(c, name(it[1]), it):
-          Sym(kind: skType, typ: Type(kind: tkData))
+          Sym(kind: skType, typ: Type(kind: tkSum))
       of "subtype":
         it.expectLen 4
         addSym(c, name(it[1]), it):
-          Sym(kind: skType, typ: Type(kind: tkData))
+          Sym(kind: skType, typ: Type(kind: tkSum))
       of "context":
         it.expectLen 3
         # use void as the type, so that an r-pattern can be used everywhere
@@ -1856,11 +1968,25 @@ proc sem(body: NimNode): LangDef =
         let id = c.lookup[name(it[1])].id
         it[2].expectKind nnkStmtList
         for x in it[2].items:
-          var pat = semPattern(c, x, {nkContext, nkHole, nkConstr})
-          checkRPattern(pat, x)
-          c.finalize(pat) # resolve type variables
-          c.flushVars()
-          c.matchers[id].patterns.add pat
+          # TODO: this special handling shouldn't be needed. A "context" is
+          #       just a named or-pattern, and it should therefore be allowed
+          #       to be made of arbitrary sub patterns (the restrictions w.r.t.
+          #       holes still apply)
+          if x.kind == nnkBracketExpr:
+            let pat = semPattern(c, x, {nkPlug, nkContext})
+            # only self recursion is allowed at the moment
+            if pat[1].kind == nkContext and pat[1].id == id:
+              let patterns =
+                plugPattern(c, pat[0].id, Node(kind: nkContext, id: id))
+              c.matchers[id].patterns.add patterns
+            else:
+              error(fmt"plugged-with pattern must be '{name(it[1])}'", x)
+          else:
+            var pat = semPattern(c, x, {nkContext, nkHole, nkConstr})
+            checkRPattern(pat, x)
+            c.finalize(pat) # resolve type variables
+            c.flushVars()
+            c.matchers[id].patterns.add pat
     of nnkFuncDef:
       c.lookup.withValue name(macros.name(it)), val:
         c.functions[val.id] = semFunction(c, it, val.typ)

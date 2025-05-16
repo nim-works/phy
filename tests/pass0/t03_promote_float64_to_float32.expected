@@ -1,0 +1,5 @@
+.type t0 () -> float
+.start t0 p0
+  LdImmFloat 0.5
+  Ret
+.end

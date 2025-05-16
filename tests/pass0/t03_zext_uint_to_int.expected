@@ -1,0 +1,5 @@
+.type t0 () -> int
+.start t0 p0
+  LdImmInt 255
+  Ret
+.end

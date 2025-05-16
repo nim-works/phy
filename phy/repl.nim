@@ -16,8 +16,10 @@ import
   passes/[
     changesets,
     pass0,
+    pass_ptrToInt,
     pass_aggregateParams,
     pass_aggregatesToBlob,
+    pass_globalsToPointer,
     pass_legalizeBlobOps,
     pass_inlineTypes,
     pass_stackAlloc,
@@ -82,13 +84,15 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
     # lower to L0:
     m = m.apply(pass30.lower(m))
     m = m.apply(pass25.lower(m))
+    m = m.apply(pass_globalsToPointer.lower(m, 8))
     m = m.apply(pass_flattenPaths.lower(m))
-    m = m.apply(pass_aggregateParams.lower(m, 8))
+    m = m.apply(pass_aggregateParams.lower(m))
     m = m.apply(pass_aggregatesToBlob.lower(m, 8))
-    m = m.apply(pass_localsToBlob.lower(m))
+    m = m.apply(pass_localsToBlob.lower(m, 8))
     m = m.apply(pass_legalizeBlobOps.lower(m))
-    m = m.apply(pass_stackAlloc.lower(m, 8))
+    m = m.apply(pass_stackAlloc.lower(m))
     m = m.apply(pass_inlineTypes.lower(m))
+    m = m.apply(pass_ptrToInt.lower(m, 8))
 
     let module = translate(m)
 
@@ -106,8 +110,12 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
     else:
       unreachable("memory config invalid; there's probably a bug in source2il")
 
-    var env = initVm(mem.total, mem.total)
-    link(env, hostProcedures(includeTest = false), [module])
+    var env = initVm(mem.initial, mem.maximum)
+    var ltab = LinkTable()
+    if not load(env, ltab, module):
+      echo "Error: couldn't load module"
+      return
+    load(env, ltab, hostProcedures(includeTest = false))
 
     let cl = HostEnv(outStream: newFileStream(stdout),
                      errStream: newFileStream(stderr))

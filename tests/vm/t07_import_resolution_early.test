@@ -1,0 +1,24 @@
+discard """
+  description: "
+    Test import resolution where the procedure is already present when the
+    module containing the import is loaded.
+  "
+  output: "(Done 1)"
+"""
+#.module
+.type P1 () -> int
+.start P1 p
+  LdImmInt 1
+  Ret
+.end
+.export proc p "p.exported"
+.close
+
+.module
+.type P1 () -> int
+.import P1 imported "p.exported"
+.start P1 main
+  Call imported 0
+  Ret
+.end
+.close

@@ -1,0 +1,6 @@
+.type t0 () -> int
+.start t0 p0
+  LdImmInt 510
+  Mask 8
+  Ret
+.end

@@ -46,11 +46,13 @@ arith  ::= (Neg <type> <expr>)
         |  (Shl <type> <expr> <expr>)
         |  (Shr <type> <expr> <expr>)
 
-conv   ::= (Reinterp <type> <type> <expr>)
-        |  (Conv     <type> <type> <expr>)
-
-# TODO: `Reinterp` and `Conv` need to be replaced with concrete operations
-#       (e.g., zero extend, sign extend, ftoi.)
+conv   ::= (Reinterp <type> <type> <expr>) # bit casting (between numeric types)
+        |  (Conv     <type> <type> <expr>) # int-to-float conversion and vice versa
+        |  (Zext     <type> <type> <expr>) # zero extension (integer only)
+        |  (Sext     <type> <type> <expr>) # sign extension (integer only)
+        |  (Trunc    <type> <type> <expr>) # integer truncation
+        |  (Demote   <type> <type> <expr>) # larger float to smaller float demotion
+        |  (Promote  <type> <type> <expr>) # smaller float to larger float promotion
 
 memops ::= (Load <type> <expr>)
 
@@ -104,8 +106,10 @@ stmt ::= (Asgn <local> <expr>)
 bblock ::= (Block  (Params <local>*) <stmt>* <exit>)
         |  (Except (Params <local>)  <stmt>* <exit>)
 
-int_or_float ::= <intVal> | <floatVal>
-globaldef ::= (GlobalDef <type> <int_or_float>)
+dataInit   ::= (Data align:<int> size:<int>)
+            |  (Data align:<int> content:(StringVal <string>))
+globalInit ::= <dataInit> | <intVal> | <floatVal>
+globaldef  ::= (GlobalDef <type> <globalInit>)
 ```
 
 ```grammar

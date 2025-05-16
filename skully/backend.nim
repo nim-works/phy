@@ -9,6 +9,9 @@ import
     strtabs,
     tables
   ],
+  std/private/[
+    containers
+  ],
   compiler/front/[
     options,
     msgs
@@ -32,7 +35,6 @@ import
   ],
   compiler/utils/[
     bitsets,
-    containers,
     platform
   ],
   compiler/backend/[
@@ -57,7 +59,6 @@ import
 
 from compiler/mir/mirbodies import MirBody, `[]`
 
-import vm/utils as vm_utils
 import skully/passes as phy_passes
 
 type
@@ -105,11 +106,10 @@ type
       ## maps MIR globals and constants to IL globals
     constMap: Table[ConstId, uint32]
     dataMap: Table[DataId, uint32]
-    globals: seq[tuple[typ: TypeId, address: uint32]]
-      ## the IL globals. address is the virtual address the underlying storage
-      ## is located at
-    globalsAddress: uint32
-      ## the lower bound for virtual addresses of new global variable storage
+    strMap: Table[StringId, uint32]
+      ## string ID -> IL global storing the character array
+    globals: seq[tuple[typ: uint32, hasValue: bool, init: uint32]]
+      ## the IL globals
 
     prc: ProcContext
 
@@ -125,9 +125,6 @@ const
   StrLitFlag = 1'i64 shl 62
     ## or'ed into the capacity of seqs and strings in order to mark the
     ## data as being immutable
-  AddressBias = 4096
-    ## must be added to all raw address values, in order to undo the
-    ## offset applied to address value on memory access performed by the VM
   StackSize = 1024 * 1024 # 1 MiB
 
 using
@@ -176,6 +173,9 @@ iterator items(tree: MirTree, n: NodePosition, start: int,
 template node(k: NodeKind, v: uint32): Node =
   Node(kind: k, val: v)
 
+template node(k: NodeKind): Node =
+  Node(kind: k)
+
 proc makeExpr(nodes: sink seq[Node], typ: TypeId): Expr {.inline.} =
   Expr(nodes: nodes, typ: typ)
 
@@ -206,7 +206,7 @@ proc takeAddr(e: Expr, bu) =
 
 proc use(bu; e: Expr) =
   case e.nodes[0].kind
-  of Local, At, Field:
+  of Global, Local, At, Field:
     bu.subTree Copy:
       bu.add e.nodes
   of Deref:
@@ -416,7 +416,7 @@ proc translate(c; env: TypeEnv, id: TypeId, bu) =
   of tkUInt:
     bu.add node(UInt, desc.size(env).uint32)
   of tkPointer:
-    bu.add node(Ptr, 0)
+    bu.add node(Ptr)
   of tkBool, tkChar:
     bu.add node(UInt, 1)
   of tkArray:
@@ -586,6 +586,69 @@ proc genField(c; env: MirEnv; e: Expr; pos: int32, bu) =
   else:
     unreachable()
 
+proc spawnGlobal(c; typ: uint32, data: string): uint32 =
+  ## Spawns a new global variable with the given `typ` and the initial
+  ## value represented by the byte string `data`.
+  result = c.globals.len.uint32
+  c.globals.add (typ, true, c.lit.pack(data))
+
+proc spawnGlobal(c; typ: uint32): uint32 =
+  ## Spawns a new global variable with the given `typ` and undefined initial
+  ## value.
+  result = c.globals.len.uint32
+  c.globals.add (typ, false, 0'u32)
+
+proc newArrayType(c; env; elem: TypeId, count: Positive): uint32 =
+  ## Returns the IL type for an array with element type `elem` and `count`
+  ## number of elements.
+  var bu = initBuilder[NodeKind]()
+  let size = env.types.headerFor(elem, Canonical).size(env.types)
+  let alignment = env.types.headerFor(elem, Canonical).align
+  bu.subTree Array:
+    bu.add node(Immediate, uint32(size * count))
+    bu.add node(Immediate, uint32 alignment)
+    bu.add node(Immediate, uint32 count)
+    bu.add typeRef(c, env, elem)
+
+  result = c.types.mgetOrPut(finish(bu), c.types.len.uint32)
+
+proc newPayloadType(c; env; elem: TypeId, count: Positive): uint32 =
+  ## Returns a sized payload type for a sequence with element type `elem` and
+  ## `count` number of items.
+  var bu = initBuilder[NodeKind]()
+  let
+    intType = env.types.sizeType
+    intHdr = env.types.headerFor(intType, Canonical)
+    size = env.types.headerFor(elem, Canonical).size(env.types)
+    alignment = env.types.headerFor(elem, Canonical).align
+    arrayStart = align(intHdr.size(env.types), alignment)
+
+  bu.subTree Record:
+    bu.add node(Immediate, uint32(arrayStart + (size * count)))
+    bu.add node(Immediate, uint32 max(alignment, intHdr.align))
+    bu.subTree Field:
+      bu.add node(Immediate, 0)
+      bu.add typeRef(c, env, intType)
+    bu.subTree Field:
+      bu.add node(Immediate, uint32 arrayStart)
+      bu.add node(Type, c.newArrayType(env, elem, count))
+
+  result = c.types.mgetOrPut(finish(bu), c.types.len.uint32)
+
+proc genStrLiteral(c; env; str: StringId): uint32 =
+  ## Returns the ID for the global storing the raw character array for `str`,
+  ## creating it first if hasn't been yet.
+  c.strMap.withValue str, val:
+    result = val[]
+  do:
+    # the character array for a literal string always includes the NUL
+    # terminator
+    var data = env[str]
+    data.add "\0"
+
+    result = c.spawnGlobal(c.newArrayType(env, CharType, data.len), data)
+    c.strMap[str] = result
+
 proc genConst(c; env; tree; n; dest: Expr, stmts) =
   ## Emits the construction logic for the MIR constant expression `n`.
   template putIntoDest(n: Node) =
@@ -635,105 +698,96 @@ proc genConst(c; env; tree; n; dest: Expr, stmts) =
   of mnkStrLit:
     let str {.cursor.} = env[tree[n].strVal]
 
-    proc emitString(c; env; str: string, data: uint32, stmts) {.nimcall.} =
-      # there's no built-in support for strings in the ILs/VM, requiring
-      # the manual initialization of each character
-      for i, it in pairs(str):
-        stmts.addStmt NodeKind.Store:
-          bu.add node(UInt, 1)
-          bu.addPtrLit int64(data) + i
-          bu.add node(IntVal, c.lit.pack(ord it))
-
-      # emit the NUL terminator:
-      stmts.addStmt NodeKind.Store:
-        bu.add node(UInt, 1)
-        bu.addPtrLit int64(data) + str.len
-        bu.add node(IntVal, c.lit.pack(0))
-
     case env.types.headerFor(typ, Canonical).kind
     of tkCstring:
       # a cstring is a pointer to a raw character sequence followed by a NUL
       # terminator
-      let data = c.globalsAddress + AddressBias
-      c.globalsAddress += str.len.uint32 + 1
-      c.emitString(env, str, data, stmts)
-
-      stmts.putInto dest, Reinterp:
-        bu.add typeRef(c, env, PointerType)
-        bu.add typeRef(c, env, UInt64Type)
-        bu.add node(IntVal, c.lit.pack(data.int64))
+      if str.len == 0:
+        # an empty cstring is represented as a nil pointer
+        putIntoDest node(Nil)
+      else:
+        stmts.putInto dest, Addr:
+          bu.add node(Global, c.genStrLiteral(env, tree[n].strVal))
     of tkString:
       # it's a NimSkull string (a length + payload pointer)
-      let
-        intSize = c.graph.config.target.intSize.uint32
-        start   = align(c.globalsAddress, intSize)
-        data    = start + AddressBias
-      c.globalsAddress = start + intSize + str.len.uint32 + 1 # reserve space
-
-      # emit the capacity initialization:
-      stmts.addStmt NodeKind.Store:
-        bu.add typeRef(c, env, env.types.sizeType)
-        bu.addPtrLit data.int64
-        bu.add node(IntVal, c.lit.pack(str.len or StrLitFlag))
-
-      c.emitString(env, str, data + 8, stmts)
-
       stmts.addStmt Asgn:
         bu.subTree Field:
           bu.useLvalue dest
           bu.add node(Immediate, 0)
         bu.add node(IntVal, c.lit.pack(str.len))
-      stmts.addStmt Asgn:
-        bu.subTree Field:
-          bu.useLvalue dest
-          bu.add node(Immediate, 1)
-        bu.addPtrLit data.int64
+
+      if str.len > 0:
+        # only set a payload for non-empty strings
+        let
+          payloadTyp = c.newPayloadType(env, CharType, str.len + 1)
+          # +1 for the terminator
+          payload = c.spawnGlobal(payloadTyp)
+          data = c.genStrLiteral(env, tree[n].strVal)
+
+        # emit the capacity initialization:
+        stmts.addStmt Asgn:
+          bu.subTree Field:
+            bu.add node(Global, payload)
+            bu.add node(Immediate, 0)
+          bu.add node(IntVal, c.lit.pack(str.len or StrLitFlag))
+        # emit the payload data initialization (copy the character array):
+        stmts.addStmt Asgn:
+          bu.subTree Field:
+            bu.add node(Global, payload)
+            bu.add node(Immediate, 1)
+          bu.subTree Copy:
+            bu.add node(Global, data)
+
+        # emit the payload pointer initialization:
+        stmts.addStmt Asgn:
+          bu.subTree Field:
+            bu.useLvalue dest
+            bu.add node(Immediate, 1)
+          bu.subTree Addr:
+            bu.add node(Global, payload)
     else:
       unreachable()
   of mnkSeqConstr:
-    let
-      intSize = c.graph.config.target.intSize.uint32
-      elem = env.types.headerFor(typ, Canonical).elem
-      size = env.types.headerFor(elem, Canonical).size(env.types)
-      alignment = env.types.headerFor(elem, Canonical).align.uint32
+    let elem = env.types.headerFor(typ, Canonical).elem
 
-    # the payload address must satisfy the alignment requirements of the
-    # element type
-    let
-      payload     = align(c.globalsAddress, alignment)
-      data        = align(payload + intSize, alignment)
-      payloadAddr = payload + AddressBias
-      dataAddr    = data + AddressBias
-    # reserve enough space for the whole payload:
-    c.globalsAddress = data + uint32(size * tree.len(n))
-
-    # emit the seq construction:
+    # emit the length assignment:
     stmts.addStmt Asgn:
       bu.subTree Field:
         bu.useLvalue dest
         bu.add node(Immediate, 0)
       bu.add node(IntVal, c.lit.pack(tree.len(n)))
 
-    stmts.addStmt Asgn:
-      bu.subTree Field:
-        bu.useLvalue dest
-        bu.add node(Immediate, 1)
-      bu.addPtrLit payloadAddr.int64
+    if tree.len(n) > 0:
+      # only create a payload for non-empty seqs
+      let
+        payloadTyp = c.newPayloadType(env, elem, tree.len(n))
+        payload = c.spawnGlobal(payloadTyp)
 
-    # emit the capacity initialization:
-    stmts.addStmt NodeKind.Store:
-      bu.add typeRef(c, env, env.types.sizeType)
-      bu.addPtrLit payloadAddr.int64
-      bu.add node(IntVal, c.lit.pack(tree.len(n) or StrLitFlag))
+      # emit the payload field initialization:
+      stmts.addStmt Asgn:
+        bu.subTree Field:
+          bu.useLvalue dest
+          bu.add node(Immediate, 1)
+        bu.subTree Addr:
+          bu.add node(Global, payload)
 
-    # emit the payload data initialization:
-    for i, it in tree.args(n):
-      let nDest = makeExpr elem:
-        bu.subTree Deref:
-          bu.add typeRef(c, env, elem)
-          bu.addPtrLit (dataAddr.int64 + size * i)
+      # emit the capacity initialization:
+      stmts.addStmt Asgn:
+        bu.subTree Field:
+          bu.add node(Global, payload)
+          bu.add node(Immediate, 0)
+        bu.add node(IntVal, c.lit.pack(tree.len(n) or StrLitFlag))
 
-      c.genConst(env, tree, it, nDest, stmts)
+      # emit the payload data initialization:
+      for i, it in tree.args(n):
+        let nDest = makeExpr elem:
+          bu.subTree At:
+            bu.subTree Field:
+              bu.add node(Global, payload)
+              bu.add node(Immediate, 1)
+            bu.add node(IntVal, c.lit.pack(i))
+
+        c.genConst(env, tree, it, nDest, stmts)
   of mnkSetConstr:
     let desc = env.types.headerFor(typ, Lowered)
 
@@ -769,14 +823,7 @@ proc genConst(c; env; tree; n; dest: Expr, stmts) =
     unreachable()
 
 proc newGlobal(c; env: MirEnv, typ: TypeId): uint32 =
-  let desc = env.types.headerFor(typ, Lowered)
-  # align the address first:
-  c.globalsAddress = align(c.globalsAddress, desc.align.uint32)
-  c.globals.add (typ, c.globalsAddress)
-  # occupy the memory slot:
-  c.globalsAddress += desc.size(env.types).uint32
-
-  result = c.globals.high.uint32
+  c.spawnGlobal(c.genType(env.types, typ))
 
 proc newLabel(c: var ProcContext): uint32 =
   result = c.nextLabel
@@ -833,13 +880,10 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition,
 
   case tree[n].kind
   of mnkGlobal:
-    # all globals are offsets into static memory (because the target IL
-    # doesn't support mutable global variables)
-    bu.subTree (if wantValue: Load else: Deref):
-      bu.add typeRef(c, env, tree[n].typ)
-      c.loadGlobalAddr(env, c.globalsMap[tree[n].global], bu)
+    wrapCopy:
+      bu.add node(Global, c.globalsMap[tree[n].global])
   of mnkNilLit:
-    bu.add node(IntVal, 0)
+    bu.add node(Nil)
   of mnkIntLit, mnkUIntLit:
     bu.add node(IntVal, c.lit.pack(env.getInt(tree[n].number)))
   of mnkFloatLit:
@@ -871,13 +915,11 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition,
       if extract(id) notin c.dataMap:
         c.dataMap[extract(id)] = c.newGlobal(env, tree[n].typ)
 
-      bu.subTree (if wantValue: Load else: Deref):
-        bu.add typeRef(c, env, tree[n].typ)
-        c.loadGlobalAddr(env, c.dataMap[extract(id)], bu)
+      wrapCopy:
+        bu.add node(Global, c.dataMap[extract(id)])
     else:
-      bu.subTree (if wantValue: Load else: Deref):
-        bu.add typeRef(c, env, tree[n].typ)
-        c.loadGlobalAddr(env, c.constMap[tree[n].cnst], bu)
+      wrapCopy:
+        bu.add node(Global, c.constMap[tree[n].cnst])
   of mnkProcVal:
     bu.add node(ProcVal, c.registerProc(tree[n].prc))
   of mnkDeref, mnkDerefView:
@@ -1009,7 +1051,8 @@ proc getTypeInfoV2(c; env: var MirEnv, typ: TypeId): Expr =
     c.rttiCache[typ] = global
 
   result = makeExpr PointerType:
-    c.loadGlobalAddr(env, global, bu)
+    bu.subTree Addr:
+      bu.add node(Global, global)
 
 proc genDefault(c; env: var MirEnv; dest: Expr, typ: TypeId, bu) =
   let typ = env.types.canonical(typ)
@@ -1084,7 +1127,7 @@ proc genLength(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
       bu.subTree Eq:
         bu.add typeRef(c, env, CstringType)
         c.translateValue(env, tree, n, true, bu)
-        bu.add node(IntVal, 0)
+        bu.add node(Nil)
       bu.goto els
       bu.goto then
     stmts.join then
@@ -1098,11 +1141,75 @@ proc genLength(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
   else:
     unreachable()
 
+proc genNumericConv(c; env; val: Expr, to: TypeId, bu) =
+  ## If the types are equal (at the IL level), emits an *unchecked* numeric
+  ## conversion for `val` to type `to`.
+  proc skip(env; t: TypeId): TypeId =
+    result = env.types.canonical(t)
+    # treat imported types as their underlying representation
+    if env.types.headerFor(t, Lowered).kind == tkImported:
+      result = env.skip(env.types.headerFor(t, Lowered).elem)
+
+  let dst = env.types.headerFor(env.skip(to), Lowered)
+  let src = env.types.headerFor(env.skip(val.typ), Lowered)
+
+  template convOp(kind: NodeKind) =
+    bu.subTree kind:
+      bu.add typeRef(c, env, to)
+      bu.add typeRef(c, env, val.typ)
+      bu.use val
+
+  template sizedConv(widen, narrow: NodeKind) =
+    if dst.size(env.types) < src.size(env.types):
+      convOp narrow
+    elif dst.size(env.types) > dst.size(env.types):
+      convOp widen
+    else:
+      # nothing to do
+      bu.use val
+
+  const
+    uints = {tkUInt, tkChar, tkBool}
+    ints  = {tkInt}
+
+  case dst.kind
+  of uints:
+    case src.kind
+    of ints, uints:
+      # conversion to uint is the same as casting to uint
+      sizedConv Trunc, Zext
+    of tkFloat:
+      convOp Conv
+    else:
+      unreachable(src.kind)
+  of ints:
+    case src.kind
+    of ints:    sizedConv Trunc, Sext
+    of uints:   sizedConv Trunc, Zext
+    of tkFloat: convOp Conv
+    else:
+      unreachable(src.kind)
+  of tkFloat:
+    case src.kind
+    of ints, uints:
+      convOp Conv
+    of tkFloat:
+      sizedConv Promote, Demote
+    else:
+      unreachable()
+  of tkPtr, tkPointer, tkProc, tkCstring:
+    # a conversion between pointer types is a no-op. These conversion aren't
+    # really numeric conversions, but it's easier to also include them here
+    bu.use val
+  else:
+    unreachable(dst.kind)
+
 proc genSetElem(c; env; tree; n; styp: TypeId, bu) =
   ## Emits the expression for loading a value for use in a set-related
   ## operation. This means turning the value into one relative to the start of
   ## the set's value range. The resulting value is always of uint16 type.
-  proc aux(c; env; tree; n; styp: TypeId, bu) =
+  let val = makeExpr tree[n].typ:
+    # shift the operand's value so that its range starts at 0
     assert env.types[styp].kind == tySet
     let first = c.graph.config.firstOrd(env.types[styp])
     if first != Zero:
@@ -1113,16 +1220,8 @@ proc genSetElem(c; env; tree; n; styp: TypeId, bu) =
     else:
       c.translateValue(env, tree, n, true, bu)
 
-  let typ = env.types.canonical(tree[n].typ)
-  let desc = env.types.headerFor(typ, Lowered)
-  if desc.kind != tkUInt or desc.size(env.types) != 2:
-    # sets cannot have more than 2^16 elements, hence a uint16
-    bu.subTree Conv:
-      bu.add node(UInt, 2)
-      bu.add typeRef(c, env, typ)
-      aux(c, env, tree, n, styp, bu)
-  else:
-    aux(c, env, tree, n, styp, bu)
+  # sets cannot have more than 2^16 elements, hence a uint16
+  c.genNumericConv(env, val, UInt16Type, bu)
 
 proc genSetOp(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   ## Generates and emits the IL code for a binary set operation.
@@ -1384,7 +1483,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         # must be a pointer-like type
         bu.add typeRef(c, env, tree[arg].typ)
         value(arg)
-      bu.add node(IntVal, 0)
+      bu.add node(Nil)
   of mAddU, mSubU, mMulU, mDivU, mModU:
     const Map = [mAddU: Add, mSubU: Sub, mMulU: Mul, mDivU: Div, mModU: Mod]
     wrapAsgn Map[tree[n, 1].magic]:
@@ -1420,19 +1519,11 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       bu.add typeRef(c, env, tree[n].typ)
       value(tree.argument(n, 0))
       value(tree.argument(n, 1))
-  of mOrd, mChr:
-    # converts the operand to an int or char
-    let dst = typeRef(c, env, tree[n].typ)
-    let src = typeRef(c, env, tree[tree.argument(n, 0)].typ)
-    if dst == src:
-      # copies, but otherwise a no-op
-      wrapAsgn:
-        value(tree.argument(n, 0))
-    else:
-      wrapAsgn Conv:
-        bu.add dst
-        bu.add src
-        value(tree.argument(n, 0))
+  of mOrd, mChr
+    # it's a conversion, nothing more
+    let input = c.gen(env, tree, NodePosition(tree.argument(n, 0)), true)
+    wrapAsgn:
+      c.genNumericConv(env, input, tree[n].typ, bu)
   of mIncl, mExcl, mLtSet, mLeSet, mEqSet, mMinusSet, mPlusSet, mMulSet,
      mInSet:
     c.genSetOp(env, tree, n, dest, stmts)
@@ -1456,7 +1547,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       # also use countBits32, but widen the operand first
       wrapAsgn Call:
         bu.add compilerProc(c, env, "countBits32")
-        bu.subTree Conv:
+        bu.subTree Zext:
           bu.add node(UInt, 4)
           bu.add typeRef(c, env, tree[a].typ)
           value a
@@ -1739,7 +1830,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
           bu.subTree Field:
             lvalue(tree.argument(n, 0))
             bu.add node(Immediate, 1)
-        bu.add node(IntVal, 0)
+        bu.add node(Nil)
       bu.goto then
       bu.goto els
     stmts.join then
@@ -1982,18 +2073,11 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
     wrapAsgn:
       value(n)
   of mnkConv, mnkStdConv:
-    let dstTyp = typeRef(c, env, tree[n].typ)
-    let srcTyp = typeRef(c, env, tree[n, 0].typ)
-    if dstTyp == srcTyp:
-      # happens for pointer <-> cstring and ptr <-> pointer conversions.
-      # These types are identical at the IL level, so no conversion is needed
-      wrapAsgn:
-        value tree.child(n, 0)
-    else:
-      wrapAsgn Conv:
-        bu.add dstTyp
-        bu.add srcTyp
-        value(tree.child(n, 0))
+    # the high-level MIR conversions are lowered into the more specific
+    # operations of the target IL
+    let input = c.gen(env, tree, tree.child(n, 0), true)
+    wrapAsgn:
+      c.genNumericConv(env, input, tree[n].typ, bu)
   of mnkCopy, mnkMove, mnkSink:
     wrapAsgn:
       value(tree.child(n, 0))
@@ -2310,55 +2394,44 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         takeAddr tree.child(n, 0)
         bu.add node(IntVal, c.lit.pack(size))
     else:
-      template isUnsigned(id: TypeId): bool =
-        env.types.headerFor(id, Lowered).kind in {tkUInt, tkChar, tkBool}
+      template isPointer(id: TypeId): bool =
+        env.types.headerFor(id, Lowered).kind in
+          {tkPointer, tkProc, tkRef, tkPtr, tkCstring}
 
       let a = env.types.headerFor(dst, Lowered).size(env.types)
       let b = env.types.headerFor(src, Lowered).size(env.types)
       # for the implementation, keep in mind that Reinterp only supports
-      # operands of the same size. "Cutting off" bits only works with uint
-      # values, requiring the operand to first be bitcast into a uint value of
-      # the same size
-      # XXX: translation for casts will become easier once the IL has more fine
-      #      grained conversion operators
+      # operands of the same size
       if a == b: # same size, only reinterpret
         wrapAsgn Reinterp:
           bu.add typeRef(c, env, dst)
           bu.add typeRef(c, env, src)
           value tree.child(n, 0)
       else:
-        var tmp = makeExpr src:
-          value tree.child(n, 0)
-
-        const UInts = [1: UInt8Type, 2: UInt16Type, UInt32Type, 4: UInt32Type,
-                       UInt64Type, UInt64Type, UInt64Type, 8: UInt64Type]
-          ## byte-width to type map
-
-        if not isUnsigned(src):
-          # cast to uint first, as only uint values can be zero extended
-          # or truncated
-          tmp = makeExpr UInts[b]:
+        let op = if a < b: Trunc else: Zext
+        # pointer values cannot be truncated/extended directly -- the operation
+        # has to happen on a uint
+        if isPointer(src):
+          wrapAsgn op:
+            bu.add typeRef(c, env, dst)
+            bu.add typeRef(c, env, env.types.usizeType)
             bu.subTree Reinterp:
-              bu.add typeRef(c, env, UInts[b])
+              bu.add typeRef(c, env, env.types.usizeType)
               bu.add typeRef(c, env, src)
-              bu.use tmp
-
-        # truncate or zero extend (both done via Conv at the moment)
-        tmp = makeExpr UInts[b]:
-          bu.subTree Conv:
-            bu.add typeRef(c, env, UInts[a])
-            bu.add typeRef(c, env, UInts[b])
-            bu.use tmp
-
-        if not isUnsigned(dst):
-          # cast to the destination type
-          tmp = makeExpr dst:
-            bu.subTree Reinterp:
-              bu.add typeRef(c, env, dst)
-              bu.add typeRef(c, env, UInts[a])
-              bu.use tmp
-
-        genAsgn(dest, tmp, stmts)
+              value tree.child(n, 0)
+        elif isPointer(dst):
+          wrapAsgn Reinterp:
+            bu.add typeRef(c, env, dst)
+            bu.add typeRef(c, env, env.types.usizeType)
+            bu.subTree op:
+              bu.add typeRef(c, env, env.types.usizeType)
+              bu.add typeRef(c, env, src)
+              value tree.child(n, 0)
+        else:
+          wrapAsgn op:
+            bu.add typeRef(c, env, dst)
+            bu.add typeRef(c, env, dst)
+            value tree.child(n, 0)
   else:
     unreachable()
 
@@ -2824,21 +2897,17 @@ proc generateCodeForMain(c; env: var MirEnv; m: Module,
   for cnst, id in c.dataMap.pairs:
     let typ = env[cnst][0].typ
     let dest = makeExpr typ:
-      bu.subTree Deref:
-        bu.add typeRef(c, env, typ)
-        c.loadGlobalAddr(env, id, bu)
+      bu.add node(Global, id)
 
     c.genConst(env, env[cnst], NodePosition(0), dest, bu)
 
   # emit the initialization for constants. While not required by the
   # NimSkull specification, we give each constant its own unique location
   for cnst, id in c.constMap.pairs:
-    bu.subTree NodeKind.Store:
-      bu.add typeRef(c, env, env.types.add(env[cnst].typ))
-      c.loadGlobalAddr(env, id, bu)
-      bu.subTree Load:
-        bu.add typeRef(c, env, env.types.add(env[cnst].typ))
-        c.loadGlobalAddr(env, c.dataMap[env.dataFor(cnst)], bu)
+    bu.subTree Asgn:
+      bu.add node(Global, id)
+      bu.subTree Copy:
+        bu.add node(Global, c.dataMap[env.dataFor(cnst)])
 
   c.prc.active = true
   genAll(env, body.code, bu, c)
@@ -2926,23 +2995,17 @@ proc generateCode*(graph: ModuleGraph): PackedTree[NodeKind] =
 
   bu.subTree GlobalDefs:
     for it in c.globals.items:
-      bu.subTree GlobalDef:
-        bu.add node(UInt, 8)
-        bu.add node(IntVal, c.lit.pack(it.address.int + AddressBias))
-
-    # the stack starts after the globals' memory region
-    c.globalsAddress = align(c.globalsAddress, 8)
+      bu.subTree GlobalLoc:
+        bu.add node(Type, it.typ)
+        bu.subTree Data:
+          bu.add node(Type, it.typ)
+          if it.hasValue:
+            bu.add node(StringVal, it.init)
 
     # define the globals storing the memory configuration:
-    bu.subTree GlobalDef: # stack start
-      bu.add node(UInt, 8)
-      bu.add node(IntVal, c.lit.pack(c.globalsAddress.BiggestInt))
     bu.subTree GlobalDef: # stack size
       bu.add node(UInt, 8)
       bu.add node(IntVal, c.lit.pack(StackSize))
-    bu.subTree GlobalDef: # total memory
-      bu.add node(UInt, 8)
-      bu.add node(IntVal, c.lit.pack(c.globalsAddress.BiggestInt + StackSize))
 
   bu.subTree ProcDefs:
     for id, it in procs.pairs:
@@ -2951,14 +3014,8 @@ proc generateCode*(graph: ModuleGraph): PackedTree[NodeKind] =
   # the exports:
   bu.subTree List:
     bu.subTree Export:
-      bu.add Node(kind: StringVal, val: c.lit.pack("stack_start"))
-      bu.add Node(kind: Global, val: c.globals.len.uint32)
-    bu.subTree Export:
       bu.add Node(kind: StringVal, val: c.lit.pack("stack_size"))
-      bu.add Node(kind: Global, val: c.globals.len.uint32 + 1)
-    bu.subTree Export:
-      bu.add Node(kind: StringVal, val: c.lit.pack("total_memory"))
-      bu.add Node(kind: Global, val: c.globals.len.uint32 + 2)
+      bu.add Node(kind: Global, val: c.globals.len.uint32)
 
     for id, v in c.procMap.pairs:
       let s = env.procedures[id]

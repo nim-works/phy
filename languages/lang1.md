@@ -1,14 +1,15 @@
 ## L1 Language
 
 ```grammar
-.extends lang0
+.extends langPtr
 ```
 
-Numeric types can be identified types and identified types can be used in all
-places where types are expected.
+Numeric and pointer types can be identified types and identified types can be
+used in all places where types are expected.
 
 ```grammar
 typedesc += <numtype>
+          | (Ptr)
 type += <type_id>
 ```
 

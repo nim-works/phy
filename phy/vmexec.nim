@@ -24,7 +24,11 @@ import vm/vmtypes except tkVoid, tkInt, tkFloat, tkProc
 type
   MemoryConfig* = object
     ## The guest memory configuration.
-    total*: uint
+    initial*: uint
+      ## the number of bytes that must be allocated at VM setup
+    maximum*: uint
+      ## the number of bytes of VM memory required to have all modules
+      ## loaded at the same time
     stackStart*: uint
     stackSize*: uint
 
@@ -56,7 +60,7 @@ proc primToSexp(v: Value, typ: SemType): SexpNode =
     newSInt(v.intVal)
   of tkFloat:
     newSFloat(v.floatVal)
-  of ComplexTypes, tkError, tkVoid:
+  of ComplexTypes, tkError, tkVoid, tkPointer:
     unreachable()
 
 proc valueToSexp(env: var VmEnv, a: VirtualAddr, typ: SemType): SexpNode =
@@ -117,35 +121,37 @@ proc valueToSexp(env: var VmEnv, a: VirtualAddr, typ: SemType): SexpNode =
     for i in 0..<len:
       result.add valueToSexp(env, VirtualAddr(data + size(typ.elems[0]) * i),
                              typ.elems[0])
-  of tkVoid, tkError:
+  of tkVoid, tkPointer, tkError:
     unreachable()
 
 proc readMemConfig*(m: VmModule): Option[MemoryConfig] =
   ## Reads the guest memory configuration from `m` by looking for the
-  ## `stack_start`, `stack_size`, and `total_memory` global variables.
-  ## A default is used for the values where the respective global is
-  ## not present. If the configuration is invalid, ``none`` is returned.
+  ## `stack_start` global variable, with a default value used if not present.
+  ## If the configuration is invalid, ``none`` is returned.
   var
     stackStart = 0'u64
     stackSize  = 1024'u64
-    total      = stackSize
 
   for it in m.exports.items:
     if it.kind == expGlobal and m.globals[it.id].typ == vtInt:
       case m.names[it.name]
-      of "stack_start":
-        stackStart = m.globals[it.id].val.uintVal
       of "stack_size":
         stackSize = m.globals[it.id].val.uintVal
-      of "total_memory":
-        total = m.globals[it.id].val.uintVal
+        break
 
-  if stackStart >= total or stackStart + stackSize > total or
-      stackStart + stackSize < stackStart or
-      total > high(uint):
+  # round the initial size up to be a multiple of 4096, as that's the expected
+  # alignment of a module's memory region
+  if stackSize + 4095 < stackSize:
+    return none(MemoryConfig) # integer overflow
+
+  let initial = (stackSize + 4095) and not 4095'u64 # round up
+
+  if initial + m.memory < initial or
+     initial + m.memory > high(uint):
     none MemoryConfig
   else:
-    some MemoryConfig(total: uint(total),
+    some MemoryConfig(initial: uint(stackSize),
+                      maximum: uint(stackSize + m.memory),
                       stackStart: uint(stackStart),
                       stackSize: uint(stackSize))
 

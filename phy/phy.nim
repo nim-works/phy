@@ -15,11 +15,13 @@ import
   ],
   generated/[
     lang0_checks,
+    langPtr_checks,
     lang1_checks,
     lang2_checks,
     lang3_checks,
     lang4_checks,
     lang5_checks,
+    lang6_checks,
     lang25_checks,
     lang30_checks,
     source_checks
@@ -32,9 +34,11 @@ import
     pass_aggregateParams,
     pass_aggregatesToBlob,
     pass_flattenPaths,
+    pass_globalsToPointer,
     pass_inlineTypes,
     pass_legalizeBlobOps,
     pass_localsToBlob,
+    pass_ptrToInt,
     pass_stackAlloc,
     pass25,
     pass30,
@@ -62,16 +66,24 @@ import
 import passes/syntax except NodeKind
 import passes/syntax_source except NodeKind
 
+when hostOS != "any":
+  # unfortunately, skully doesn't support the times and monotimes module yet,
+  # meaning that tracing is not supported in a skully-built phy executable
+  import phy/tracing
+  import std/[tables, times]
+
 type
   Language = enum
     langBytecode = "vm"
     langLLVM = "llvm"
     lang0 = "L0"
+    langPtr = "LPtr"
     lang1 = "L1"
     lang2 = "L2"
     lang3 = "L3"
     lang4 = "L4"
     lang5 = "L5"
+    lang6 = "L6"
     lang25 = "L25"
     lang30 = "L30"
     langSource = "source"
@@ -91,6 +103,8 @@ Options:
   --target:lang               the language to translate/lower to
   --runner                    makes the program suitable for being used as a
                               test runner
+  --measure                   shows the time various internal processing took
+                              as a CSV list on succesful compilation
 
 Commands:
   c                           translates/lowers the code from the source
@@ -108,10 +122,42 @@ var
   gRunner = false
     ## whether the program is used as a test runner. This enables some
     ## accommodations for the tester
+  gMeasure = false
+    ## whether instrumentation of various is enabled
+
+when declared(EventLog):
+  var
+    gEvents = initLog()
+      ## global performance event log
 
 proc error(msg: string) =
   echo "Error: ", msg
   quit 1
+
+template measure(name: static string, body: untyped) =
+  ## Records a ``Start`` and ``Stop`` event around `body`, with `name` as
+  ## the data.
+  when declared(gEvents):
+    gEvents.begin(name)
+  body
+  when declared(gEvents):
+    gEvents.stop(name)
+
+when declared(EventLog):
+  proc dumpTimings(log: EventLog) =
+    ## Echoes the timings collected in `log` to the standard output, as a
+    ## comma-separated-value list.
+    var times: Table[string, Duration]
+    for it in log.events.items:
+      case it.kind
+      of Start:
+        times[it.data] = log.relative(it)
+      of End:
+        let diff = log.relative(it) - times[it.data]
+        # the time is shown in seconds, using microsecond precision
+        echo it.data, ",", float64(inMicroseconds(diff)) / 1e6
+      of Action:
+        discard "ignore"
 
 template syntaxCheck(code: PackedTree, module, name: untyped) {.dirty.} =
   # for some reason, ``checkSyntax`` from ``debugutils`` doesn't want to work
@@ -129,11 +175,13 @@ proc syntaxCheck(code: PackedTree[syntax.NodeKind], lang: Language) =
   ## error if they don't succeed.
   case lang
   of lang0:  syntaxCheck(code, lang0_checks, module)
+  of langPtr:syntaxCheck(code, langPtr_checks, module)
   of lang1:  syntaxCheck(code, lang1_checks, module)
   of lang2:  syntaxCheck(code, lang2_checks, module)
   of lang3:  syntaxCheck(code, lang3_checks, module)
   of lang4:  syntaxCheck(code, lang4_checks, module)
   of lang5:  syntaxCheck(code, lang5_checks, module)
+  of lang6:  syntaxCheck(code, lang6_checks, module)
   of lang25: syntaxCheck(code, lang25_checks, module)
   of lang30: syntaxCheck(code, lang30_checks, module)
   else:      unreachable()
@@ -214,35 +262,53 @@ proc compile(tree: var PackedTree[syntax.NodeKind], source, target: Language) =
     case current
     of lang0, langBytecode, langSource, langLLVM:
       assert false, "cannot be handled here: " & $current
+    of langPtr:
+      measure "pass:ptr-to-int":
+        tree = tree.apply(pass_ptrToInt.lower(tree, PointerSize))
+      current = lang0
     of lang1:
       syntaxCheck(tree, lang1_checks, module)
-      tree = tree.apply(pass_inlineTypes.lower(tree))
-      current = lang0
+      measure "pass:inline-types":
+        tree = tree.apply(pass_inlineTypes.lower(tree))
+      current = langPtr
     of lang2:
       syntaxCheck(tree, lang2_checks, module)
-      tree = tree.apply(pass_stackAlloc.lower(tree, PointerSize))
+      measure "pass:stack-alloc":
+        tree = tree.apply(pass_stackAlloc.lower(tree))
       current = lang1
     of lang3:
       syntaxCheck(tree, lang3_checks, module)
-      tree = tree.apply(pass_aggregatesToBlob.lower(tree, PointerSize))
-      tree = tree.apply(pass_localsToBlob.lower(tree))
-      tree = tree.apply(pass_legalizeBlobOps.lower(tree))
+      measure "pass:aggregates-to-blob":
+        tree = tree.apply(pass_aggregatesToBlob.lower(tree, PointerSize))
+      measure "pass:locals-to-blob":
+        tree = tree.apply(pass_localsToBlob.lower(tree, PointerSize))
+      measure "pass:legalize-blobs":
+        tree = tree.apply(pass_legalizeBlobOps.lower(tree))
       current = lang2
     of lang4:
       syntaxCheck(tree, lang4_checks, module)
-      tree = tree.apply(pass_aggregateParams.lower(tree, PointerSize))
+      measure "pass:lower-aggregate-params":
+        tree = tree.apply(pass_aggregateParams.lower(tree))
       current = lang3
     of lang5:
       syntaxCheck(tree, lang5_checks, module)
-      tree = tree.apply(pass_flattenPaths.lower(tree))
+      measure "pass:flatten-paths":
+        tree = tree.apply(pass_flattenPaths.lower(tree))
       current = lang4
+    of lang6:
+      syntaxCheck(tree, lang6_checks, module)
+      measure "pass:globals-to-pointer":
+        tree = tree.apply(pass_globalsToPointer.lower(tree, PointerSize))
+      current = lang5
     of lang25:
       syntaxCheck(tree, lang25_checks, module)
-      tree = tree.apply(pass25.lower(tree))
-      current = lang5
+      measure "pass:basic-blocks":
+        tree = tree.apply(pass25.lower(tree))
+      current = lang6
     of lang30:
       syntaxCheck(tree, lang30_checks, module)
-      tree = tree.apply(pass30.lower(tree))
+      measure "pass:goto-rep":
+        tree = tree.apply(pass30.lower(tree))
       current = lang25
 
     print(tree, current)
@@ -270,6 +336,8 @@ proc main(args: openArray[string]) =
         target = parseEnum[Language](arg)
       of "show":
         gShow.incl parseEnum[Language](arg)
+      of "measure":
+        gMeasure = true
       of "":
         # a `--` means "program arguments follow"
         if cmd != Eval:
@@ -340,7 +408,8 @@ proc main(args: openArray[string]) =
     # the input is in some higher-level language
     if source == langSource:
       # translate to the highest-level IL first
-      (code, typ) = sourceToIL(text)
+      measure "source-to-il":
+        (code, typ) = sourceToIL(text)
       newSource = lang30
       print(code, newSource)
     elif gRunner:
@@ -354,7 +423,8 @@ proc main(args: openArray[string]) =
       # compile to L0 code and then translate to bytecode
       compile(code, newSource, lang0)
       syntaxCheck(code, lang0)
-      module = pass0.translate(code)
+      measure "vm-gen":
+        module = pass0.translate(code)
       # the bytecode is verified later
     elif target == langLLVM:
       compile(code, newSource, lang3)
@@ -364,6 +434,12 @@ proc main(args: openArray[string]) =
       compile(code, newSource, target)
       # make sure the output code is correct:
       syntaxCheck(code, target)
+
+  if gMeasure:
+    when declared(EventLog):
+      dumpTimings(gEvents)
+    else:
+      echo "`phy` was not built with instrumentation support"
 
   if target == langBytecode:
     # make sure the environment is correct:
@@ -384,6 +460,12 @@ proc main(args: openArray[string]) =
       else:
         error "invalid memory configuration"
 
+      # setup the VM instance and load all modules (currently only one):
+      var env = initVm(mem.initial, mem.maximum)
+      var ltab = LinkTable()
+      if not load(env, ltab, module):
+        error "loading the VM module failed"
+
       # look for the procedure to start evaluation with:
       var entry = none ProcIndex
       if source == langSource:
@@ -403,9 +485,9 @@ proc main(args: openArray[string]) =
         else:
           error "there's nothing to run"
 
-      # reserve the maximum amount of memory up-front
-      var env = initVm(mem.total, mem.total)
-      link(env, hostProcedures(gRunner), [module])
+      # import the host procedure's only now, so that the above module-level
+      # references are also valid program-level references
+      load(env, ltab, hostProcedures(gRunner))
       let stack = hoSlice(mem.stackStart, mem.stackStart + mem.stackSize)
 
       if source == langSource:

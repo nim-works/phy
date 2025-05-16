@@ -4,7 +4,8 @@
 import
   std/[
     intsets,
-    strformat
+    strformat,
+    strutils
   ],
   vm/[
     vmenv,
@@ -132,11 +133,22 @@ proc disassemble*(m: VmModule): string =
 
   # emit the constants:
   for i, val in m.constants.pairs:
-    result.add &".const c{i} {val}\n"
+    result.add &".const c{i} {val.typ} {val}\n"
 
   # emit the globals:
   for i, val in m.globals.pairs:
     result.add &".global g{i} {val.typ} {val}\n"
+
+  if m.memory > 0: # omit if zero
+    result.add &".memory {m.memory}\n"
+
+  # emit the regions:
+  for it in m.init.items:
+    result.add &".init {it.at} {escape(it.data)}\n"
+
+  # emit the relocations:
+  for it in m.relocations.items:
+    result.add &".reloc g{it}\n"
 
   # emit the procedures:
   for i, prc in m.procs.pairs:
@@ -152,7 +164,7 @@ proc disassemble*(m: VmModule): string =
     of pkStub:
       unreachable() # not possible
 
-  # # emit the exports:
+  # emit the exports:
   for e in m.exports.items:
     case e.kind
     of expGlobal:

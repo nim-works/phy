@@ -25,6 +25,8 @@ var
   env   = initVm(1024, 1024 * 1024)
   asmbl = AssemblerState()
   line  = 1
+  open  = true # start with an implicit module
+  modules = newSeq[VmModule]()
 
 var s = openFileStream(getExecArgs()[0], fmRead)
 if s.readLine() == "discard \"\"\"":
@@ -35,10 +37,33 @@ if s.readLine() == "discard \"\"\"":
 else:
   s.setPosition(0) # move back to the start
 
+proc closeModule(a: var AssemblerState): VmModule =
+  # make sure the assembled module is correct:
+  result = a.close()
+  let errors = validate(result)
+  if errors.len > 0:
+    for it in errors.items:
+      stderr.writeLine(it)
+    quit(1)
+
+  open = false
+  a = AssemblerState()
+
 # read all lines and pass them to the assembler:
 while not s.atEnd:
   try:
-    asmbl.process(s.readLine())
+    let L = s.readLine()
+    # check whether its a module start/end directive:
+    if L.startsWith(".module"):
+      if open:
+        raise ValueError.newException("assembly is already in progress")
+      open = true
+    elif L.startsWith(".close"):
+      if not open:
+        raise ValueError.newException("no module is open")
+      modules.add closeModule(asmbl)
+    else:
+      asmbl.process(L)
     inc line
   except AssemblerError, ValueError:
     stderr.writeLine("In line " & $line & ": " & getCurrentExceptionMsg())
@@ -46,16 +71,15 @@ while not s.atEnd:
 
 s.close()
 
-# make sure the assembled module is correct:
-let
-  module = asmbl.close()
-  errors = validate(module)
-if errors.len > 0:
-  for it in errors.items:
-    stderr.writeLine(it)
-  quit(1)
+if open:
+  modules.add closeModule(asmbl)
 
-link(env, toTable({"test": test}), [module])
+var ltab = LinkTable()
+# load all modules in order of apperance:
+for i, it in modules.pairs:
+  if not load(env, ltab, it):
+    stderr.write("failed to load module")
+    quit(1)
 
 if env.procs.len == 0:
   # there's nothing to execute, but don't treat this as an error
@@ -66,6 +90,9 @@ var
   res: YieldReason
   # use 1KB for the in-memory stack
   thread = env.initThread(env.procs.high.ProcIndex, 1024, @[])
+
+# finally, load the host procedures for testing:
+load(env, ltab, toTable({"test": test}))
 
 # run the thread until execution cannot resume anymore:
 while true:
