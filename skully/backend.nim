@@ -654,12 +654,6 @@ proc genConst(c; env; tree; n; dest: Expr, stmts) =
   template putIntoDest(n: Node) =
     stmts.putInto dest, n
 
-  template addPtrLit(bu: var Builder[NodeKind], i: int64) =
-    bu.subTree Reinterp:
-      bu.add typeRef(c, env, PointerType)
-      bu.add typeRef(c, env, UInt64Type)
-      bu.add node(IntVal, c.lit.pack(i))
-
   iterator args(tree; n): (int, NodePosition) =
     var i = 0
     for it in tree.items(n, 0, ^1):
@@ -852,14 +846,6 @@ proc genExit(c; tree; n; bu) =
       bu.add node(Immediate, c.prc.request(tree[n].label))
   else:
     unreachable()
-
-proc loadGlobalAddr(c; env: MirEnv, id: uint32, bu) =
-  ## Emits a load of the address stored in the global with the given id.
-  bu.subTree Reinterp:
-    bu.add typeRef(c, env, PointerType)
-    bu.add typeRef(c, env, UInt64Type)
-    bu.subTree Copy:
-      bu.add Node(kind: Global, val: id)
 
 proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition,
                     wantValue: bool, bu) =
@@ -1519,7 +1505,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       bu.add typeRef(c, env, tree[n].typ)
       value(tree.argument(n, 0))
       value(tree.argument(n, 1))
-  of mOrd, mChr
+  of mOrd, mChr:
     # it's a conversion, nothing more
     let input = c.gen(env, tree, NodePosition(tree.argument(n, 0)), true)
     wrapAsgn:
