@@ -1510,10 +1510,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       bu.add typeRef(c, env, tree[n].typ)
       value(tree.argument(n, 0))
       value(tree.argument(n, 1))
-  of mOrd:
-    wrapAsgn:
-      value(tree.argument(n, 0))
-  of mChr:
+  of mOrd, mChr:
     # it's a conversion, nothing more
     let input = c.gen(env, tree, NodePosition(tree.argument(n, 0)), true)
     wrapAsgn:
