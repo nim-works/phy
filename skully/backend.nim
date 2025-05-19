@@ -998,7 +998,8 @@ proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition,
             emit(c, env, tree, tree.child(n, 0), diff, b, bu)
       else:
         if env.types.headerFor(b, Lowered).kind in PointerLike:
-          # there are no pointer types in the IL; nothing to do
+          # all MIR pointer types map to the same IL pointer type;
+          # nothing special to do
           recurse(tree.child(n, 0), wantValue)
         else:
           assert not wantValue
@@ -1429,7 +1430,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
   of mEqProc:
     let typ = env.types.canonical(tree[tree.argument(n, 0)].typ)
     if env.types.headerFor(typ, Lowered).kind == tkProc:
-      # simple integer equality suffices
+      # simple pointer equality suffices
       wrapAsgn Eq:
         bu.add typeRef(c, env, typ)
         value(tree.argument(n, 0))
