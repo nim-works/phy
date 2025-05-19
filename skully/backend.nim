@@ -308,6 +308,49 @@ proc translateProcType(c; env: TypeEnv, id: TypeId, ignoreClosure: bool, bu) =
     if desc.callConv(env) == ccClosure and not ignoreClosure:
       bu.add typeRef(c, env, PointerType)
 
+proc computeSizeAlign(c; env: TypeEnv, typ: Typeid,
+                      withTag = true): (int64, int16) =
+  ## Computes the size and alignment of an embedded record/union.
+  # TODO: this shouldn't be our responsiblity! The NimSkull compiler has to
+  #       set the size and alignment for embedded records
+  let desc = env.headerFor(typ, Lowered)
+  var size = 0'i64
+  var align = 0'i16
+  case desc.kind
+  of tkTaggedUnion:
+    if withTag:
+      let tag = env.headerFor(env[env.lookupField(typ, 0)].typ, Lowered)
+      align = tag.align
+      size = tag.size(env)
+
+    for _, it in env.fields(desc, 1):
+      if env.isEmbedded(it.typ):
+        # an anonymous record; its fields need to be considered too
+        let (s, a) = computeSizeAlign(c, env, it.typ)
+        align = max(align, a)
+        size = max(size, s)
+      else:
+        let sub = env.headerFor(it.typ, Canonical)
+        align = max(align, sub.align)
+        size = max(size, sub.size(env))
+  of tkRecord:
+    for _, it in env.fields(desc, 0):
+      # align the offset, then add the size
+      if env.isEmbedded(it.typ):
+        let (s, a) = computeSizeAlign(c, env, it.typ)
+        size = align(size, a)
+        size += s
+        align = max(align, a)
+      else:
+        let sub = env.headerFor(it.typ, Canonical)
+        size = align(size, sub.align)
+        size += sub.size(env)
+        align = max(align, sub.align)
+  else:
+    unreachable()
+  # don't add any padding at the end
+  result = (size, align)
+
 proc embedTaggedUnion(c; env: TypeEnv, id: TypeId, bu) =
   privateAccess(RecField) # required for accessing the field offsets
 
@@ -317,29 +360,16 @@ proc embedTaggedUnion(c; env: TypeEnv, id: TypeId, bu) =
   let
     desc = env.headerFor(id, Lowered)
     tagField = env.lookupField(id, 0)
-
-  # compute the alignment for the union:
-  # TODO: this needs to be upstreamed into NimSkull
-  var alignment = 0'i16
-  for _, it in env.fields(desc, 1):
-    let sub = env.headerFor(it.typ, Canonical)
-    if env.isEmbedded(it.typ):
-      # an anonymous record; its fields need to be considered too
-      for _, inner in env.fields(sub):
-        alignment = max(alignment, env.headerFor(inner.typ, Canonical).align)
-    else:
-      alignment = max(alignment, sub.align)
-
-  let offset = align(env[tagField].offset.uint32 + desc.size(env).uint32,
-                     uint32 alignment)
-    ## the offset of the union within the embedding record
+    tagDesc = env.headerFor(env[tagField].typ, Lowered)
+    (size, alignment) = computeSizeAlign(c, env, id, withTag=false)
+      # the size and alignment of the union (without the tag)
+    offset = align(env[tagField].offset.uint32 + tagDesc.size(env).uint32,
+                   uint32 alignment)
+      ## the offset of the union within the embedding record
 
   let inner = block:
-    # XXX: size and alignment are currently ignored, as it's simpler this way
-    #      and no pass inspects these values anyhow (at least at the time of
-    #      writing)
     var bu = initBuilder(Union)
-    bu.add node(Immediate, 0)
+    bu.add node(Immediate, uint32 size)
     bu.add node(Immediate, uint32 alignment)
     for _, it in env.fields(desc, 1):
       if env.isEmbedded(it.typ):
@@ -347,12 +377,13 @@ proc embedTaggedUnion(c; env: TypeEnv, id: TypeId, bu) =
           # IL record types must not be empty; add a dummy field
           bu.add node(UInt, 1)
         else:
+          let (s, a) = computeSizeAlign(c, env, it.typ)
           # emit the record type for the embedded type, but make sure to
           # correct the field offsets; they need to be relative to the start
           # of the union, not to the start of the embedding record
           var bu2 = initBuilder(Record)
-          bu2.add node(Immediate, 0)
-          bu2.add node(Immediate, 0)
+          bu2.add node(Immediate, s.uint32)
+          bu2.add node(Immediate, a.uint32)
           for _, recf in env.fields(env.headerFor(it.typ, Lowered)):
             bu2.subTree Field:
               bu2.add node(Immediate, recf.offset.uint32 - offset)
