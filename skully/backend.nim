@@ -1820,7 +1820,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         bu.subTree Copy:
           bu.subTree Field:
             lvalue(tree.argument(n, 0))
-            bu.add node(Immediate, 0)
+            bu.add node(Immediate, 1)
         bu.add node(Nil)
       bu.goto then
       bu.goto els
