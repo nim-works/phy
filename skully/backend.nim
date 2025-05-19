@@ -1150,10 +1150,10 @@ proc genNumericConv(c; env; val: Expr, to: TypeId, bu) =
       bu.add typeRef(c, env, val.typ)
       bu.use val
 
-  template sizedConv(widen, narrow: NodeKind) =
+  template sizedConv(narrow, widen: NodeKind) =
     if dst.size(env.types) < src.size(env.types):
       convOp narrow
-    elif dst.size(env.types) > dst.size(env.types):
+    elif dst.size(env.types) > src.size(env.types):
       convOp widen
     else:
       # nothing to do
@@ -1185,7 +1185,7 @@ proc genNumericConv(c; env; val: Expr, to: TypeId, bu) =
     of ints, uints:
       convOp Conv
     of tkFloat:
-      sizedConv Promote, Demote
+      sizedConv Demote, Promote
     else:
       unreachable()
   of tkPtr, tkPointer, tkProc, tkCstring:
