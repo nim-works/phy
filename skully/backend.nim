@@ -1440,7 +1440,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       # TODO: use a proper short-circuiting ``and``, not a ``bitand``
       wrapAsgn BitAnd:
         bu.add typeRef(c, env, PointerType)
-        wrapAsgn Eq:
+        bu.subTree Eq:
           bu.add typeRef(c, env, PointerType)
           bu.subTree Copy:
             bu.subTree Field:
@@ -1450,7 +1450,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
             bu.subTree Field:
               lvalue tree.argument(n, 1)
               bu.add node(Immediate, 0)
-        wrapAsgn Eq:
+        bu.subTree Eq:
           bu.add typeRef(c, env, PointerType)
           bu.subTree Copy:
             bu.subTree Field:
