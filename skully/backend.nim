@@ -669,6 +669,8 @@ proc genConst(c; env; tree; n; dest: Expr, stmts) =
     putIntoDest node(FloatVal, c.lit.pack(env.getFloat(tree[n].number)))
   of mnkProcVal:
     putIntoDest node(ProcVal, c.registerProc(tree[n].prc))
+  of mnkNilLit:
+    putIntoDest node(Nil)
   of mnkArrayConstr:
     for i, it in tree.args(n):
       let nDest = makeExpr tree[it].typ:
