@@ -1596,14 +1596,14 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       bu.subTree Call:
         bu.add compilerProc(c, env, "cmpStrings")
         value(tree.argument(n, 0))
-        bu.add node(IntVal, 0)
+      bu.add node(IntVal, 0)
   of mLtStr:
     wrapAsgn Lt:
       bu.add typeRef(c, env, env.types.sizeType)
       bu.subTree Call:
         bu.add compilerProc(c, env, "cmpStrings")
         value(tree.argument(n, 0))
-        bu.add node(IntVal, 0)
+      bu.add node(IntVal, 0)
   of mFinished:
     # the status field is stored at the start of the env object, load it and
     # test whether the value is < 0
