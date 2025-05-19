@@ -1920,7 +1920,7 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         bu.subTree Eq:
           bu.add typeRef(c, env, e.typ)
           bu.use e
-          bu.add node(IntVal, c.lit.pack(0))
+          bu.add node(Nil)
         bu.goto els
         bu.goto then
       stmts.join then
@@ -2094,7 +2094,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
                 bu.subTree Field:
                   lvalue callee
                   bu.add node(Immediate, 1)
-              bu.add node(IntVal, c.lit.pack(0))
+              bu.add node(Nil)
             bu.goto els
             bu.goto then
           stmts.join then
@@ -2300,7 +2300,7 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
       bu.subTree Field:
         bu.useLvalue dest
         bu.add node(Immediate, 0)
-      bu.add node(IntVal, c.lit.pack(0))
+      bu.add node(Nil)
     stmts.addStmt Asgn:
       bu.subTree Field:
         bu.useLvalue dest
@@ -2616,7 +2616,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
   of mnkContinue:
     guardActive()
     stmts.addStmt Raise:
-      bu.add node(IntVal, 0)
+      bu.add node(Nil)
       c.genExit(tree, tree.child(n, 0), bu)
     c.prc.active = false
   of mnkRaise:
@@ -2624,7 +2624,7 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
     # NimSkull exceptions are managed separately; there's nothing to pass
     # along to ``Raise``
     stmts.addStmt Raise:
-      bu.add node(IntVal, 0)
+      bu.add node(Nil)
       c.genExit(tree, tree.child(n, 0), bu)
     c.prc.active = false
   of mnkEmit, mnkAsm:
