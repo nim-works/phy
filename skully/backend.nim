@@ -2368,8 +2368,14 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
           c.genSetElem(env, tree, it, tree[n].typ, bu)
         c.genIncl(env, dest, e, stmts)
   of mnkCast:
-    let dst = env.types.canonical(tree[n].typ)
-    let src = env.types.canonical(tree[n, 0].typ)
+    proc canon(env: TypeEnv, id: TypeId): TypeId =
+      ## Skips to the non-imported canonical type.
+      result = env.canonical(id)
+      if env.headerFor(result, Lowered).kind == tkImported:
+        result = canon(env, env.headerFor(result, Lowered).elem)
+
+    let dst = env.types.canon(tree[n].typ)
+    let src = env.types.canon(tree[n, 0].typ)
     let tdst = c.genType(env.types, dst)
     let tsrc = c.genType(env.types, src)
     if tdst == tsrc:
@@ -2385,9 +2391,9 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
         takeAddr tree.child(n, 0)
         bu.add node(IntVal, c.lit.pack(size))
     else:
-      template isPointer(id: TypeId): bool =
+      template isInt(id: TypeId): bool =
         env.types.headerFor(id, Lowered).kind in
-          {tkPointer, tkProc, tkRef, tkPtr, tkCstring}
+          {tkInt, tkUInt, tkBool, tkChar}
 
       let a = env.types.headerFor(dst, Lowered).size(env.types)
       let b = env.types.headerFor(src, Lowered).size(env.types)
@@ -2400,29 +2406,29 @@ proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
           value tree.child(n, 0)
       else:
         let op = if a < b: Trunc else: Zext
-        # pointer values cannot be truncated/extended directly -- the operation
-        # has to happen on a uint
-        if isPointer(src):
-          wrapAsgn op:
-            bu.add typeRef(c, env, dst)
-            bu.add typeRef(c, env, env.types.usizeType)
+        var val = c.gen(env, tree, tree.child(n, 0), true)
+        # non-integer values cannot be truncated/extended directly; the value
+        # has to be bitcast into an int first
+        if not isInt(src):
+          val = makeExpr env.types.usizeType:
             bu.subTree Reinterp:
               bu.add typeRef(c, env, env.types.usizeType)
               bu.add typeRef(c, env, src)
-              value tree.child(n, 0)
-        elif isPointer(dst):
+              bu.use val
+
+        if isInt(dst):
+          wrapAsgn op:
+            bu.add typeRef(c, env, dst)
+            bu.add typeRef(c, env, val.typ)
+            bu.use val
+        else:
           wrapAsgn Reinterp:
             bu.add typeRef(c, env, dst)
             bu.add typeRef(c, env, env.types.usizeType)
             bu.subTree op:
               bu.add typeRef(c, env, env.types.usizeType)
-              bu.add typeRef(c, env, src)
-              value tree.child(n, 0)
-        else:
-          wrapAsgn op:
-            bu.add typeRef(c, env, dst)
-            bu.add typeRef(c, env, dst)
-            value tree.child(n, 0)
+              bu.add typeRef(c, env, val.typ)
+              bu.use val
   else:
     unreachable()
 
