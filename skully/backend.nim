@@ -1045,11 +1045,14 @@ proc getTypeInfoV2(c; env: var MirEnv, typ: TypeId): Expr =
 proc genDefault(c; env: var MirEnv; dest: Expr, typ: TypeId, bu) =
   let typ = env.types.canonical(typ)
   case env.types.headerFor(typ, Lowered).kind
-  of tkBool, tkChar, tkInt, tkUInt, tkRef, tkPtr, tkVar, tkLent, tkPointer:
+  of tkBool, tkChar, tkInt, tkUInt:
     genAsgn(dest, makeExpr(@[node(IntVal, c.lit.pack(0))], typ), bu)
   of tkFloat:
     genAsgn(dest, makeExpr(@[node(FloatVal, c.lit.pack(0.0))], typ), bu)
+  of tkRef, tkPtr, tkVar, tkLent, tkPointer, tkCstring, tkProc:
+    genAsgn(dest, makeExpr(@[node(Nil)], typ), bu)
   else:
+    # TODO: for seqs, closures, and openarrays, set the fields directly
     let size = env.types.headerFor(typ, Lowered).size(env.types)
     bu.subTree Clear:
       takeAddr(dest, bu)
