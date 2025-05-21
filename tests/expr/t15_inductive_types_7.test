@@ -1,0 +1,8 @@
+discard """
+  description: "Data types may have more than one constructor"
+  arguments: "c"
+"""
+(DataTypeDecl typ
+  (Constr nullary)
+  (Constr unary (IntTy))
+  (Constr binary (IntTy) (FloatTy)))
