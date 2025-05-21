@@ -174,7 +174,7 @@ jobs:
         run: bin/phy --source:L25 --target:llvm --measure c build/phy.txt
 
       - name: Assemble LLVM bitcode
-        run: clang -fstack-protector -O3 -o build/phy.bc out.ll
+        run: clang -fstack-protector -O3 --emit-llvm -o build/phy.bc out.ll
 
       - name: Compile final program
         run: clang -fstack-protector -O3 -o build/phy-llvm build/phy.bc runtime.c
