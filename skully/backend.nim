@@ -2730,8 +2730,6 @@ proc translateProc(c; env: var MirEnv, procType: TypeId,
   let typ = c.genProcType(env, procType)
   c.complete(env, typ, c.prc, body, content)
 
-import compiler/mir/utils
-
 proc replaceProcAst(config: ConfigRef, prc: PSym, with: PNode) =
   ## Replaces the ``PSym.ast`` of `prc` with the routine AST `with`,
   ## reparenting all symbols found in the body. This is crude, brittle, and
@@ -2852,13 +2850,8 @@ proc processEvent(env: var MirEnv, bodies: var ProcMap,
     var body = evt.body
     apply(body, env) # apply the additional MIR passes
 
-    try:
-      let procType = env.types.add(evt.sym.typ)
-      bodies[c.registerProc(evt.id)] = c.translateProc(env, procType, body)
-    except:
-      echo evt.sym
-      echo render(body.code, addr env, addr body)
-      raise
+    let procType = env.types.add(evt.sym.typ)
+    bodies[c.registerProc(evt.id)] = c.translateProc(env, procType, body)
   of bekImported:
     # dynlib procedures are not supported
     c.graph.config.localReport(evt.sym.info,
@@ -2915,8 +2908,6 @@ proc generateCodeForMain(c; env: var MirEnv; m: Module,
 
   let typ = c.genProcType(env, env.types.add(prc.typ))
   result = (prc, c.complete(env, typ, c.prc, body, finish(bu)))
-
-import compiler/backend/ccgutils
 
 proc generateCode*(graph: ModuleGraph): PackedTree[NodeKind] =
   ## Generates the IL code for the full program represented by `graph` and
@@ -3014,12 +3005,5 @@ proc generateCode*(graph: ModuleGraph): PackedTree[NodeKind] =
     bu.subTree Export:
       bu.add Node(kind: StringVal, val: c.lit.pack("stack_size"))
       bu.add Node(kind: Global, val: c.globals.len.uint32)
-
-    for id, v in c.procMap.pairs:
-      let s = env.procedures[id]
-      if sfImportc notin s.flags:
-        bu.subTree Export:
-          bu.add Node(kind: StringVal, val: c.lit.pack(mangle(s.skipGenericOwner.name.s & "." & s.name.s)))
-          bu.add Node(kind: Proc, val: v.uint32)
 
   result = initTree[NodeKind](finish(bu), c.lit)
