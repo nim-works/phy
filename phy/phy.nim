@@ -429,7 +429,10 @@ proc main(args: openArray[string]) =
     elif target == langLLVM:
       compile(code, newSource, lang3)
       syntaxCheck(code, lang3)
-      writeFile("out.ll", passllvm.translate(code))
+      var output: string
+      measure "llvm-gen":
+        output = passllvm.translate(code)
+      writeFile("out.ll", output)
     else:
       compile(code, newSource, target)
       # make sure the output code is correct:
