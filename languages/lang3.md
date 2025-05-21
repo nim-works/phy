@@ -17,9 +17,7 @@ typedesc -= (Blob <int> <int>)
 typedesc += (Record size:<int> align:<int> (Field <int> <type>)+)
           | (Union  size:<int> align:<int> <type>+)
           | (Array  size:<int> align:<int> count:<int> <type>)
-          | (Ptr) # XXX: temporary solution
 
-type += (Ptr) # XXX: temporary solution
 type -= (Blob <int> <int>)
 ```
 
