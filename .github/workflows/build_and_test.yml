@@ -168,3 +168,17 @@ jobs:
         env:
           TEST_FILE: tests/expr/t06_call_proc_with_tuple_return_type.test
           TEST_OUTPUT: "(TupleCons 100 200) : (TupleTy (IntTy) (IntTy))(Done 0)"
+
+      # test the LLVM code generator
+      - name: Compile phy to LLVM
+        run: bin/phy --source:L25 --target:llvm --measure c build/phy.txt
+
+      - name: Assemble LLVM bitcode
+        run: clang -fstack-protector -O3 -o build/phy.bc out.ll
+
+      - name: Compile final program
+        run: clang -fstack-protector -O3 -o build/phy-llvm build/phy.bc runtime.c
+
+      # use the LLVM-compiled phy to compile phy to LLVM
+      - name: Test LLVM-built phy
+        run: build/phy-llvm --source:L25 --target:llvm c phy.txt
