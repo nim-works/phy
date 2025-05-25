@@ -38,6 +38,7 @@ texpr    ::= <ident>
           |  (VoidTy)
           |  (UnitTy)
           |  (BoolTy)
+          |  (CharTy)
           |  (IntTy)
           |  (FloatTy)
           |  (ArrayTy <intVal> <texpr>)
