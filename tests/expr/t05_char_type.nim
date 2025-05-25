@@ -1,0 +1,1 @@
+(TypeDecl (Ident "char") (CharTy))

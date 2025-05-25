@@ -253,6 +253,7 @@ proc evalType(c; t; n: NodeIndex): SemType =
   of VoidTy:  prim(tkVoid)
   of UnitTy:  prim(tkUnit)
   of BoolTy:  prim(tkBool)
+  of CharTy:  prim(tkChar)
   of IntTy:   prim(tkInt)
   of FloatTy: prim(tkFloat)
   of SourceKind.ArrayTy:
