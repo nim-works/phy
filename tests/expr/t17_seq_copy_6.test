@@ -1,0 +1,8 @@
+discard """
+  output: "(RecordCons (Field f (array 1 2 3))) : (RecordTy (Field f (SeqTy (IntTy))))"
+"""
+(Exprs
+  (Decl x (Seq (IntTy) 1 2 3))
+  (Decl y (RecordCons (Field f x)))
+  (Asgn (At x 0) 4)
+  y)
