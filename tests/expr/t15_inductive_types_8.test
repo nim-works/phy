@@ -1,0 +1,16 @@
+discard """
+  description: "
+    When inferring the type of a decl, the full data type is preferred over
+    a subtype (subject to change).
+  "
+  output: "b : typ"
+"""
+(Module
+  (DataTypeDecl typ
+    (Constr a)
+    (Constr b))
+  (ProcDecl test typ (Params)
+    (Exprs
+      (Decl x a)
+      (Asgn x b)
+      x)))
