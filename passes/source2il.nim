@@ -611,6 +611,17 @@ proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
             newCall(c.getTypeBoundOp(opCopy, it), newFieldExpr(src, i)))
 
       body.add newReturn(dst)
+    of tkRecord:
+      body = IrNode(kind: Stmts)
+      for i, it in typ.fields.pairs:
+        if isTriviallyCopyable(it.typ):
+          body.add newAsgn(newFieldExpr(dst, i),
+            newFieldExpr(src, i))
+        else:
+          body.add newAsgn(newFieldExpr(dst, i),
+            newCall(c.getTypeBoundOp(opCopy, it.typ), newFieldExpr(src, i)))
+
+      body.add newReturn(dst)
     of tkUnion:
       body = IrNode(kind: Stmts)
       # copy the tag:
@@ -630,7 +641,7 @@ proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
 
       body.add caseStmt
       body.add newReturn(dst)
-    else:
+    of AllTypes - AggregateTypes:
       unreachable() # no copy procedure needed
   of opAt:
     case typ.kind
