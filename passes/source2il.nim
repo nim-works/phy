@@ -229,6 +229,14 @@ proc expectNot(c; typ: sink SemType, kind: TypeKind): SemType =
     c.error("type not allowed in this context")
     result = errorType()
 
+proc unify(c; a, b: SemType): SemType =
+  ## Unifies `a` and `b`, reporting and returning error an when this is
+  ## not possible.
+  result = commonType(a, b)
+  if result.kind == tkError and tkError notin {a.kind, b.kind}:
+    c.error("'$1' and '$2' cannot be unified into a single type" %
+            [$a, $b])
+
 proc unionOf(types: openArray[SemType]): tuple[typ: SemType, folded: bool] =
   ## Attempts to create a union type from `types`. If the resulting union would
   ## only consist of a single type, the single type is returned and `folded` is
@@ -1235,15 +1243,8 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       body = exprToIL(c, t, b)
       els = if t.len(n) == 3: exprToIL(c, t, t.child(n, 2))
             else:             unitExpr
-      typ = commonType(body.typ, els.typ)
-      (fb, fe) =
-        case typ.kind
-        of tkError:
-          c.error("if ($1) and else ($2) branches cannot be unified into a single type" %
-                  [$body.typ, $els.typ])
-          (body, els)
-        else:
-          (c.fitExpr(body, typ), c.fitExpr(els, typ))
+      typ = unify(c, body.typ, els.typ)
+      (fb, fe) = (c.fitExpr(body, typ), c.fitExpr(els, typ))
       tmp = c.newTemp(typ)
 
     stmts.add newIf(use(c, cond, stmts), wrap(c, fb, tmp), wrap(c, fe, tmp))
@@ -1295,10 +1296,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
           c.error("element cannot be of type 'void'")
           args[i].typ = errorType()
 
-        if elem.kind != tkError:
-          elem = commonType(elem, args[i].typ)
-          if elem.kind == tkError and args[i].typ.kind != tkError:
-            c.error("cannot unify types")
+        elem = unify(c, elem, args[i].typ)
 
       result = arrayType(length, elem) + {}
       expr = c.newTemp(result.typ)
@@ -1623,12 +1621,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       let body = c.exprToIL(t, bodyNode)
       c.closeScope()
 
-      let newResult = commonType(res, body.typ)
-      if tkError notin {res.kind, body.typ.kind} and
-         newResult.kind == tkError:
-        c.error("'$1' and '$2' cannot be unified into a single type" %
-                [$res, $body.typ])
-      res = newResult
+      res = unify(c, res, body.typ)
 
       if at >= got.len or got[at] != typ:
         got.insert typ, at
