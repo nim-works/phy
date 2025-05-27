@@ -1035,7 +1035,7 @@ proc userCallToIL(c; t; n: NodeIndex, expr; stmts): SemType =
         # only try fitting the argument if there's a corresponding parameter
         let arg =
           if i < prc.elems.len:
-            c.fitExprStrict(c.exprToIL(t, it), prc.elems[i])
+            c.fitExpr(c.exprToIL(t, it), prc.elems[i])
           else:
             c.exprToIL(t, it)
 
