@@ -273,18 +273,11 @@ proc evalType(c; t; n: NodeIndex): SemType =
     else:
       var tup = SemType(kind: tkTuple)
       for it in t.items(n):
-        tup.elems.add evalType(c, t, it)
-        case tup.elems[^1].kind
-        of tkError:
-          tup = errorType()
-          break
-        of tkVoid:
+        var elem = evalType(c, t, it)
+        if elem.kind == tkVoid:
           c.error("'void' type cannot be part of tuple type")
-          tup = errorType()
-          break
-        else:
-          discard "all good"
-
+          elem = errorType()
+        tup.elems.add elem
       tup
   of RecordTy:
     var rec = SemType(kind: tkRecord)
@@ -1326,15 +1319,14 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       # assigned individually
       let tmp = c.newTemp(errorType())
       for i, it in t.pairs(n):
-        let e = c.exprToIL(t, it)
-        elems[i] = e.typ
-
-        if e.typ.kind == tkError:
-          return errorType() + {}
-        elif e.typ.kind == tkVoid:
+        var e = c.exprToIL(t, it)
+        if e.typ.kind == tkVoid:
           c.error("tuple element cannot be 'void'")
-          return errorType() + {}
+          # turn into an error expression:
+          e.typ = errorType()
+          e.expr = IrNode(kind: None)
 
+        elems[i] = e.typ
         # add an assignment for the field:
         stmts.add newAsgn(newFieldExpr(tmp, i), use(c, e, stmts))
 
