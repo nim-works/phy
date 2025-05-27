@@ -1,0 +1,9 @@
+discard """
+  description: "Either the if or else branch has an error"
+  reject: true
+"""
+(Module
+  (ProcDecl (Ident "test") (UnitTy) (Params (ParamDecl (Ident "x") (IntTy)))
+    (Return))
+  (ProcDecl (Ident "main") (UnitTy) (Params)
+    (Call (Ident "test") (Ident "missing"))))
