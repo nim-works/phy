@@ -860,6 +860,8 @@ proc fitExprStrict(c; e: sink Expr, typ: SemType): Expr =
   ## returning an error-expression if not.
   if e.typ == typ:
     result = e # all good
+  elif tkError in {e.typ.kind, typ.kind}:
+    result = e # don't report follow-up errors
   else:
     c.error("expected expression of type $1 but got type $2" %
             [$typ, $e.typ])
