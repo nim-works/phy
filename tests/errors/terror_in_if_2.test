@@ -1,0 +1,7 @@
+discard """
+  description: "The "else" part of an if has an error"
+  reject: true
+"""
+(If (Ident "true")
+  (IntVal 10)
+  (Ident "missing"))
