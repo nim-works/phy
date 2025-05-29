@@ -1,5 +1,5 @@
 discard """
-  description: "Either the if or else branch has an error"
+  description: "A call argument has an error"
   reject: true
 """
 (Module

@@ -1,5 +1,5 @@
 discard """
-  description: "Either the if or else branch has an error"
+  description: "A tuple construction element has an error"
   reject: true
 """
 (TupleCons (Ident "missing"))
