@@ -1,0 +1,5 @@
+discard """
+  description: "A tuple construction element has an error"
+  reject: true
+"""
+(TupleCons (Ident "missing"))
