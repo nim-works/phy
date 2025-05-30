@@ -848,6 +848,11 @@ proc interpret(c; lang; n: Node, then: sink Next): Node {.tailcall.} =
     for i in 0..<n.len - 1:
       inputs.add eval(c, lang, n[i][1])
 
+    # all lists must have the same number of arguments:
+    for i in 1..<inputs.len:
+      if inputs[i].len != inputs[0].len:
+        raise Failure.newException("")
+
     var output: seq[Node]
     for i in 0..<inputs[0].len:
       c.push()

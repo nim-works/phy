@@ -1,0 +1,13 @@
+discard """
+  description: "
+    A call argument's type must match the type of the corresponding
+    parameter.
+  "
+  output: "(TupleCons) : (UnitTy)"
+"""
+(Module
+  (ProcDecl (Ident "test") (UnitTy)
+    (Params (ParamDecl (Ident "x") (UnionTy (IntTy) (UnitTy))))
+    (TupleCons))
+  (ProcDecl (Ident "main") (UnitTy) (Params)
+    (Call (Ident "test") (TupleCons))))
