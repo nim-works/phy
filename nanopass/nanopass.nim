@@ -9,6 +9,7 @@ import
   std/[macros, sets, strformat, tables]
 
 type
+  # Core types capturing a defined language
   Elem = object
     mvar: string
     typ: string
@@ -43,6 +44,8 @@ type
     tags: Table[string, uint8]
       ## associates an integer ID with each tag
 
+type
+  # Intermediate types meant to bridge macro language to core types
   NonTerminalDef = object
     ## Pre-processed non-terminal definition.
     name: NimNode
