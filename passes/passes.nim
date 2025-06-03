@@ -23,7 +23,7 @@ defineLanguage Lsrc:
               RecordCons(rf0, ...rf1) |
               Seq(t, ...e) |
               Seq(str) |
-              Call(e, ...e) |
+              Call(e0, ...e1) |
               FieldAccess(e, n) |
               FieldAccess(e, x) |
               At(e0, e1) |
@@ -62,7 +62,7 @@ defineLanguage L2, L1:
 
 defineLanguage L3, L2:
   ## Language that replaces Decl with Let.
-  expr(e) ::= -Decl(x, e) | +Let(x, e, e)
+  expr(e) ::= -Decl(x, e) | +Let(x, e1, e2)
 
 defineLanguage L4, L3:
   ## Removes the `Match` form.
