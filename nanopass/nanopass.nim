@@ -96,6 +96,9 @@ proc parseForm(vars: Table[string, string], n: NimNode): (seq[string], Form) =
     if e >= 0 and name[e] == '_':
       dec e
 
+    if name in result[0]:
+      error(fmt"duplicate use of '{name}'; elements need a unique name", it)
+
     elem.mvar = name[0..e]
     if elem.mvar notin vars:
       error(fmt"no meta-var with name '{elem.mvar}' exists", it)
