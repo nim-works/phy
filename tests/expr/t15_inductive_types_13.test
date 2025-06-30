@@ -1,0 +1,16 @@
+discard """
+  description: "
+    The `Constr` pattern is used for destructuring a constructed value.
+  "
+  output: "100 : (IntTy)"
+"""
+(Module
+  (DataTypeDecl typ
+    (Constr a (IntTy))
+    (Constr b (IntTy)))
+  (ProcDecl test (IntTy) (Params)
+    (Exprs
+      (Decl x (Call a 100))
+      (Match x
+        (Rule (Constr a val) val)
+        (Rule (Constr b val) 0)))))
