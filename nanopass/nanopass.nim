@@ -11,41 +11,50 @@ import
 type
   # Core types capturing a defined language
   Elem = object
-    mvar: string
+    ## Element of a form.
     typ: string
       ## the actual type
     repeat: bool
 
   Form = object
-    tag: string
+    ## Semantic representation of a syntax form.
+    tag: string # TODO: rename to name
     elems: seq[Elem]
 
-  NamedForm = object
-    names: seq[string]
-      ## gives a name to each element of the form
-    form: int
-      ## reference to the form
+  OrigForm = object
+    ## Source-level-ish representation of a syntax form description.
+    vars: seq[string]
+      ## the metavars-as-written for the form's elements
+    semantic: int
+      ## index of the semantic representation
 
   NonTerminal = object
     mvars: seq[string]
       ## the meta-variables for ranging over the productions
     vars: seq[string]
       ## meta-variables used as productions
-    forms: seq[NamedForm]
+    forms: seq[OrigForm]
       ## forms used as productions
 
   LangDef = object
+    ## A checked and pre-processed language definition, carrying enough
+    ## source-level information necessary for implementing, e.g., inheritance.
     terminals: Table[string, string]
-      ## name -> type. The terminals of the language
+      ## the terminals of the language
     nterminals: Table[string, NonTerminal]
       ## the non-terminals of the language
     forms: seq[Form]
-      ## all forms used in productions
+      ## all syntax forms present in the language
     tags: Table[string, uint8]
       ## associates an integer ID with each tag
 
 type
   # Intermediate types meant to bridge macro language to core types
+  ParsedForm = object
+    ## A syntax form description as parsed from NimNode AST.
+    name: string
+    elems: seq[tuple[mvar: string, repeat: bool, info: NimNode]]
+
   NonTerminalDef = object
     ## Pre-processed non-terminal definition.
     name: NimNode
@@ -63,7 +72,7 @@ template findIt[T](s: seq[T], predicate: untyped): untyped =
   r
 
 proc `==`(x, y: Elem): bool =
-  x.mvar == y.mvar and x.repeat == y.repeat
+  x.typ == y.typ and x.repeat == y.repeat
 
 proc `==`(x, y: Form): bool =
   ## Compares `x` and `y`, which must belong to the same language, for equality.
@@ -78,54 +87,20 @@ proc checkName(target: LangDef, vars: Table[string, string], name: string,
   elif name in vars:
     error(fmt"'{name}' is already used by a meta-variable for '{vars[name]}'", info)
 
-proc parseForm(vars: Table[string, string], n: NimNode): (seq[string], Form) =
+proc parseForm(n: NimNode): ParsedForm =
+  ## Parses a form in the context of a language definition. No semantic checks
+  ## take place.
   n[0].expectKind nnkIdent
-  var form = Form(tag: n[0].strVal)
-
+  result.name = n[0].strVal
   for i in 1..<n.len:
-    var elem = Elem()
+    var repeat = false
     var it = n[i]
     if it.kind == nnkPrefix and it[0].eqIdent("..."):
-      elem.repeat = true
+      repeat = true
       it = it[1]
 
     it.expectKind nnkIdent
-    let name = it.strVal
-    var e = name.high
-    # to get the type, trim trailing numbers and a single underscore:
-    while e >= 0 and name[e] in {'0'..'9'}:
-      dec e
-
-    if e >= 0 and name[e] == '_':
-      dec e
-
-    if name in result[0]:
-      error(fmt"duplicate use of '{name}'; elements need a unique name", it)
-
-    elem.mvar = name[0..e]
-    if elem.mvar notin vars:
-      error(fmt"no meta-var with name '{elem.mvar}' exists", it)
-
-    elem.typ = vars[elem.mvar]
-    form.elems.add elem
-    result[0].add name
-  result[1] = form
-
-proc parseRawForm(n: NimNode): Form =
-  ## Parses a raw form (a form without name information) from the given AST.
-  n[0].expectKind nnkIdent
-  result.tag = n[0].strVal
-
-  for i in 1..<n.len:
-    var elem = Elem()
-    var it = n[i]
-    if it.kind == nnkPrefix and it[0].eqIdent("..."):
-      elem.repeat = true
-      it = it[1]
-
-    it.expectKind nnkIdent
-    elem.mvar = it.strVal
-    result.elems.add elem
+    result.elems.add (it.strVal, repeat, it)
 
 proc addForm(def: var LangDef, form: Form): int =
   def.forms.add form
@@ -179,10 +154,23 @@ proc buildLanguage(add, sub: seq[NimNode],
     vars[it] = it
 
   proc removeProd(def: var LangDef, n: NimNode, to: string) =
+    proc find(def: LangDef, nt: NonTerminal, f: ParsedForm): int =
+      for i, it in nt.forms.pairs:
+        if def.forms[it.semantic].tag == f.name and
+           it.vars.len == f.elems.len:
+          block search:
+            # compare the elements:
+            for j in 0..<f.elems.len:
+              if f.elems[j].repeat != def.forms[it.semantic].elems[j].repeat or
+                 f.elems[j].mvar != it.vars[j]:
+                break search
+
+            return i
+      result = -1
+
     case n.kind
     of nnkCall:
-      let f = def.forms.find(parseRawForm(n))
-      let idx = def.nterminals[to].forms.findIt(it.form == f)
+      let idx = def.find(def.nterminals[to], parseForm(n))
       if idx == -1:
         error(fmt"given form is not a production of '{to}'", n)
       def.nterminals[to].forms.delete(idx)
@@ -232,15 +220,15 @@ proc buildLanguage(add, sub: seq[NimNode],
         base.nterminals[name].mvars.add mname
         vars[mname] = name
 
-  proc checkForm(def: LangDef, vars: Table[string, string], form: Form,
+  proc checkForm(def: LangDef, vars: Table[string, string], form: OrigForm,
                  info: NimNode) =
-    for i, it in form.elems.pairs:
-      if it.mvar in vars:
-        if vars[it.mvar] != it.typ:
-          error(fmt"cannot inherit '{form}'; '{it.mvar}' changed its meaning",
+    for i, it in form.vars.pairs:
+      if it in vars:
+        if vars[it] != def.forms[form.semantic].elems[i].typ:
+          error(fmt"cannot inherit '{form}'; '{it}' changed its meaning",
                 info)
       else:
-        error(fmt"cannot inherit '{form}'; '{it.mvar}' was removed", info)
+        error(fmt"cannot inherit '{form}'; '{it}' was removed", info)
 
   # after all that setup, the productions can finally be inherited:
   for name, it in base.nterminals.pairs:
@@ -248,11 +236,11 @@ proc buildLanguage(add, sub: seq[NimNode],
     # inherit the forms and patch references:
     for f in res.forms.mitems:
       # make sure the forms are still valid after the previous removals/renames
-      checkForm(base, vars, base.forms[f.form], info)
-      var idx = result.forms.find(base.forms[f.form])
+      checkForm(base, vars, f, info)
+      var idx = result.forms.find(base.forms[f.semantic])
       if idx == -1:
-        idx = result.addForm(base.forms[f.form])
-      f.form = idx
+        idx = result.addForm(base.forms[f.semantic])
+      f.semantic = idx
 
     # check the meta-vars:
     for v in res.vars.items:
@@ -270,16 +258,27 @@ proc buildLanguage(add, sub: seq[NimNode],
     vars[name] = name
 
   proc addProd(def: var LangDef, n: NimNode, to: string) =
+    proc addForm(def: var LangDef, p: ParsedForm): OrigForm =
+      var form = Form(tag: p.name) # the ID is computed later
+
+      for i, (name, repeat, info) in p.elems.pairs:
+        if name notin vars:
+          error(fmt"no meta-var with name '{name}' exists", info)
+
+        form.elems.add Elem(repeat: repeat, typ: vars[name])
+        result.vars.add name
+
+      var index = def.forms.find(form)
+      if index == -1:
+        index = def.addForm(form)
+      result.semantic = index
+
     case n.kind
     of nnkCall:
-      let (names, form) = parseForm(vars, n)
-      var idx = def.forms.find(form)
-      if idx == -1:
-        # register the form first
-        idx = def.addForm(form)
-      if def.nterminals[to].forms.findIt(it.form == idx) != -1:
+      let got = def.addForm(parseForm(n))
+      if def.nterminals[to].forms.findIt(it.semantic == got.semantic) != -1:
         error(fmt"production is already part of '{to}'", n)
-      def.nterminals[to].forms.add NamedForm(names: names, form: idx)
+      def.nterminals[to].forms.add got
     of nnkIdent:
       let name = n.strVal
       if name notin vars:
