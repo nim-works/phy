@@ -19,6 +19,10 @@ type
   Form = object
     ## Semantic representation of a syntax form.
     tag: string # TODO: rename to name
+    id: int
+      ## the integer ID through which a tree node is identified as being an
+      ## instance of the form
+      # TODO: rename to ntag ("node tag")
     elems: seq[Elem]
 
   OrigForm = object
@@ -39,14 +43,12 @@ type
   LangDef = object
     ## A checked and pre-processed language definition, carrying enough
     ## source-level information necessary for implementing, e.g., inheritance.
-    terminals: Table[string, string]
+    terminals: Table[string, tuple[typ: string, tag: int]]
       ## the terminals of the language
     nterminals: Table[string, NonTerminal]
       ## the non-terminals of the language
     forms: seq[Form]
       ## all syntax forms present in the language
-    tags: Table[string, uint8]
-      ## associates an integer ID with each tag
 
 type
   # Intermediate types meant to bridge macro language to core types
@@ -60,6 +62,12 @@ type
     name: NimNode
     sub: seq[NimNode]
     add: seq[NimNode]
+
+const
+  RefTag = 128'u8
+    ## the node used internally for indirections
+  FirstTerminalTag = RefTag + 1
+    ## the start of the terminals' tag space
 
 template findIt[T](s: seq[T], predicate: untyped): untyped =
   ## Version of ``find`` that allows providing an inline predicate,
@@ -106,17 +114,26 @@ proc addForm(def: var LangDef, form: Form): int =
   def.forms.add form
   result = def.forms.high
 
-proc computeTags(def: var LangDef) =
-  ## Populates the tag table.
-  var next: uint8
-  for tag in def.tags.values:
-    next = max(tag + 1, next)
+proc computeNodeTags(def: var LangDef) =
+  ## Assigns node tags to forms and terminals.
+  var next = 0
+  for it in def.forms.items:
+    next = max(it.id + 1, next)
   # ^^ while simple, this does waste ID space
 
-  for it in def.forms.items:
-    if it.tag notin def.tags:
-      # TODO: handle overflow
-      def.tags[it.tag] = next
+  for it in def.forms.mitems:
+    # TODO: report an error when the ID overflows the allowed range
+    if it.id == -1:
+      it.id = next
+      inc next
+
+  next = int FirstTerminalTag
+  for it in def.terminals.values:
+    next = max(it.tag + 1, next)
+
+  for it in def.terminals.mvalues:
+    if it.tag == -1:
+      it.tag = next
       inc next
 
 proc buildLanguage(add, sub: seq[NimNode],
@@ -143,7 +160,7 @@ proc buildLanguage(add, sub: seq[NimNode],
   # apply the terminal removals and carry over the remaining ones:
   for it in sub.items:
     let (name, typ) = processTerminal(it)
-    if name notin base.terminals or base.terminals[name] != typ:
+    if name notin base.terminals or base.terminals[name].typ != typ:
       error("terminal does not exist in the base language", it)
     base.terminals.del(name)
 
@@ -254,12 +271,13 @@ proc buildLanguage(add, sub: seq[NimNode],
   for it in add.items:
     let (name, typ) = processTerminal(it)
     checkName(result, vars, name, it)
-    result.terminals[name] = typ
+    # the node tag is filled in later
+    result.terminals[name] = (typ, -1)
     vars[name] = name
 
   proc addProd(def: var LangDef, n: NimNode, to: string) =
     proc addForm(def: var LangDef, p: ParsedForm): OrigForm =
-      var form = Form(tag: p.name) # the ID is computed later
+      var form = Form(tag: p.name, id: -1) # the ID is computed later
 
       for i, (name, repeat, info) in p.elems.pairs:
         if name notin vars:
@@ -308,9 +326,7 @@ proc buildLanguage(add, sub: seq[NimNode],
       for a in it.add.items:
         addProd(result, a, name)
 
-  # TODO: implement tag ID computation for terminals
-  # TODO: re-use tag IDs from the base language
-  computeTags(result)
+  computeNodeTags(result)
 
 proc makeLanguage(body: NimNode): LangDef =
   ## Creates a language definition from the ``defineLanguage`` DSL code.
