@@ -840,7 +840,7 @@ proc request(c: var ProcContext; label: LabelId): uint32 =
 
 proc genExit(c; tree; n; bu) =
   case tree[n].kind
-  of mnkResume:
+  of mnkUnwind:
     bu.subTree Unwind:
       discard
   of mnkLabel:
@@ -1793,12 +1793,6 @@ proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
           value(it)
 
     genAsgn(dest, temp, stmts)
-  of mParseBiggestFloat:
-    wrapAsgn Call:
-      bu.add compilerProc(c, env, "nimParseBiggestFloat")
-      value(tree.argument(n, 0))
-      takeAddr NodePosition(tree.argument(n, 1))
-      value(tree.argument(n, 2))
   of mAppendStrCh:
     stmts.addStmt Call:
       bu.add compilerProc(c, env, "nimAddCharV1")
@@ -2634,10 +2628,19 @@ proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
       bu.add node(Nil)
       c.genExit(tree, tree.child(n, 0), bu)
     c.prc.active = false
+  of mnkReturn:
+    guardActive()
+    if tree[n].len == 1:
+      stmts.addStmt Return:
+        c.translateValue(env, tree, tree.child(n, 0), true, bu)
+    else:
+      stmts.addStmt Return:
+        discard
+    c.prc.active = false
   of mnkEmit, mnkAsm:
     # XXX: ignore these statements for now
     warn(c, tree[n].info, "unsupported statement")
-  else:
+  of AllNodeKinds - StmtNodes + {mnkDestroy}:
     unreachable()
 
 proc genAll(env: var MirEnv, tree: MirTree, bu; c) =
@@ -2716,15 +2719,6 @@ proc translateProc(c; env: var MirEnv, procType: TypeId,
   let content = block:
     var bu = initBuilder[NodeKind](Stmts)
     genAll(env, body.code, bu, c)
-
-    if c.prc.active:
-      # a return statement is required if control-flow falls through at the
-      # end
-      bu.subTree Return:
-        if body[LocalId 0].typ != VoidType:
-          bu.subTree Copy:
-            bu.add node(Local, c.prc.localMap[LocalId 0])
-
     bu.finish()
 
   let typ = c.genProcType(env, procType)
@@ -2902,9 +2896,6 @@ proc generateCodeForMain(c; env: var MirEnv; m: Module,
 
   c.prc.active = true
   genAll(env, body.code, bu, c)
-  bu.subTree Return:
-    bu.subTree Copy:
-      bu.add node(Local, 0)
 
   let typ = c.genProcType(env, env.types.add(prc.typ))
   result = (prc, c.complete(env, typ, c.prc, body, finish(bu)))
@@ -2928,8 +2919,7 @@ proc generateCode*(graph: ModuleGraph): PackedTree[NodeKind] =
     BackendConfig(
       noImported: true, # prefer not using FFI procedures
       tconfig: TranslationConfig(
-        magicsToKeep: MagicsToKeep,
-        options: {goTailCallElim}
+        magicsToKeep: MagicsToKeep
       ))
 
   var
