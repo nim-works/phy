@@ -157,3 +157,7 @@ macro `()`*[T](c: (T, CellRef), args: varargs[untyped]): untyped =
   result = quote do:
     let (`callee`, `arg`) = `c`
     `call`
+
+proc isNil*[T: proc](c: (T, CellRef)): bool {.inline.} =
+  ## Whether the continuation `c` is "empty".
+  c[0].isNil
