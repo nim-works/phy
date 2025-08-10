@@ -50,14 +50,16 @@ type
       ## if logging is enabled, accumulates log entries describing
       ## the execution
 
+  MatchKind = enum
+    none, match
+
   Match = object
     ## The result of matching a term against a pattern.
-    case has: bool
-    of true:
+    case kind: MatchKind
+    of match:
       ctx: seq[int]
-        ## the path to the source term fragment that the hole (if any) matched
       bindings: Bindings
-    of false:
+    of none:
       discard
 
   Next = proc(c: var Context, lang: LangDef, val: sink Node): Node {.contcc.}
@@ -84,6 +86,8 @@ proc take(x: sink Node, i: int): Node =
   ## Consumes a whole node and returns a single element out of it, dropping
   ## the rest.
   move x[i]
+
+template has(m: Match): bool = m.kind == match
 
 proc extract(term: Node, path: seq[int]): Node =
   ## Returns the term at the given `path`.
@@ -156,7 +160,7 @@ proc matchList(lang; pat, term: Node, m: sink Match,
            ret: sink PLNext): Match {.tailcall.} =
     # note: `a* rest` is the same as `(a a* rest) | rest`
     # try the repetition's content:
-    step(lang, pat, term, 0, ti, Match(has: true),
+    step(lang, pat, term, 0, ti, Match(kind: match),
       proc(lang; ti2: int, m: sink Match): Match {.
           cont: (ptr pat, ptr term, rest, b, ti, ret).} =
         if m.has:
@@ -188,7 +192,7 @@ proc matchList(lang; pat, term: Node, m: sink Match,
 
     case pat[pi].kind
     of nkOneOrMore:
-      step(lang, pat[pi], term, 0, ti, Match(has: true),
+      step(lang, pat[pi], term, 0, ti, Match(kind: match),
         proc(lang; ti: int, m: sink Match): Match {.
             cont: (ptr pat, ptr term, b, pi, ret).} =
           if not m.has:
@@ -225,7 +229,7 @@ proc matchList(lang; pat, term: Node, m: sink Match,
         b.bindings[HoleId] = pat[pi] # remember the shape of the hole for later
         step(lang, pat, term, pi + 1, ti + 1, b, ret)
       else:
-        matches(lang, pat[pi], term[ti], Match(has: true),
+        matches(lang, pat[pi], term[ti], Match(kind: match),
           proc(lang; tmp: sink Match): Match {.
               cont: (ptr pat, ptr term, pi, ti, b, ret).} =
             if tmp.has:
@@ -238,16 +242,14 @@ proc matchList(lang; pat, term: Node, m: sink Match,
               ret(lang, 0, tmp))
     else:
       drop b
-      ret(lang, 0, Match(has: false))
+      ret(lang, 0, Match(kind: none))
 
   step(lang, pat, term, 0, 0, m,
     proc(lang; i: int, m: sink Match): Match {.cont: (ptr term, ret).} =
       # the list pattern only matches the term if the term is fully consumed
-      if m.has and term.len == i:
-        ret(lang, m)
-      else:
-        drop m
-        ret(lang, Match(has: false)))
+      if m.has and term.len != i:
+        m = Match(kind: none)
+      ret(lang, m))
 
 proc matches(lang; typ: TypeId, term: Node, m: sink Match,
              ret: sink PNext): Match {.tailcall.} =
@@ -256,7 +258,7 @@ proc matches(lang; typ: TypeId, term: Node, m: sink Match,
       ret(lang, m)
     else:
       drop m
-      ret(lang, Match(has: false))
+      ret(lang, Match(kind: none))
 
   case lang[typ].kind
   of tkVoid, tkAll:
@@ -283,7 +285,7 @@ proc matches(lang; typ: TypeId, term: Node, m: sink Match,
     proc step(lang; typ: TypeId, i: int, term: Node, m: sink Match,
               ret: sink PNext): Match {.tailcall.} =
       if i < lang[typ].children.len:
-        matches(lang, lang[typ].children[i], term, Match(has: true),
+        matches(lang, lang[typ].children[i], term, Match(kind: match),
           proc(lang; sub: sink Match): Match {.
               cont: (ptr term, typ, i, m, ret).} =
             if sub.has:
@@ -296,7 +298,7 @@ proc matches(lang; typ: TypeId, term: Node, m: sink Match,
       else:
         # no summand type matched -> no match
         drop m
-        ret(lang, Match(has: false))
+        ret(lang, Match(kind: none))
 
     step(lang, typ, 0, term, m, ret)
   of tkPat:
@@ -312,7 +314,7 @@ proc matches(lang; pat, term: Node, m: sink Match,
       ret(lang, m)
     else:
       drop m
-      ret(lang, Match(has: false))
+      ret(lang, Match(kind: none))
 
   case pat.kind
   of nkTrue, nkFalse:
@@ -326,7 +328,7 @@ proc matches(lang; pat, term: Node, m: sink Match,
       matchList(lang, pat, term, m, ret)
     else:
       drop m
-      ret(lang, Match(has: false))
+      ret(lang, Match(kind: none))
   of nkTuple:
     if term.kind == nkTuple and term.len == pat.len:
       proc step(lang; pat, term: Node, i: int, m: sink Match,
@@ -346,7 +348,7 @@ proc matches(lang; pat, term: Node, m: sink Match,
       step(lang, pat, term, 0, m, ret)
     else:
       drop m
-      ret(lang, Match(has: false))
+      ret(lang, Match(kind: none))
   of nkHole, nkContext:
     # the hole is recorded as a special binding in order to be looked up again
     # later for the purpose of post-matching
@@ -381,13 +383,13 @@ proc matches(lang; pat, term: Node, m: sink Match,
       matchList(lang, pat, term, m, ret)
     else:
       drop m
-      ret(lang, Match(has: false))
+      ret(lang, Match(kind: none))
   else:
     unreachable()
 
 proc matches(lang; pat, term: Node): Match =
   ## Temporary adapter procedure for bridging between the CPS and non-CPS code.
-  matches(lang, pat, term, Match(has: true),
+  matches(lang, pat, term, Match(kind: match),
     proc(lang; m: sink Match): Match {.cont.} = m)
 
 template catch(c: var Context, body, els: untyped) =
