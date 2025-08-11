@@ -1,7 +1,7 @@
 ## Implements an interpreter for the full meta-language. The expressions are
 ## evaluated directly, without an intermediate IR or a VM.
 
-import std/[tables, sugar]
+import std/[algorithm, tables]
 import builtin, bignums, rationals, cps
 import types except Node
 
@@ -50,14 +50,24 @@ type
       ## if logging is enabled, accumulates log entries describing
       ## the execution
 
+  MatchKind = enum
+    none, match, hole
+
   Match = object
     ## The result of matching a term against a pattern.
-    case has: bool
-    of true:
-      ctx: seq[int]
-        ## the path to the source term fragment that the hole (if any) matched
+    case kind: MatchKind
+    of match:
       bindings: Bindings
-    of false:
+      alt: proc(lang: LangDef): Match {.contcc.}
+        ## a match thread that hasn't been tried yet
+    of hole:
+      term: ptr Node
+        ## the term fragment matching the hole
+      ctx: seq[int]
+        ## the path describing where in the term being matched against
+        ## the plug pattern `term` is located
+      resume: proc(lang: LangDef, m: sink Match): Match {.contcc.}
+    of none:
       discard
 
   Next = proc(c: var Context, lang: LangDef, val: sink Node): Node {.contcc.}
@@ -71,7 +81,6 @@ using
 
 const
   ParamId = -1 ## ID for a function's/relation's parameter binding
-  HoleId  = -2 ## ID for hole bindings
 
 proc unreachable() {.noreturn, noinline.} =
   raise AssertionDefect.newException("unreachable")
@@ -85,12 +94,24 @@ proc take(x: sink Node, i: int): Node =
   ## the rest.
   move x[i]
 
-proc extract(term: Node, path: seq[int]): Node =
-  ## Returns the term at the given `path`.
-  var x {.cursor.} = term
-  for it in path.items:
-    x = x[it]
-  result = x # XXX: unfortunately requires a copy
+template has(m: Match): bool = m.kind == match
+
+proc withHole(n: Node, path: openArray[int]): Node =
+  ## Returns `n` with the node at `path` replaced with a hole.
+  if path.len == 0:
+    return Node(kind: nkHole)
+
+  case n.kind
+  of withChildren:
+    result = Node(kind: n.kind)
+    result.children.newSeq(n.len)
+    for i, it in n.children.pairs:
+      if i == path[0]:
+        result.children[i] = withHole(it, path.toOpenArray(1, path.high))
+      else:
+        result.children[i] = it
+  else:
+    unreachable()
 
 proc push(c) =
   ## Pushes a new empty scope.
@@ -135,7 +156,8 @@ proc wrap(a: sink Match): Match =
 
 proc merge(a: var Match, b: sink Match) =
   a.bindings.merge(b.bindings)
-  a.ctx.add b.ctx
+  if not b.alt.isNil:
+    a.alt = b.alt
 
 proc matches(lang; pat, term: Node, m: sink Match,
              ret: sink PNext): Match {.tailcall.}
@@ -156,24 +178,34 @@ proc matchList(lang; pat, term: Node, m: sink Match,
            ret: sink PLNext): Match {.tailcall.} =
     # note: `a* rest` is the same as `(a a* rest) | rest`
     # try the repetition's content:
-    step(lang, pat, term, 0, ti, Match(has: true),
+    step(lang, pat, term, 0, ti, Match(kind: match),
       proc(lang; ti2: int, m: sink Match): Match {.
           cont: (ptr pat, ptr term, rest, b, ti, ret).} =
-        if m.has:
+        case m.kind
+        of match:
           # it's a match! greedily try to continue with the repetition
           rep(lang, pat, term, ti2, wrap(m), rest,
             proc(lang; ti2: int, m: sink Match): Match {.
                 cont: (ti, b, rest, ret).} =
-              if m.has:
+              case m.kind
+              of match:
                 # success! the repetition + rest was successful
                 b.merge(m)
                 drop rest
                 ret(lang, ti2, b)
-              else:
+              of hole:
+                drop b
+                drop rest
+                ret(lang, 0, m)
+              of none:
                 # continuing would result in a failure; backtrack
                 drop m
                 rest(lang, ti, b, ret))
-        else:
+        of hole:
+          drop b
+          drop rest
+          ret(lang, 0, m)
+        of none:
           # no match, try `rest`
           drop m
           rest(lang, ti, b, ret))
@@ -188,7 +220,7 @@ proc matchList(lang; pat, term: Node, m: sink Match,
 
     case pat[pi].kind
     of nkOneOrMore:
-      step(lang, pat[pi], term, 0, ti, Match(has: true),
+      step(lang, pat[pi], term, 0, ti, Match(kind: match),
         proc(lang; ti: int, m: sink Match): Match {.
             cont: (ptr pat, ptr term, b, pi, ret).} =
           if not m.has:
@@ -218,36 +250,30 @@ proc matchList(lang; pat, term: Node, m: sink Match,
           else:
             ret(lang, 0, m))
     elif ti < term.len:
-      case pat[pi].kind
-      of nkContext, nkHole:
-        assert b.ctx.len == 0, "multiple holes?"
-        b.ctx = @[ti]
-        b.bindings[HoleId] = pat[pi] # remember the shape of the hole for later
-        step(lang, pat, term, pi + 1, ti + 1, b, ret)
-      else:
-        matches(lang, pat[pi], term[ti], Match(has: true),
-          proc(lang; tmp: sink Match): Match {.
-              cont: (ptr pat, ptr term, pi, ti, b, ret).} =
-            if tmp.has:
-              if tmp.ctx.len > 0: # was there a "hole match"?
-                tmp.ctx.insert(ti) # prepend the position to the list
-              b.merge(tmp)
-              step(lang, pat, term, pi + 1, ti + 1, b, ret)
-            else:
-              drop b
-              ret(lang, 0, tmp))
+      matches(lang, pat[pi], term[ti], Match(kind: match),
+        proc(lang; m: sink Match): Match {.
+            cont: (ptr pat, ptr term, pi, ti, b, ret).} =
+          case m.kind
+          of match:
+            b.merge(m)
+            step(lang, pat, term, pi + 1, ti + 1, b, ret)
+          of hole:
+            m.ctx.add ti
+            drop b
+            ret(lang, 0, m)
+          of none:
+            drop b
+            ret(lang, 0, m))
     else:
       drop b
-      ret(lang, 0, Match(has: false))
+      ret(lang, 0, Match(kind: none))
 
   step(lang, pat, term, 0, 0, m,
     proc(lang; i: int, m: sink Match): Match {.cont: (ptr term, ret).} =
       # the list pattern only matches the term if the term is fully consumed
-      if m.has and term.len == i:
-        ret(lang, m)
-      else:
-        drop m
-        ret(lang, Match(has: false)))
+      if m.has and term.len != i:
+        m = Match(kind: none)
+      ret(lang, m))
 
 proc matches(lang; typ: TypeId, term: Node, m: sink Match,
              ret: sink PNext): Match {.tailcall.} =
@@ -256,7 +282,7 @@ proc matches(lang; typ: TypeId, term: Node, m: sink Match,
       ret(lang, m)
     else:
       drop m
-      ret(lang, Match(has: false))
+      ret(lang, Match(kind: none))
 
   case lang[typ].kind
   of tkVoid, tkAll:
@@ -283,26 +309,63 @@ proc matches(lang; typ: TypeId, term: Node, m: sink Match,
     proc step(lang; typ: TypeId, i: int, term: Node, m: sink Match,
               ret: sink PNext): Match {.tailcall.} =
       if i < lang[typ].children.len:
-        matches(lang, lang[typ].children[i], term, Match(has: true),
+        matches(lang, lang[typ].children[i], term, Match(kind: match),
           proc(lang; sub: sink Match): Match {.
               cont: (ptr term, typ, i, m, ret).} =
-            if sub.has:
+            case sub.kind
+            of match:
               m.merge(sub)
               ret(lang, m) # found a match
-            else:
+            of hole:
+              drop m
+              ret(lang, sub)
+            of none:
               # continue searching
               drop sub
               step(lang, typ, i + 1, term, m, ret))
       else:
         # no summand type matched -> no match
         drop m
-        ret(lang, Match(has: false))
+        ret(lang, Match(kind: none))
 
     step(lang, typ, 0, term, m, ret)
   of tkPat:
     matches(lang, lang.types[typ.ord - 1].pat, term, m, ret)
   else:
     unreachable()
+
+proc matchContext(lang; ctx: int, term: Node, m: sink Match,
+                  ret: sink PNext): Match {.tailcall.} =
+  ## Implements context matching. A context is nothing more than a
+  ## parameterized named union type (or a parameterized named choice/or
+  ## pattern). Being named allows the pattern being recursive.
+  proc step(lang; ctx, i: int, term: Node, m: sink Match, ret: sink PNext
+           ): Match {.tailcall.} =
+    if i < lang.matchers[ctx].patterns.len:
+      matches(lang, lang.matchers[ctx].patterns[i], term, Match(kind: match),
+        proc(lang; sub: sink Match): Match {.
+            cont: (ptr term, m, ctx, i, ret).} =
+          case sub.kind
+          of match:
+            # don't create an 'alt' continuation if it'd be overwritten anyway
+            if sub.alt.isNil:
+              m.alt = proc(lang): Match {.cont: (ptr term, m, ctx, i, ret).} =
+                step(lang, ctx, i + 1, term, m, ret)
+            m.merge(sub)
+            ret(lang, m) # found a match
+          of hole:
+            drop m
+            ret(lang, sub)
+          of none:
+            # try the next choice
+            drop sub
+            step(lang, ctx, i + 1, term, m, ret)
+      )
+    else:
+      drop m
+      ret(lang, Match(kind: none))
+
+  step(lang, ctx, 0, term, m, ret)
 
 proc matches(lang; pat, term: Node, m: sink Match,
              ret: sink PNext): Match {.tailcall.} =
@@ -312,7 +375,7 @@ proc matches(lang; pat, term: Node, m: sink Match,
       ret(lang, m)
     else:
       drop m
-      ret(lang, Match(has: false))
+      ret(lang, Match(kind: none))
 
   case pat.kind
   of nkTrue, nkFalse:
@@ -326,7 +389,7 @@ proc matches(lang; pat, term: Node, m: sink Match,
       matchList(lang, pat, term, m, ret)
     else:
       drop m
-      ret(lang, Match(has: false))
+      ret(lang, Match(kind: none))
   of nkTuple:
     if term.kind == nkTuple and term.len == pat.len:
       proc step(lang; pat, term: Node, i: int, m: sink Match,
@@ -335,9 +398,13 @@ proc matches(lang; pat, term: Node, m: sink Match,
           matches(lang, pat[i], term[i], m,
             proc(lang; m: sink Match): Match {.
                 cont: (ptr pat, ptr term, i, ret).} =
-              if m.has:
+              case m.kind
+              of match:
                 step(lang, pat, term, i + 1, m, ret)
-              else:
+              of hole:
+                m.ctx.add i
+                ret(lang, m)
+              of none:
                 ret(lang, m) # failure, return early
           )
         else:
@@ -346,17 +413,64 @@ proc matches(lang; pat, term: Node, m: sink Match,
       step(lang, pat, term, 0, m, ret)
     else:
       drop m
-      ret(lang, Match(has: false))
-  of nkHole, nkContext:
-    # the hole is recorded as a special binding in order to be looked up again
-    # later for the purpose of post-matching
-    m.bindings[HoleId] = pat
-    ret(lang, m)
+      ret(lang, Match(kind: none))
+  of nkHole:
+    # unwind to the closest hole handler and pass the current
+    # continuation (i.e., `ret`) along
+    let resume = proc(lang; sub: sink Match): Match {.cont: (m, ret).} =
+      if sub.has:
+        m.merge(sub)
+        ret(lang, m)
+      else:
+        drop m
+        ret(lang, sub)
+    ret(lang, Match(kind: hole, resume: resume, term: addr term))
+  of nkContext:
+    # functions the same as ``(plug (context ...) (hole))``
+    matchContext(lang, pat.id, term, m, ret)
   of nkPlug:
-    # remember the plug pattern and matched term, for later resolution
-    block:
-      m.bindings[HoleId] = tree(nkGroup, tree(nkTuple, pat, term))
-    ret(lang, m)
+    let id = if pat[0].kind == nkBind: pat[0][1].id else: pat[0].id
+    matchContext(lang, id, term, Match(kind: match),
+      proc(lang; s: sink Match): Match {.cont: (ptr pat, ptr term, ret, m).} =
+        case s.kind
+        of match:
+          m.merge(s)
+          ret(lang, m)
+        of none:
+          drop m
+          ret(lang, s)
+        of hole:
+          # the handler for holes
+          # XXX: the explicit moves work around a compiler bug with
+          #      cursor inference
+          let (resume, node, ctx) = (move s.resume, move s.term, move s.ctx)
+          drop m
+          drop s
+          matches(lang, pat[1], node[], Match(kind: match),
+            proc(lang; m: sink Match): Match {.
+                cont: (ptr pat, ptr term, resume, ret, ctx).} =
+              case m.kind
+              of match, none:
+                # handle the captures and resume right where hole matching
+                # left off
+                if m.kind == match and pat[0].kind == nkBind:
+                  reverse(ctx)
+                  m.bindings[pat[0][0].id] = withHole(term, ctx)
+                # adding the context capture here (as opposed to when plug
+                # matching "returns") may seem weird at first, but it is
+                # required for holes in repetitions to work correctly
+                drop ctx
+                drop ret
+                resume(lang, m)
+              of hole:
+                # this happens for plug patterns part of contexts where the
+                # plugged-with pattern has holes itself
+                m.ctx.add ctx
+                drop ctx
+                drop resume
+                ret(lang, m)
+          )
+    )
   of nkBind:
     if pat.len == 1:
       # unconditional bind
@@ -381,13 +495,13 @@ proc matches(lang; pat, term: Node, m: sink Match,
       matchList(lang, pat, term, m, ret)
     else:
       drop m
-      ret(lang, Match(has: false))
+      ret(lang, Match(kind: none))
   else:
     unreachable()
 
 proc matches(lang; pat, term: Node): Match =
   ## Temporary adapter procedure for bridging between the CPS and non-CPS code.
-  matches(lang, pat, term, Match(has: true),
+  matches(lang, pat, term, Match(kind: match),
     proc(lang; m: sink Match): Match {.cont.} = m)
 
 template catch(c: var Context, body, els: untyped) =
@@ -546,52 +660,6 @@ proc interpretRelation(c; lang; id: int, args: sink Node): Node =
 
   c.log LogEntry(kind: lekSuccess)
 
-proc matchRPattern(c; lang; id: int, n: Node, ctx: seq[int],
-                   then: proc(c: var Context, lang: LangDef, n: Node, ctx: seq[int]): Node): Node =
-  ## Implements R-pattern matching. Tries to decompose `n` into a term-with-
-  ## hole and a term. On finding a candidate, `then` is invoked. If a `then`
-  ## invocation succeeds, returns with the result of the invocation, otherwise
-  ## continues looking for a decomposition.
-  for pat in lang.matchers[id].patterns.items:
-    let m = matches(lang, pat, n)
-    if m.has:
-      c.catch:
-        let (p, t) = (m.bindings[HoleId], extract(n, m.ctx))
-        if p.kind == nkContext:
-          # recurse into the R-pattern
-          result = matchRPattern(c, lang, p.id, t, ctx & m.ctx, then)
-        else:
-          # try to plug the hole
-          c.push()
-          result = then(c, lang, t, ctx & m.ctx) # may raise
-          c.merge()
-        # found a matching pattern
-        break
-      do:
-        discard "try the next pattern"
-    # else: try the next pattern
-
-  if result.kind == nkFail:
-    # no pattern matched
-    raise Failure.newException("")
-
-proc withHole(n: Node, path: openArray[int]): Node =
-  ## Returns `n` with the node at `path` replaced with a hole.
-  if path.len == 0:
-    return Node(kind: nkHole)
-
-  case n.kind
-  of withChildren:
-    result = Node(kind: n.kind)
-    result.children.newSeq(n.len)
-    for i, it in n.children.pairs:
-      if i == path[0]:
-        result.children[i] = withHole(it, path.toOpenArray(1, path.high))
-      else:
-        result.children[i] = it
-  else:
-    unreachable()
-
 proc plug(term, hole: Node): Node =
   ## Given a term-with-a-hole `term`, plugs the hole with `hole` and returns
   ## the result.
@@ -624,56 +692,34 @@ proc interpretAll(c; lang; s: openArray[Node]): seq[Node] =
     it = eval(c, lang, s[i])
 
 proc interpretMatch(c; lang; pat, term: Node, then: sink Next): Node =
-  ## Tries matching `term` with `pat`, and on success, adds the captures to
-  ## the context and invokes `then` with `nkTrue`; `nkFalse` otherwise.
-  var m = matches(lang, pat, term);
-  if m.has:
-    var plugs: Node
-    # did plug patterns participate in the match?
-    if m.bindings.pop(HoleId, plugs):
-      # yes, resolve them
+  ## Applies `then` to an ``nkTrue`` value for each match between `pat` and
+  ## `term`, returning the value of the first application that doesn't fail.
+  ## If there are zero matches or no match works, applies `then`
+  ## to ``nkFalse`` and returns the result.
+  var m = matches(lang, pat, term)
+  while m.has:
+    c.catch:
+      c.push()
       c.merge(m.bindings)
-      proc inner(c; lang; j: int): Node {.closure.} =
-        # TODO: make `inner` a tailcall procedure
-        if j < plugs.len:
-          let (pat, term) = (plugs[j][0], plugs[j][1])
-          assert pat.kind == nkPlug
-          let rpat =
-            if pat[0].kind == nkBind: pat[0][1].id
-            else:                     pat[0].id
-          matchRPattern(c, lang, rpat, term, @[],
-            (c: var Context, lang, res, ctx) => (
-              # try the plugged-with pattern:
-              interpretMatch(c, lang, pat[1], res,
-                proc(c; lang; val: sink Node): Node {.
-                    cont: (ptr pat, ptr term, ptr ctx, j, inner).} =
-                  if val.kind == nkTrue:
-                    if pat[0].kind == nkBind:
-                      # bind the context to the given name
-                      c.addBinding(pat[0][0].id, withHole(term, ctx))
-                    inner(c, lang, j + 1) # continue with the next plug
-                  else:
-                    raise Failure.newException(""))))
-        else:
-          # all plugs could be resolved successfully
-          then(c, lang, Node(kind: nkTrue))
-      inner(c, lang, 0)
-    else:
-      # no plug patterns; the match was successful
-      c.merge(m.bindings)
-      then(c, lang, Node(kind: nkTrue))
-  else:
-    # no match
-    then(c, lang, Node(kind: nkFalse))
+      result = then(c, lang, Node(kind: nkTrue))
+      c.merge()
+      return
+    do:
+      if m.alt.isNil:
+        break
+      else:
+        m = m.alt(lang)
+
+  then(c, lang, Node(kind: nkFalse))
 
 proc interpret(c; lang; n: Node, then: sink Next): Node {.tailcall.} =
   ## Evaluates expression `n`. Evaluation uses continuation-passing-style
   ## (=CPS): instead of returning the value, the `then` procedure is
-  ## invoked with it; this makes the non-deterministic plug pattern matching
-  ## possible.
-  # for reasons of code complexity, evaluation of some intermediate results
-  # does not use CPS, meaning that any plug pattern matching within doesn't
-  # work
+  ## applied to it; this makes the ambiguous pattern matching possible.
+  # to keep the implementation a little simpler, evaluation of some
+  # intermediate results is done without using CPS, meaning that any
+  # continuations created within won't capture the rest of the
+  # evaluated function
   case n.kind
   of nkFail:
     raise Failure.newException("")
