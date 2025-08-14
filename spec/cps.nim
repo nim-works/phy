@@ -141,8 +141,8 @@ macro `()`*[T](c: (T, CellRef), args: varargs[untyped]): untyped =
   ## Invokes continuation `c` with the given `args`, consuming it in the
   ## process.
   let
-    callee = genSym(nskLet, "callee")
-    arg    = genSym(nskLet, "arg")
+    callee = genSym("callee")
+    arg    = genSym("arg")
     call   = newCall(callee)
   for it in args.items:
     call.add it
