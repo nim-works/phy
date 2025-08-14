@@ -46,8 +46,6 @@ proc newCell[T](val: sink T): CellRef {.inline.} =
 
 # ---- macro helpers
 
-template strip[T](x: typedesc[sink T]): typedesc = T
-
 proc paramType(): NimNode =
   newCall(ident"sink", bindSym"CellRef")
 
@@ -76,10 +74,6 @@ macro cont*(captures, lambda: untyped): untyped =
     for j in 0..<lambda.params[i].len-2:
       call.add lambda.params[i][j]
 
-  proc fixedTypeof(n: NimNode): NimNode =
-    # work around the compiler not dropping the sink modifier with `typeof`
-    newCall(bindSym"strip", quote do: typeof(`n`))
-
   captures.expectKind {nnkPar, nnkTupleConstr}
   # handle the captures:
   for it in captures.items:
@@ -92,7 +86,7 @@ macro cont*(captures, lambda: untyped): untyped =
       unpack.add name
       call.add (quote do: `name`[])
       constr.add nnkAddr.newTree(name)
-      typ.add nnkPtrTy.newTree(fixedTypeof(name))
+      typ.add nnkPtrTy.newTree(nnkTypeOfExpr.newTree(name))
       lambda.params.add newIdentDefs(name, quote do: typeof(`name`[]))
     of nnkIdent:
       # capture by value -- the value is passed to the inner procedure as a
@@ -100,7 +94,7 @@ macro cont*(captures, lambda: untyped): untyped =
       unpack.add it
       call.add it
       constr.add it
-      typ.add fixedTypeof(it)
+      typ.add nnkTypeOfExpr.newTree(it)
       lambda.params.add newIdentDefs(it, quote do: sink typeof(`it`))
     else:
       error("expected identifier or `ptr x`", it)
@@ -147,8 +141,8 @@ macro `()`*[T](c: (T, CellRef), args: varargs[untyped]): untyped =
   ## Invokes continuation `c` with the given `args`, consuming it in the
   ## process.
   let
-    callee = genSym(nskLet, "callee")
-    arg    = genSym(nskLet, "arg")
+    callee = genSym("callee")
+    arg    = genSym("arg")
     call   = newCall(callee)
   for it in args.items:
     call.add it
