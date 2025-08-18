@@ -459,12 +459,6 @@ proc symbolize(x: L3, r: ref ReportContext[string]): L4 {.pass.} =
         error(fmt"undeclared identifier: '{x.val.string}'")
         build s(^Symbol()) # error correction
 
-  proc pattern(n: src.p): dst.p {.transform.} =
-    # TODO: don't require this processor (will be fixed by moving to using
-    #       generic procedures internally)
-    case n
-    of As(x, t): unreachable()
-
   proc rule(n: src.mr): dst.mr {.transform.} =
     case n
     of Rule(p, e):
@@ -480,7 +474,7 @@ proc symbolize(x: L3, r: ref ReportContext[string]): L4 {.pass.} =
     of ParamDecl(x, [t]):
       build ParamDecl(^add(x.val.string), t)
 
-  proc params(n: src.pa): dst.pa {.infer.}
+  proc params(n: src.pa): dst.pa {.generated.}
 
   proc decl(n: src.d): dst.d {.transform.} =
     case n
@@ -504,7 +498,7 @@ proc typeCheck(x: L4): L5 {.pass.} =
     of Seq(str):
       build Seq(SeqTy(CharTy()), str)
     of Seq([t], [e]):
-      build Seq(SeqTy(t), [e])
+      build Seq(SeqTy(t), e)
     of Call([e0], [e1]):
       build Call(UnitTy(), e0, e1)
     of FieldAccess([e], n):
@@ -662,7 +656,7 @@ proc exprToStmt(x: Lnoletwithval): Lstmt {.pass.} =
       match e2:
       of Unit(): build If(e, st)
       else:      build If(e, st, ^etos(e2))
-    of Exprs(_, [st0], [st1]):
+    of Exprs(t, [st0], [st1]):
       build Stmts(st0, st1)
     of While([e], [st]):
       build While(e, st)
