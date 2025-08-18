@@ -929,7 +929,7 @@ macro defineCompiler(name, names: untyped) =
   var prev = ident"e"
   let body = newStmtList()
   for it in names.items:
-    let tmp = genSym(nskLet, "tmp")
+    let tmp = genSym()
     if it.kind == nnkIdent:
       let name = it.strVal
       body.add quote do: echo "-- ", `name`
