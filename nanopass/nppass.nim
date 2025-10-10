@@ -44,7 +44,7 @@ macro processorMatchImpl(lang: static LangInfo, src: static string,
         newIntLitNode(id),
         (quote do:
           (typeof(result))(
-            index: `sym`(def(src), def(dst), typeof(result).N, `it`, `sel`))))
+            index: `sym`(idef(src), idef(dst), typeof(result).N, `it`, `sel`))))
 
   # auto-generate the branches for missing production terminals and
   # non-terminals:
