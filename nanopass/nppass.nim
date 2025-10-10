@@ -43,7 +43,8 @@ macro processorMatchImpl(lang: static LangInfo, src: static string,
       branches.add nnkOfBranch.newTree(
         newIntLitNode(id),
         (quote do:
-          Metavar[dst, `src`](index: `sym`(def(src), def(dst), `src`, `it`, `sel`))))
+          (typeof(result))(
+            index: `sym`(def(src), def(dst), typeof(result).N, `it`, `sel`))))
 
   # auto-generate the branches for missing production terminals and
   # non-terminals:
@@ -59,7 +60,7 @@ macro processorMatchImpl(lang: static LangInfo, src: static string,
             # TODO: use the tag of the destination language
             `to`.nodes.add:
               TreeNode[uint8](kind: uint8(`id`), val: `input`[`sel`].val)
-            Metavar[dst, `src`](index: NodeIndex(`to`.nodes.high))))
+            (typeof(result))(index: NodeIndex(`to`.nodes.high))))
     else:
       # if the first form's tag is used, so is the non-terminal itself
       if lang.forms[lang.types[it].forms[0]].ntag notin used:
@@ -72,7 +73,7 @@ macro processorMatchImpl(lang: static LangInfo, src: static string,
         let callee = ident"->"
         # dispatch to the processor and convert to the expected type
         branch.add quote do:
-          Metavar[dst, `src`](
+          (typeof(result))(
             index: `callee`(src.`name`(index: `sel`), dst.`name`).index)
         branches.add branch
 
@@ -278,7 +279,7 @@ macro passImpl(src, dst, srcnterm, dstnterm: typedesc, def: untyped) =
     # prefers the more specific adapters created for the programmer-provided
     # processors
     proc `name`[U, X](n: U, T: typedesc[Metavar[`dst`, X]]): T =
-      genProcessor(n.index, T.N)
+      genProcessor(n.index, U.N)
 
   # if the body doesn't end in an expression, add a call to the
   # entry processor
