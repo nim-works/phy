@@ -12,6 +12,7 @@ import
     condsyms,
     commands,
     cmdlinehelper,
+    msgs
   ],
   compiler/sem/[
     passes,
@@ -78,6 +79,7 @@ proc main(args: openArray[string]) =
     stdout.writeLine(output)
   config.writeHook = proc(r: ConfigRef, output: string, flags: MsgFlags) =
     stdout.write(output)
+  config.diagHandler = msgs.defaultDiagHandler
 
   let
     ids   = newIdentCache()
