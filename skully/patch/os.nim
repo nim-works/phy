@@ -1,13 +1,8 @@
 ## A (somewhat) platform-agnostic implementation of the standard library's
 ## `os` module. Not everything is implemented yet.
 
-proc hostParamCount(): int {.importc.}
-proc hostParamStr(i: int, str: pointer, len: int): int {.importc.}
-
-proc hook_hostParamCount(): int {.
-  compilerproc, importc: "pe.paramCount".}
-proc hook_hostParamStr(i: int, str: pointer, len: int): int {.
-  compilerproc, importc: "pe.paramStr".}
+proc hostParamCount(): int {.importc: "pe.paramCount".}
+proc hostParamStr(i: int, str: pointer, len: int): int {.importc: "pe.paramStr".}
 
 proc getEnv*(key: string): string =
   discard
