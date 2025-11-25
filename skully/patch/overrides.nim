@@ -99,6 +99,23 @@ proc hook_exit(code: int) {.noreturn, exportc: "exit".} =
   # TODO: implement this properly, via calling a host procedure
   discard "fall through, which will cause a trap"
 
+# overrides for globals variables work the same as overrides for procedures:
+
+var
+  # the relation between the overrides and their target is not visible to the
+  # compiler, so use `.noinit` to prevent default-initializing the globals again
+  stdout {.exportc, noinit.}: File
+  stderr {.exportc, noinit.}: File
+  stdin {.exportc, noinit.}: File
+
+  IOFBF {.exportc: "_IOFBF".}: cint
+  IONBF {.exportc: "_IONBF".}: cint
+
+  errno {.exportc.}: cint
+  # none of host I/O procedures modify errno; it's just defined so that the
+  # system-module provided I/O procedures compile
+  EINTR {.exportc.}: cint = 4
+
 # TODO: the overrides below should not be needed. Instead, the procedures
 #       calling these I/O and formatting procedures need to be hooked
 
