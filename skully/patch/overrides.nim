@@ -95,6 +95,10 @@ proc hook_isnan(a: float): bool {.exportc: "isnan".} =
   ((bits and 0x7ff0000000000000'u64) == 0x7ff0000000000000'u64) and
     (bits and 0xFFFFFFFFFFFFF'u64) != 0
 
+proc hook_exit(code: int) {.noreturn, exportc: "exit".} =
+  # TODO: implement this properly, via calling a host procedure
+  discard "fall through, which will cause a trap"
+
 # TODO: the overrides below should not be needed. Instead, the procedures
 #       calling these I/O and formatting procedures need to be hooked
 
