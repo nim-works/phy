@@ -105,6 +105,10 @@ proc main(args: openArray[string]) =
   config.backend = backendC
   initDefines(config.symbols)
 
+  # remove any C compiler specific defines (no C compiler is used)
+  for c in CC:
+    undefSymbol(config, c.name)
+
   # the maximum heap size is fixed at compile-time, with the possibility to
   # override the default value
   if not isDefined(config, "StandaloneHeapSize"):
