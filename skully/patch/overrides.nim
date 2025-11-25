@@ -127,7 +127,7 @@ proc hook_fseeko(f: File, offset: int64, whence: cint): cint {.
   compilerproc, importc: "cio.fseek".}
 
 proc hook_ftello(f: File): int64 {.
-  compilerproc, importc: "cio.fseek".}
+  compilerproc, importc: "cio.ftell".}
 
 proc hook_clearerr(f: File) {.
   compilerproc, importc: "cio.clearerr".}
