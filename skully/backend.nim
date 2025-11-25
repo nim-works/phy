@@ -529,6 +529,25 @@ proc lvalueToIL(c; m; pos; bu) =
   else:
     unreachable()
 
+proc magicToIL(c; m; pos; bu): bool =
+  ## If possible, emits a custom implementation for the call at `pos` using
+  ## built-in ops. Returns whether a custom implementation was emitted.
+  if m.ast[pos, 0].kind == cnkUse and m.ast[m.ast.child(pos, 0), 1].kind == cnkProc:
+    case m.get(m.ast[m.ast.child(pos, 0), 1].val.StringId)
+    of "nimCopyMem":
+      bu.subTree Blit:
+        c.exprToIL(m, m.ast.child(pos, 1), bu)
+        c.exprToIL(m, m.ast.child(pos, 2), bu)
+        c.exprToIL(m, m.ast.child(pos, 3), bu)
+      result = true
+    of "nimZeroMem":
+      bu.subTree Clear:
+        c.exprToIL(m, m.ast.child(pos, 1), bu)
+        c.exprToIL(m, m.ast.child(pos, 2), bu)
+      result = true
+    else:
+      discard "nothing to do"
+
 proc exprToIL(c; m; pos; bu) =
   template recurse(n: NodePos) =
     c.exprToIL(m, n, bu)
@@ -655,14 +674,15 @@ proc exprToIL(c; m; pos; bu) =
         bu.add src
         c.exprToIL(m, m.ast.child(pos, 1), bu)
   of cnkCall:
-    let ctyp = m.getType(m.ast.child(pos, 0))
-    bu.subTree Call:
-      if m.tast[ctyp].kind == cnkPtrTy:
-        # it's an indirect call; use the indirect form
-        bu.add typeRef(c, m, m.tast.child(ctyp, 0))
-      recurse(m.ast.child(pos, 0))
-      for it in m.ast.items(pos, 1):
-        recurse(it)
+    if not magicToIL(c, m, pos, bu):
+      let ctyp = m.getType(m.ast.child(pos, 0))
+      bu.subTree Call:
+        if m.tast[ctyp].kind == cnkPtrTy:
+          # it's an indirect call; use the indirect form
+          bu.add typeRef(c, m, m.tast.child(ctyp, 0))
+        recurse(m.ast.child(pos, 0))
+        for it in m.ast.items(pos, 1):
+          recurse(it)
   of cnkSizeof:
     let (size, _) = computeSizeAlign(c, m, m.types[m.ast[pos, 1].val.StringId])
     bu.add node(IntVal, c.lit.pack(size))
