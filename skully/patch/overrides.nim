@@ -172,7 +172,7 @@ proc fseeko(f: File, offset: int64, whence: cint): cint {.
   redir: "cio.fseek".}
 
 proc ftello(f: File): int64 {.
-  redir: "cio.fseek".}
+  redir: "cio.ftell".}
 
 proc clearerr(f: File) {.
   redir: "cio.clearerr".}
