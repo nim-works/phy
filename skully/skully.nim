@@ -132,13 +132,12 @@ proc main(args: openArray[string]) =
   # needs for operation and/or code generation have to be compiled (after
   # the system module, of course)
   graph.compileSystemModule()
-  discard graph.compileModule(findPatchFile(config, "setimpl.nim"), {})
   discard graph.compileModule(findPatchFile(config, "io_helper.nim"), {})
   discard graph.compileModule(findPatchFile(config, "overrides.nim"), {})
 
   graph.compileProject(config.projectMainIdx)
 
-  let m = generateCode(graph)
+  let m = generateCode(graph, graph.takeModuleList())
   writeFile(args[1], pretty(m, trees.NodeIndex(0)))
 
 main(getExecArgs())
