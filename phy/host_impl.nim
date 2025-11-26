@@ -36,6 +36,9 @@ proc c_ungetc(c: cint, f: CFilePtr): cint {.
 proc c_fseeko(f: CFilePtr, offset: csize_t, whence: cint): cint {.
   importc: "fseeko", header: "<stdio.h>".}
 
+proc c_ftello(f: CFilePtr): int64 {.
+  importc: "ftello", header: "<stdio.h>".}
+
 proc c_fread(dst: pointer, elem: csize_t, count: csize_t, f: CFilePtr): csize_t {.
   importc: "fread", header: "<stdio.h>".}
 
@@ -222,6 +225,8 @@ proc hostProcedures*(includeTest: bool): Table[string, VmCallback] =
     ret c_fseeko(cast[CFilePtr](args[0].intVal),
                  cast[csize_t](args[1].uintVal),
                  cast[cint](args[2].intVal))
+  hostProc "cio.ftell":
+    ret c_ftello(cast[CFilePtr](args[0].intVal))
   hostProc "cio.setvbuf":
     ret c_setvbuf(cast[CFilePtr](args[0].addrVal),
                   toHost(args[1].addrVal, args[3].uintVal),
