@@ -1,0 +1,15 @@
+discard """
+  description: "
+    A non-nullary constructor declaration also introduces a type of the same
+    name; it's the return type of the constructor and a subtype of the data
+    type the constructor belongs to.
+  "
+  output: "(Call val 1 1.5) : typ"
+"""
+(Module
+  (DataTypeDecl typ
+    (Constr val (IntTy) (FloatTy)))
+  (ProcDecl cons val (Params)
+    (Call val 1 1.5))
+  (ProcDecl test typ (Params)
+    (Call cons)))

@@ -1,0 +1,11 @@
+discard """
+  reject: true
+"""
+(Module
+  (DataTypeDecl typ
+    (Constr a (IntTy) (IntTy)))
+  (ProcDecl test (IntTy) (Params)
+    (Exprs
+      (Decl x (Call a 100 100))
+      (Match x
+        (Rule (Constr a i1 i2 i3) val)))))

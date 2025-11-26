@@ -1,0 +1,8 @@
+discard """
+  description: "Nullary constructors don't introduce a type"
+  reject: true
+"""
+(Module
+  (DataTypeDecl typ
+    (Constr val))
+  (TypeDecl test val))

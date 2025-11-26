@@ -1,0 +1,16 @@
+discard """
+  description: "`As` patterns don't introduce variables"
+  reject: true
+"""
+(Module
+  (DataTypeDecl typ
+    (Constr a (IntTy))
+    (Constr b (IntTy)))
+  (ProcDecl test (IntTy) (Params)
+    (Exprs
+      (Decl x (Call a 100))
+      (Match x
+        (Rule (As y a)
+          (Asgn y (Call a 1)))
+        (Rule (As y b)
+          (Asgn y (Call b 1)))))))
