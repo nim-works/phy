@@ -2,16 +2,18 @@
 ## It provides overrides for importc'ed procedures, implemented with code that
 ## doesn't rely on the C standard library or C backend specific language
 ## features.
-##
-## All overrides are compilerprocs with a name of the form
-## "hook_<original name>".
+
+# the overrides need to be exportc'ed with the same name as the importc'ed
+# procedure they intend to override - the code-generator/backend handle the
+# rest. While simple, an unfortunate side-effect of this approach is that
+# they're always part of the final executable, even if not used
 
 {.push checks: off, profiler: off, stacktrace: off.}
 
-proc hook_memcpy*(a, b: pointer, size: csize_t): pointer {.compilerproc.} =
+proc hook_memcpy*(a, b: pointer, size: csize_t): pointer {.exportc: "memcpy".} =
   copyMem(a, b, size)
 
-proc hook_memmove(a, b: pointer, size: csize_t): pointer {.compilerproc.} =
+proc hook_memmove(a, b: pointer, size: csize_t): pointer {.exportc: "memmove".} =
   if a < b:
     var a = cast[ptr UncheckedArray[byte]](a)
     var b = cast[ptr UncheckedArray[byte]](b)
@@ -23,7 +25,7 @@ proc hook_memmove(a, b: pointer, size: csize_t): pointer {.compilerproc.} =
     for i in countdown(size - 1, 0):
       a[i] = b[i]
 
-proc hook_strstr(haystack, needle: cstring): cstring {.compilerproc.} =
+proc hook_strstr(haystack, needle: cstring): cstring {.exportc: "strstr".} =
   # the most inefficient implementation imaginable
   let hLen = len(haystack)
   let nLen = len(needle)
@@ -33,7 +35,7 @@ proc hook_strstr(haystack, needle: cstring): cstring {.compilerproc.} =
 
   result = nil # not found
 
-proc hook_strcmp(a, b: cstring): int {.compilerproc.} =
+proc hook_strcmp(a, b: cstring): int {.exportc: "strcmp".} =
   # the most inefficient implementation imaginable
   let
     aLen = len(a)
@@ -50,7 +52,7 @@ proc hook_strcmp(a, b: cstring): int {.compilerproc.} =
         return
 
 proc hook_memchr(cstr: pointer, c: char, n: csize_t
-                ): pointer {.compilerproc.} =
+                ): pointer {.exportc: "memchr".} =
   let arr = cast[ptr UncheckedArray[char]](cstr)
   for i in 0..<n:
     if arr[i] == c:
@@ -58,28 +60,28 @@ proc hook_memchr(cstr: pointer, c: char, n: csize_t
 
   result = nil
 
-proc hook_nimModInt(a, b: int, p: ptr int): bool {.compilerproc.} =
+proc hook_nimModInt(a, b: int, p: ptr int): bool {.exportc: "nimModInt".} =
   p[] = a mod b
 
-proc hook_nimModInt8(a, b: int8, p: ptr int8): bool {.compilerproc.} =
+proc hook_nimModInt8(a, b: int8, p: ptr int8): bool {.exportc: "nimModInt8".} =
   p[] = a mod b
 
-proc hook_nimModInt16(a, b: int16, p: ptr int16): bool {.compilerproc.} =
+proc hook_nimModInt16(a, b: int16, p: ptr int16): bool {.exportc: "nimModInt16".} =
   p[] = a mod b
 
-proc hook_nimModInt32(a, b: int32, p: ptr int32): bool {.compilerproc.} =
+proc hook_nimModInt32(a, b: int32, p: ptr int32): bool {.exportc: "nimModInt32".} =
   p[] = a mod b
 
-proc hook_nimModInt64(a, b: int64, p: ptr int64): bool {.compilerproc.} =
+proc hook_nimModInt64(a, b: int64, p: ptr int64): bool {.exportc: "nimModInt64".} =
   p[] = a mod b
 
-proc hook_NIM_LIKELY(a: bool): bool {.compilerproc.} =
+proc hook_NIM_LIKELY(a: bool): bool {.exportc: "NIM_LIKELY".} =
   a
 
-proc hook_NIM_UNLIKELY(a: bool): bool {.compilerproc.} =
+proc hook_NIM_UNLIKELY(a: bool): bool {.exportc: "NIM_UNLIKELY".} =
   a
 
-proc hook_fabs(a: float): float {.compilerproc.} =
+proc hook_fabs(a: float): float {.exportc: "fabs".} =
   if a == 0.0:
     result = 0.0 # so that fabs(-0.0) == 0.0
   elif a < 0.0:
@@ -87,58 +89,101 @@ proc hook_fabs(a: float): float {.compilerproc.} =
   else:
     result = a
 
-proc hook_isnan(a: float): bool {.compilerproc.} =
+proc hook_isnan(a: float): bool {.exportc: "isnan".} =
   # only works for IEEE 754 doubles
   let bits = cast[uint64](a)
   ((bits and 0x7ff0000000000000'u64) == 0x7ff0000000000000'u64) and
     (bits and 0xFFFFFFFFFFFFF'u64) != 0
 
+proc hook_exit(code: int) {.noreturn, exportc: "exit".} =
+  # TODO: implement this properly, via calling a host procedure
+  discard "fall through, which will cause a trap"
+
+# overrides for globals variables work the same as overrides for procedures:
+
+var
+  # the relation between the overrides and their target is not visible to the
+  # compiler, so use `.noinit` to prevent default-initializing the globals again
+  stdout {.exportc, noinit.}: File
+  stderr {.exportc, noinit.}: File
+  stdin {.exportc, noinit.}: File
+
+  IOFBF {.exportc: "_IOFBF".}: cint
+  IONBF {.exportc: "_IONBF".}: cint
+
+  errno {.exportc.}: cint
+  # none of host I/O procedures modify errno; it's just defined so that the
+  # system-module provided I/O procedures compile
+  EINTR {.exportc.}: cint = 4
+
 # TODO: the overrides below should not be needed. Instead, the procedures
 #       calling these I/O and formatting procedures need to be hooked
 
-proc hook_fopen(filename, mode: cstring): File {.
-  compilerproc, importc: "cio.fopen".}
+import std/macros
 
-proc hook_fclose(f: File): cint {.
-  compilerproc, importc: "cio.fclose".}
+macro redir(name: untyped, proto: untyped) =
+  ## Macro pragma that turns a procedure prototype into an override calling the
+  ## host procedure with the given `name`.
+  let orig = copyNimTree(proto)
+  let s = genSym()
+  let imp = copyNimTree(proto)
+  imp.name = s
+  imp.pragma = nnkPragma.newTree(
+    nnkExprColonExpr.newTree(ident"importc", name))
 
-proc hook_setvbuf(f: File, buf: pointer, mode: cint, size: csize_t): cint {.
-  compilerproc, importc: "cio.setvbuf".}
+  # call the actual procedure from the override:
+  orig.body = nnkCall.newTree(s)
+  for it in orig.params.items:
+    for i in 0..<it.len-2:
+      orig.body.add copyNimTree(it[i])
 
-proc hook_fflush(f: File): cint {.
-  compilerproc, importc: "cio.fflush".}
+  orig.pragma.add ident"exportc"
 
-proc hook_fread(buf: pointer, size, n: csize_t, f: File): csize_t {.
-  compilerproc, importc: "cio.fread".}
+  nnkStmtList.newTree(imp, orig)
 
-proc hook_fwrite(buf: pointer, size, n: csize_t, f: File): cint {.
-  compilerproc, importc: "cio.fwrite".}
+proc fopen(filename, mode: cstring): File {.
+  redir: "cio.fopen".}
 
-proc hook_fgets(c: cstring, n: cint, f: File): cstring {.
-  compilerproc, importc: "cio.fgets".}
+proc fclose(f: File): cint {.
+  redir: "cio.fclose".}
 
-proc hook_fgetc(f: File): cint {.
-  compilerproc, importc: "cio.fgetc".}
+proc setvbuf(f: File, buf: pointer, mode: cint, size: csize_t): cint {.
+  redir: "cio.setvbuf".}
 
-proc hook_ungetc(c: cint, f: File): cint {.
-  compilerproc, importc: "cio.ungetc".}
+proc fflush(f: File): cint {.
+  redir: "cio.fflush".}
 
-proc hook_fseeko(f: File, offset: int64, whence: cint): cint {.
-  compilerproc, importc: "cio.fseek".}
+proc fread(buf: pointer, size, n: csize_t, f: File): csize_t {.
+  redir: "cio.fread".}
 
-proc hook_ftello(f: File): int64 {.
-  compilerproc, importc: "cio.ftell".}
+proc fwrite(buf: pointer, size, n: csize_t, f: File): cint {.
+  redir: "cio.fwrite".}
 
-proc hook_clearerr(f: File) {.
-  compilerproc, importc: "cio.clearerr".}
+proc fgets(c: cstring, n: cint, f: File): cstring {.
+  redir: "cio.fgets".}
 
-proc hook_ferror(f: File): cint {.
-  compilerproc, importc: "cio.ferror".}
+proc fgetc(f: File): cint {.
+  redir: "cio.fgetc".}
 
-proc hook_strerror(errnum: cint): cstring {.
-  compilerproc, importc: "cstr.strerror".}
+proc ungetc(c: cint, f: File): cint {.
+  redir: "cio.ungetc".}
 
-proc hook_strtod(buf: cstring, endptr: ptr cstring): float64 {.
-  compilerproc, importc: "cstr.strtod".}
+proc fseeko(f: File, offset: int64, whence: cint): cint {.
+  redir: "cio.fseek".}
+
+proc ftello(f: File): int64 {.
+  redir: "cio.ftell".}
+
+proc clearerr(f: File) {.
+  redir: "cio.clearerr".}
+
+proc ferror(f: File): cint {.
+  redir: "cio.ferror".}
+
+proc strerror(errnum: cint): cstring {.
+  redir: "cstr.strerror".}
+
+proc strtod(buf: cstring, endptr: ptr cstring): float64 {.
+  redir: "cstr.strtod".}
 
 {.pop.}

@@ -3,11 +3,7 @@
 
 import system/ansi_c
 
-proc getNativeStream(id: int): File {.importc.}
-
-# only hooks can import foreign procedures
-proc hook_getNativeStream(id: int): File {.
-  compilerproc, importc: "cio.getNativeStream".}
+proc getNativeStream(id: int): File {.importc: "cio.getNativeStream".}
 
 stdin  = getNativeStream(1)
 stdout = getNativeStream(2)
