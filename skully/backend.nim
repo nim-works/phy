@@ -1,12 +1,7 @@
-## Implements the code generator for Skully. It's integrated into the
-## compilation process like the NimSkull-native code generators are, via the
-## ``backends`` module.
+## Implements the CGIR-based code generator for Skully.
 
 import
   std/[
-    importutils,
-    packedsets,
-    strtabs,
     tables
   ],
   std/private/[
@@ -20,9 +15,7 @@ import
     modulelowering
   ],
   compiler/ast/[
-    ast,
     ast_types,
-    ast_query,
     idents,
     lineinfos,
     report_enums,
@@ -31,58 +24,42 @@ import
   ],
   compiler/modules/[
     modulegraphs,
-    magicsys
-  ],
-  compiler/utils/[
-    bitsets,
-    platform
   ],
   compiler/backend/[
-    backends
+    cgbackend,
+    cgir2
   ],
-  compiler/mir/[
-    datatables,
-    mirenv,
-    mirgen,
-    mirtrees,
-    mirtypes,
-    sourcemaps
+  compiler/ic/[
+    bitabs
   ],
   passes/[
     builders,
     syntax,
     trees
-  ],
-  skully/[
-    rtti
   ]
 
-from compiler/mir/mirbodies import MirBody, `[]`
-
-import skully/passes as phy_passes
+import std/options as std_options
 
 type
   Node = TreeNode[NodeKind]
+  NodePos = cgir2.NodeIndex
+
+  LabelId = distinct uint32
 
   ProcContext = object
-    localMap: Table[LocalId, uint32]
-    labelMap: Table[LabelId, uint32]
-    params: seq[uint32]
-    indirectLocals: PackedSet[LocalId]
-      ## all locals that are references and not locals with storage
-    nextLabel: uint32
+    localMap: Table[StringId, uint32]
+    labelMap: Table[uint32, LabelId]
+    locals: seq[Node]
     nextLocal: uint32
-    temps: seq[TypeId]
-    active: bool
-
-    sources: SourceMap
+    nextLabel: uint32
 
   Context = object
     graph: ModuleGraph
     lit: Literals
+    ptrSize: int64
 
-    typeCache: Table[TypeId, uint32]
-      ## cache for the IL types resulting from MIR types
+    typeCache: Table[StringId, uint32]
+      ## cache for the IL types resulting from CGIR types
     types: OrderedTable[seq[Node], uint32]
       ## maps IL types to the associated ID (i.e., position in the typedefs
       ## tree). This is used for simple culling of structurally equal types
@@ -91,21 +68,12 @@ type
       ##      overhead. A table that allows storing the actual key data (i.e.,
       ##      the type tree, in this case) should be used instead
 
-    rttiCache: Table[TypeId, uint32]
-      ## caches the RTTIv2 globals created for types
-
-    procMap: Table[ProcedureId, uint32]
-      ## maps MIR procedure IDs to their corresponding IL procedure IDs. The
-      ## MIR procedure IDs cannot be used directly as IL procedure ID because
-      ## the partial procedure handling creates IL procedure that have no MIR
-      ## counterpart
-    nextProc: uint32
-      ## the ID to use for the next registered procedure
-
-    globalsMap: Table[GlobalId, uint32]
-      ## maps MIR globals and constants to IL globals
-    constMap: Table[ConstId, uint32]
-    dataMap: Table[DataId, uint32]
+    procMap: Table[StringId, uint32]
+      ## maps CGIR procedures to their corresponding IL procedure IDs
+    globalsMap: Table[StringId, uint32]
+      ## maps CGIR globals and constants to IL globals
+    constMap: Table[StringId, uint32]
+    dataMap: Table[Datum, uint32]
     strMap: Table[StringId, uint32]
       ## string ID -> IL global storing the character array
     globals: seq[tuple[typ: uint32, hasValue: bool, init: uint32]]
@@ -113,62 +81,78 @@ type
 
     prc: ProcContext
 
+  SizeAlignState = object
+    ## Accumulator object for size/alignment computation.
+    size: int64
+    alignment: int16
+
   Expr = object
     nodes: seq[Node]
-    typ {.requiresInit.}: TypeId
-
-  ProcMap = SeqMap[uint32, seq[Node]]
+    typ {.requiresInit.}: NodePos
 
 const
-  MagicsToKeep = {mNewSeq, mSetLengthSeq, mAppendSeqElem,
-                  mEnumToStr, mDotDot, mEqCString, mAbsI}
-  StrLitFlag = 1'i64 shl 62
-    ## or'ed into the capacity of seqs and strings in order to mark the
-    ## data as being immutable
   StackSize = 1024 * 1024 # 1 MiB
 
 using
-  bu: var Builder[NodeKind]
-  tree: MirTree
-  n: NodePosition
-  stmts: var Builder[NodeKind]
-  env: MirEnv
+  m: CgModule
+  pos: NodePos
   c: var Context
+  stmts: var Builder[NodeKind]
+  bu: var Builder[NodeKind]
 
-proc genType(c; env: TypeEnv, typ: TypeId): uint32
-proc genProcType(c; env: MirEnv, typ: TypeId, ignoreClosure = false): Node
-proc gen(c; env: MirEnv, tree; n; wantsValue: bool): Expr
+proc `==`(a, b: LabelId): bool {.borrow.}
 
-func align[T](val, to: T): T =
-  ## `to` must be a power-of-two.
-  let mask = to - 1
-  result = (val + mask) and not mask
+func align(v: int64, to: int16): int64 {.inline.} =
+  let mask = int64(to - 1)
+  (v + mask) and not mask
 
-proc warn(c; src: SourceId, msg: string) =
+proc isArray(m; typ: StringId): bool =
+  m.tast[m.types[typ]].kind == cnkArrayTy
+
+proc resolve(m; pos): NodePos =
+  if m.tast[pos].kind == cnkType:
+    m.types[m.tast[pos].val.StringId]
+  else:
+    pos
+
+iterator items(ast: Ast, pos; first=0; last = ^1): NodePos =
+  let len = ast.len(pos)
+  var pos = ast.child(pos, first)
+  for _ in first .. (len - int(last)):
+    yield pos
+    pos = ast.next(pos)
+
+iterator pairs(ast: Ast, pos): (int, NodePos) =
+  var it = ast.child(pos, 0)
+  for i in 0..<ast.len(pos):
+    yield (i, it)
+    it = ast.next(it)
+
+proc warn(c; loc: TLineInfo, msg: sink string) =
+  ## Reports a warning pointing to `loc`.
   # the warning is not a user-provided one, but there's no other warning report
   # kind that fits, nor is it possible to introduce one without forking the
   # compiler
-  c.graph.config.localReport(c.prc.sources[src],
+  c.graph.config.localReport(loc,
     SemReport(kind: rsemUserWarning, str: msg))
 
-func payloadType(env: TypeEnv, typ: TypeId): TypeId =
-  ## Returns the ID of a seq/string type's payload type.
-  env.headerFor(env[env.lookupField(typ, 1)].typ, Canonical).elem()
+proc error(c; loc: TLineInfo, msg: sink string) {.noreturn.} =
+  ## Reports a fatal error pointing to `loc`.
+  # TODO: there's `rsemCustomError` in the compiler, which would be ideal,
+  #       but it's not implemented properly at the time of writing
+  c.graph.config.fatalReport(loc,
+    SemReport(kind: rsemUserError, str: msg))
 
-func isPassByRef(env: TypeEnv; typ: TypeId, param: int): bool =
-  # XXX: the MIR type API doesn't support querying the a proc type
-  #      parameter by position...
-  for (i, _, flags) in env.params(env.headerFor(typ, Canonical)):
-    if i == param:
-      return pfByRef in flags
-  unreachable()
-
-iterator items(tree: MirTree, n: NodePosition, start: int,
-               last: BackwardsIndex): NodePosition =
-  var it = tree.child(n, start)
-  for _ in start .. (tree.len(n) - ord(last)):
-    yield it
-    it = tree.sibling(it)
+proc toLineInfo(c; m; info: uint32): TLineInfo =
+  ## Converts `info` to the equivalent ``TLineInfo`` value.
+  if info == 0:
+    unknownLineInfo
+  else:
+    let loc = m.infos[info - 1]
+    newLineInfo(c.graph.config,
+      c.graph.config.findFile(m.get(loc.file)),
+      loc.line.int,
+      loc.column.int)
 
 template node(k: NodeKind, v: uint32): Node =
   Node(kind: k, val: v)
@@ -176,415 +160,231 @@ template node(k: NodeKind, v: uint32): Node =
 template node(k: NodeKind): Node =
   Node(kind: k)
 
-proc makeExpr(nodes: sink seq[Node], typ: TypeId): Expr {.inline.} =
-  Expr(nodes: nodes, typ: typ)
-
-template buildExpr(typ: TypeId, body: untyped): Expr =
+template addType(c: var Context, name, code: untyped): uint32 =
+  ## Builds a type using `code`, returning the created type's ID.
   if true:
-    let t = typ
-    var bu {.inject.} = initBuilder[NodeKind]()
-    body
-    makeExpr(finish(bu), t)
+    var name = initBuilder[NodeKind]()
+    code
+    c.types.mgetOrPut(finish(name), c.types.len.uint32)
   else:
     unreachable()
 
-proc goto(bu; label: uint32) =
-  bu.subTree Goto:
-    bu.add node(Immediate, label)
+proc newLabel(c: var ProcContext): LabelId =
+  result = LabelId(c.nextLabel)
+  inc c.nextLabel
 
-proc join(bu; label: uint32) =
-  bu.subTree Join:
-    bu.add node(Immediate, label)
+proc newTemp(c: var ProcContext; typ: Node): Node =
+  let id = c.locals.len
+  c.locals.add typ
+  result = node(Local, id.uint32)
 
-proc takeAddr(e: Expr, bu) =
-  if e.nodes[0].kind == Deref:
-    # drop the `Deref`
-    bu.add e.nodes.toOpenArray(2, e.nodes.high)
+proc pushLabel(c: var ProcContext, n: CgNode) =
+  assert n.kind == cnkLabel
+  if c.labelMap.mgetOrPut(n.val, LabelId(c.nextLabel)) == LabelId(c.nextLabel):
+    inc c.nextLabel
+
+proc registerLocal(c: var ProcContext, name: StringId, typ: Node) =
+  c.localMap[name] = c.locals.len.uint32
+  c.locals.add typ
+
+proc getType(m; pos): NodePos =
+  case m.ast[pos].kind
+  of cnkExprs - {cnkCall, cnkNilLit}:
+    m.types[m.ast[pos, 0].val.StringId]
+  of cnkCall:
+    # fetch the return type of the callee's proc type
+    var callee = getType(m, m.ast.child(pos, 0))
+    if m.tast[callee].kind == cnkPtrTy:
+      callee = resolve(m, m.tast.child(callee, 0))
+    m.tast.child(callee, 1)
   else:
-    bu.subTree Addr:
-      bu.add e.nodes
+    unreachable(m.ast[pos].kind)
 
-proc use(bu; e: Expr) =
-  case e.nodes[0].kind
-  of Global, Local, At, Field:
-    bu.subTree Copy:
-      bu.add e.nodes
-  of Deref:
-    # turn the ``Deref`` into a ``Load``
-    bu.subTree Load:
-      bu.add e.nodes[1]
-      bu.add e.nodes.toOpenArray(2, e.nodes.high)
+proc initSizeAlign(): SizeAlignState =
+  SizeAlignState(size: 0, alignment: 1)
+
+proc computeSizeAlign(c; m; pos): (int64, int16)
+
+proc addField(s: var SizeAlignState, c; m; pos): int64 =
+  ## Updates the size and alignment to include the given field, returning the
+  ## offset of the field.
+  let (size, alignment) = computeSizeAlign(c, m, m.tast.child(pos, 0))
+  var fixed = m.unpackInt(m.tast[pos, 1].val).int16
+  if fixed == 0:
+    fixed = alignment
+  s.size = align(s.size, fixed) # add necessary padding
+  result = s.size
+  s.alignment = max(s.alignment, fixed)
+  s.size += size
+
+proc mergeField(s: var SizeAlignState, c; m; pos) =
+  ## Updates the size and alignment to include the given field in a union.
+  let (size, alignment) = computeSizeAlign(c, m, m.tast.child(pos, 0))
+  var fixed = m.unpackInt(m.tast[pos, 1].val).int16
+  if fixed == 0:
+    fixed = alignment
+  s.size = max(s.size, size)
+  s.alignment = max(s.alignment, fixed)
+
+proc finish(s: sink SizeAlignState): (int64, int16) =
+  # pad the size so that its a multiple of the alignment
+  (align(s.size, s.alignment), s.alignment)
+
+proc opaqueToIL(c; m; pos): Node =
+  ## Translates an opaque type to an IL type with the closest semantics, using
+  ## a name-based best-effort approach.
+  # assume LLP64 data model for 64-bit and ILP32 data model for 32-bit
+  # architectures
+  case m.get(m.tast[pos, 0].val.StringId)
+  of "size_t":
+    node(UInt, c.ptrSize.uint32)
+  of "unsigned long long":
+    node(UInt, 8)
+  of "long long":
+    node(Int, 8)
+  of "unsigned long", "unsigned int":
+    node(UInt, 4)
+  of "long", "int":
+    node(Int, 4)
+  of "unsigned short":
+    node(UInt, 2)
+  of "short":
+    node(Int, 2)
+  of "unsigned char":
+    node(UInt, 1)
+  of "char":
+    node(Int, 1)
   else:
-    bu.add e.nodes
+    error(c, unknownLineInfo,
+      "unsupported C type: " & m.get(m.tast[pos, 0].val.StringId))
 
-proc useLvalue(bu; e: Expr) =
-  bu.add e.nodes
-
-proc genAsgn(dest: Expr, src: Expr; bu) =
-  if dest.nodes.len == 0:
-    bu.subTree Drop:
-      bu.use src
-  elif dest.nodes[0].kind == Deref:
-    bu.subTree NodeKind.Store:
-      bu.add dest.nodes[1]
-      bu.add dest.nodes.toOpenArray(2, dest.nodes.high)
-      bu.use src
-  else:
-    assert dest.nodes[0].kind != Load
-    bu.subTree Asgn:
-      bu.useLvalue dest
-      bu.use src
-
-template addStmt(sub: var Builder[NodeKind], kind: NodeKind, body: untyped) =
-  if true:
-    var bu {.inject.} = initBuilder[NodeKind](kind)
-    body
-    sub.add finish(bu)
-
-template putInto(builder: Builder[NodeKind], dest: Expr, kind: NodeKind,
-                 body: untyped) =
-  if true:
-    var bu {.inject.} = initBuilder(kind)
-    body
-    genAsgn(dest, makeExpr(bu.finish(), dest.typ), builder)
-
-proc putInto(bu; dest: Expr, node: Node) =
-  genAsgn(dest, makeExpr(@[node], dest.typ), bu)
-
-template makeExpr(typ: TypeId, body: untyped): Expr =
-  if true:
-    let t = typ
-    var bu {.inject.} = initBuilder[NodeKind]()
-    body
-    makeExpr(bu.finish(), t)
-  else:
-    unreachable()
-
-proc registerProc(c; prc: ProcedureId): uint32 =
-  result = c.procMap.mgetOrPut(prc, c.nextProc)
-  if result == c.nextProc: # is it a not-yet-seen procedure?
-    inc c.nextProc
-
-proc compilerProc(c; env: var MirEnv, name: string): Node =
-  ## Returns a ``Proc`` reference to the compilerproc with the given `name`.
-  ## The compilerproc is added to `c` and `env` first, if it hasn't been
-  ## already.
-  let p = c.graph.getCompilerProc(name)
-  result = node(Proc, c.registerProc(env.procedures.add(p)))
-
-proc typeRef(c; env: TypeEnv, typ: TypeId): Node =
-  node(Type, c.genType(env, typ))
-
-proc typeRef(c; env: MirEnv, typ: TypeId): Node =
-  typeRef(c, env.types, typ)
-
-proc genFlexArrayType(c; env: TypeEnv; typ: TypeId): uint32 =
-  ## Returns the IL type ID of an array type with unknown length.
-  var bu = initBuilder[NodeKind](Array)
-  # size and number of elements don't matter, but use the lowest possible
-  # value to be safe
-  bu.add node(Immediate, 1) # size
-  bu.add node(Immediate, 0) # alignment
-  bu.add node(Immediate, 0) # elements
-  bu.add typeRef(c, env, typ)
-  result = c.types.mgetOrPut(finish(bu), c.types.len.uint32)
-
-proc translateProcType(c; env: TypeEnv, id: TypeId, ignoreClosure: bool, bu) =
-  let desc = env.headerFor(id, Canonical)
-  bu.subTree ProcTy:
-    if desc.retType(env) == VoidType:
-      bu.subTree Void: discard
+proc computeSizeAlign(c; m; pos): (int64, int16) =
+  ## Computes the size and alignment of the type at `pos`.
+  case m.tast[pos].kind
+  of cnkType:
+    computeSizeAlign(c, m, m.types[m.tast[pos].val.StringId])
+  of cnkCharTy, cnkBoolTy:
+    (1'i64, 1'i16)
+  of cnkIntTy, cnkUIntTy, cnkFloatTy:
+    let size = m.unpackInt(m.tast[pos, 0].val)
+    (size, int16(size))
+  of cnkPtrTy:
+    (c.ptrSize, int16(c.ptrSize))
+  of cnkStructTy:
+    var s = initSizeAlign()
+    for it in items(m.tast, pos, 1):
+      discard s.addField(c, m, it)
+    s.finish()
+  of cnkUnionTy:
+    var s = initSizeAlign()
+    for it in items(m.tast, pos, 1):
+      s.mergeField(c, m, it)
+    s.finish()
+  of cnkArrayTy:
+    let (size, align) = computeSizeAlign(c, m, m.tast.child(pos, 1))
+    (size * m.unpackInt(m.tast[pos, 0].val), align)
+  of cnkOpaqueTy:
+    let n = opaqueToIL(c, m, pos)
+    case n.kind
+    of Ptr:
+      (c.ptrSize.int64, c.ptrSize.int16)
+    of Int, UInt, Float:
+      (n.val.int64, n.val.int16)
     else:
-      bu.add typeRef(c, env, desc.retType(env))
-
-    for (i, typ, flags) in env.params(desc):
-      # exclude compile-time-only parameters
-      if env.canonical(typ) != VoidType:
-        if pfByRef in flags:
-          bu.add typeRef(c, env, PointerType)
-        else:
-          bu.add typeRef(c, env, typ)
-
-    if desc.callConv(env) == ccClosure and not ignoreClosure:
-      bu.add typeRef(c, env, PointerType)
-
-proc computeSizeAlign(c; env: TypeEnv, typ: Typeid,
-                      withTag = true): (int64, int16) =
-  ## Computes the size and alignment of an embedded record/union.
-  # TODO: this shouldn't be our responsiblity! The NimSkull compiler has to
-  #       set the size and alignment for embedded records
-  let desc = env.headerFor(typ, Lowered)
-  var size = 0'i64
-  var align = 0'i16
-  case desc.kind
-  of tkTaggedUnion:
-    if withTag:
-      let tag = env.headerFor(env[env.lookupField(typ, 0)].typ, Lowered)
-      align = tag.align
-      size = tag.size(env)
-
-    for _, it in env.fields(desc, 1):
-      if env.isEmbedded(it.typ):
-        # an anonymous record; its fields need to be considered too
-        let (s, a) = computeSizeAlign(c, env, it.typ)
-        align = max(align, a)
-        size = max(size, s)
-      else:
-        let sub = env.headerFor(it.typ, Canonical)
-        align = max(align, sub.align)
-        size = max(size, sub.size(env))
-  of tkRecord:
-    for _, it in env.fields(desc, 0):
-      # align the offset, then add the size
-      if env.isEmbedded(it.typ):
-        let (s, a) = computeSizeAlign(c, env, it.typ)
-        size = align(size, a)
-        size += s
-        align = max(align, a)
-      else:
-        let sub = env.headerFor(it.typ, Canonical)
-        size = align(size, sub.align)
-        size += sub.size(env)
-        align = max(align, sub.align)
+      unreachable()
   else:
     unreachable()
-  # don't add any padding at the end
-  result = (size, align)
 
-proc embedTaggedUnion(c; env: TypeEnv, id: TypeId, bu) =
-  privateAccess(RecField) # required for accessing the field offsets
+proc typeToIL(c; m; typ: StringId): uint32
+proc typeToIL(c; m; pos; bu)
 
-  proc addType(c; bu: sink Builder[NodeKind]): uint32 =
-    c.types.mgetOrPut(finish(bu), c.types.len.uint32)
+proc typeRef(c; m; typ: StringId): Node =
+  node(Type, typeToIL(c, m, typ))
 
-  let
-    desc = env.headerFor(id, Lowered)
-    tagField = env.lookupField(id, 0)
-    tagDesc = env.headerFor(env[tagField].typ, Lowered)
-    (size, alignment) = computeSizeAlign(c, env, id, withTag=false)
-      # the size and alignment of the union (without the tag)
-    offset = align(env[tagField].offset.uint32 + tagDesc.size(env).uint32,
-                   uint32 alignment)
-      ## the offset of the union within the embedding record
+proc typeRef(c; m; pos): Node =
+  case m.tast[pos].kind
+  of cnkType:
+    node(Type, typeToIL(c, m, m.tast[pos].val.StringId))
+  else:
+    let id = c.addType bu:
+      c.typeToIL(m, pos, bu)
+    node(Type, id)
 
-  let inner = block:
-    var bu = initBuilder(Union)
-    bu.add node(Immediate, uint32 size)
-    bu.add node(Immediate, uint32 alignment)
-    for _, it in env.fields(desc, 1):
-      if env.isEmbedded(it.typ):
-        if env.headerFor(it.typ, Lowered).numFields == 0:
-          # IL record types must not be empty; add a dummy field
-          bu.add node(UInt, 1)
-        else:
-          let (s, a) = computeSizeAlign(c, env, it.typ)
-          # emit the record type for the embedded type, but make sure to
-          # correct the field offsets; they need to be relative to the start
-          # of the union, not to the start of the embedding record
-          var bu2 = initBuilder(Record)
-          bu2.add node(Immediate, s.uint32)
-          bu2.add node(Immediate, a.uint32)
-          for _, recf in env.fields(env.headerFor(it.typ, Lowered)):
-            bu2.subTree Field:
-              bu2.add node(Immediate, recf.offset.uint32 - offset)
-              bu2.add typeRef(c, env, recf.typ)
+proc typeToIL(c; m; pos; bu) =
+  proc inlineTypeToIL(c; m; pos; bu) =
+    case m.tast[pos].kind
+    of cnkUnionTy, cnkStructTy, cnkArrayTy, cnkProcTy:
+      # aggregate and proc types cannot be inlined; use an identified type
+      bu.add typeRef(c, m, pos)
+    else:
+      typeToIL(c, m, pos, bu)
 
-          bu.add node(Type, c.addType(bu2))
-      else:
-        bu.add typeRef(c, env, it.typ)
-
-    c.addType(bu) # the union type
-
-  # emit the necessary fields for the embedding record. The tag field is
-  # inlined into the embedder, which gets around having to use another
-  # wrapper type
-  bu.subTree Field:
-    bu.add node(Immediate, env[tagField].offset.uint32)
-    bu.add typeRef(c, env, env[tagField].typ)
-
-  bu.subTree Field:
-    bu.add node(Immediate, offset)
-    bu.add node(Type, inner)
-
-proc translate(c; env: TypeEnv, id: TypeId, bu) =
-  let desc = env.headerFor(id, Lowered)
-  case desc.kind
-  of tkInt:
-    bu.add node(Int, desc.size(env).uint32)
-  of tkFloat:
-    bu.add node(Float, desc.size(env).uint32)
-  of tkUInt:
-    bu.add node(UInt, desc.size(env).uint32)
-  of tkPointer:
-    bu.add node(Ptr)
-  of tkBool, tkChar:
+  case m.tast[pos].kind
+  of cnkType:
+    bu.add typeRef(c, m, m.tast[pos].val.StringId)
+  of cnkVoidTy:
+    bu.subTree Void: discard
+  of cnkBoolTy, cnkCharTy:
     bu.add node(UInt, 1)
-  of tkArray:
+  of cnkIntTy:
+    bu.add node(Int, m.unpackUInt(m.tast[pos, 0].val).uint32)
+  of cnkUIntTy:
+    bu.add node(UInt, m.unpackUInt(m.tast[pos, 0].val).uint32)
+  of cnkFloatTy:
+    bu.add node(Float, m.unpackUInt(m.tast[pos, 0].val).uint32)
+  of cnkPtrTy:
+    bu.add node(Ptr)
+  of cnkOpaqueTy:
+    bu.add opaqueToIL(c, m, pos)
+  of cnkArrayTy:
+    let (size, alignment) = computeSizeAlign(c, m, pos)
     bu.subTree Array:
-      bu.add node(Immediate, desc.size(env).uint32)
-      bu.add node(Immediate, desc.align.uint32)
-      bu.add node(Immediate, desc.arrayLen(env).uint32)
-      bu.add typeRef(c, env, desc.elem())
-  of tkUncheckedArray:
-    bu.subTree Array:
-      bu.add node(Immediate, 0)
-      bu.add node(Immediate, desc.align.uint32)
-      bu.add node(Immediate, 1)
-      bu.add typeRef(c, env, desc.elem())
-  of tkRecord:
-    let (size, alignment) =
-      if desc.size(env) >= 0:
-        (desc.size(env).int, desc.align.int)
-      elif env[id] != nil and
-           env[id].skipTypes(abstractVar).kind == tyOpenArray:
-        # the size for openArrays is never filled in correctly; we have to
-        # manually correct it here
-        (c.graph.config.target.ptrSize * 2, c.graph.config.target.ptrSize)
-      else:
-        (szUnknownSize, szUnknownSize)
-
-    assert size >= 0
+      bu.add node(Immediate, size.uint32)
+      bu.add node(Immediate, alignment.uint32)
+      bu.add node(Immediate, m.unpackUInt(m.tast[pos, 0].val).uint32)
+      inlineTypeToIL(c, m, m.tast.child(pos, 1), bu)
+  of cnkStructTy:
+    let (size, alignment) = computeSizeAlign(c, m, pos)
+    var s = SizeAlignState()
     bu.subTree Record:
       bu.add node(Immediate, size.uint32)
       bu.add node(Immediate, alignment.uint32)
-
-      if desc.kind == tkRecord and desc.base(env) != VoidType:
-        # the inherited-from type is added as the first field
+      for it in items(m.tast, pos, 1):
+        if m.unpackInt(m.tast[it, 3].val) != 0:
+          warn(c, toLineInfo(c, m, m.tast[it].info),
+            "bit fields are not supported and are ignored")
+        let off = s.addField(c, m, it)
         bu.subTree Field:
-          bu.add node(Immediate, 0)
-          bu.add typeRef(c, env, desc.base(env))
-
-      for f, recf in env.fields(desc):
-        privateAccess(RecField)
-        if env.headerFor(recf.typ, Canonical).kind == tkTaggedUnion:
-          c.embedTaggedUnion(env, recf.typ, bu)
-        else:
-          bu.subTree Field:
-            bu.add node(Immediate, recf.offset.uint32)
-            bu.add typeRef(c, env, recf.typ)
-  of tkUnion:
+          bu.add node(Immediate, off.uint32)
+          inlineTypeToIL(c, m, m.tast.child(it, 0), bu)
+  of cnkUnionTy:
+    let (size, alignment) = computeSizeAlign(c, m, pos)
     bu.subTree Union:
-      bu.add node(Immediate, desc.size(env).uint32)
-      bu.add node(Immediate, desc.align.uint32)
-      for _, recf in env.fields(desc):
-        bu.add typeRef(c, env, recf.typ)
-  of tkImported:
-    # treat imported types as if they were equivalent to their "underlying"
-    # type
-    # XXX: in the longer term, and once the ILs are extended sufficiently, an
-    #      "imported" type needs to be translated to the appropriate foreign
-    #      type
-    translate(c, env, elem(desc), bu)
-  of tkProc, tkPtr, tkRef, tkVar, tkLent, tkCstring:
-    c.translate(env, PointerType, bu)
+      bu.add node(Immediate, size.uint32)
+      bu.add node(Immediate, alignment.uint32)
+      for it in items(m.tast, pos, 1):
+        inlineTypeToIL(c, m, m.tast.child(it, 0), bu)
+  of cnkProcTy:
+    bu.subTree ProcTy:
+      # ignore the calling convention
+      for i in 1..<m.tast.len(pos):
+        inlineTypeToIL(c, m, m.tast.child(pos, i), bu)
+  of cnkVarargs:
+    error(c, unknownLineInfo, "varargs are not supported")
   else:
-    unreachable($desc.kind)
+    unreachable($m.tast[pos].kind)
 
-proc genProcType(c; env: MirEnv, typ: TypeId, ignoreClosure = false): Node =
-  let typ = env.types.canonical(typ)
-  assert env.types.headerFor(typ, Canonical).kind in {tkProc, tkClosure}
-
-  # XXX: the type is currently not cached
-  var bu = initBuilder[NodeKind]()
-  c.translateProcType(env.types, typ, ignoreClosure, bu)
-  node(Type, c.types.mgetOrPut(finish(bu), c.types.len.uint32))
-
-proc genType(c; env: TypeEnv, typ: TypeId): uint32 =
-  let typ = env.canonical(typ)
+proc typeToIL(c; m; typ: StringId): uint32 =
+  ## Translates `typ`, adding it to the environment and returning its
+  ## IL-level ID.
   c.typeCache.withValue typ, val:
     # already cached
     result = val[]
   do:
     # translate the type and cache it
-    var bu = initBuilder[NodeKind]()
-    c.translate(env, typ, bu)
-    result = c.types.mgetOrPut(finish(bu), c.types.len.uint32)
+    result = c.addType bu:
+      c.typeToIL(m, m.types[typ], bu)
     c.typeCache[typ] = result
-
-proc genField(c; env: MirEnv; e: Expr; pos: int32, bu) =
-  ## Emits a field access for field `pos`.
-  let typ = env.types.canonical(e.typ)
-
-  proc findType(env: TypeEnv, typ: TypeId, pos: int32): (TypeId, int) =
-    let desc = env.headerFor(typ, Lowered)
-    if desc.fieldOffset(env) > pos:
-      result = findType(env, desc.base(env), pos)
-      result[1] += 1
-    else:
-      result = (typ, 0)
-
-  proc findField(env: TypeEnv, typ: TypeId, id: FieldId,
-                 steps: var seq[uint32]): bool =
-    let desc = env.headerFor(typ, Lowered)
-    var pos = 0
-    block search:
-      for (f, recf) in env.fields(desc):
-        if env.headerFor(recf.typ, Canonical).kind == tkTaggedUnion:
-          # a tagged union field counts as two: one for the tag and one for
-          # the union
-          inc pos # skip the tag
-          if findField(env, recf.typ, id, steps):
-            if steps[^1] == 0: # is the field a tag field?
-              # the tag is part of the embedder
-              steps.del(steps.high)
-              dec pos
-            else:
-              dec steps[^1]
-            break search
-        elif env[recf.typ].isNil and
-             env.headerFor(recf.typ, Canonical).kind == tkRecord:
-          # it's an embedded record type
-          if findField(env, recf.typ, id, steps):
-            break search
-        elif f == id:
-          break search
-
-        inc pos
-
-      # not found
-      return false
-
-    if desc.kind == tkRecord and desc.base(env) != VoidType:
-      # account for the base field (which is located at the start of the
-      # record)
-      inc pos
-
-    result = true
-    steps.add uint32(pos)
-
-  case env.types.headerFor(typ, Lowered).kind
-  of tkRecord:
-    let
-      id = env.types.lookupField(typ, pos)
-      (typ, depth) = findType(env.types, typ, pos)
-    var steps: seq[uint32]
-    doAssert findField(env.types, typ, id, steps)
-    # a MIR field access doesn't translate to a single IL field access
-    # because:
-    # 1. parent type access is explicit in the Il
-    # 2. tagged unions are standalone records in the IL
-
-    var nodes: seq[Node]
-    for _ in 0..<(steps.len + depth):
-      nodes.add node(Field, 2)
-
-    nodes.add e.nodes
-
-    # add the base field access first...
-    for _ in 0..<depth:
-      nodes.add node(Immediate, 0)
-
-    # ... then the extra steps, but in reverse
-    for i in countdown(steps.high, 0):
-      nodes.add node(Immediate, uint32 steps[i])
-
-    bu.add nodes
-  of tkUnion:
-    bu.subTree Field:
-      bu.add e.nodes
-      bu.add node(Immediate, uint32 pos)
-  else:
-    unreachable()
 
 proc spawnGlobal(c; typ: uint32, data: string): uint32 =
   ## Spawns a new global variable with the given `typ` and the initial
@@ -598,44 +398,7 @@ proc spawnGlobal(c; typ: uint32): uint32 =
   result = c.globals.len.uint32
   c.globals.add (typ, false, 0'u32)
 
-proc newArrayType(c; env; elem: TypeId, count: Positive): uint32 =
-  ## Returns the IL type for an array with element type `elem` and `count`
-  ## number of elements.
-  var bu = initBuilder[NodeKind]()
-  let size = env.types.headerFor(elem, Canonical).size(env.types)
-  let alignment = env.types.headerFor(elem, Canonical).align
-  bu.subTree Array:
-    bu.add node(Immediate, uint32(size * count))
-    bu.add node(Immediate, uint32 alignment)
-    bu.add node(Immediate, uint32 count)
-    bu.add typeRef(c, env, elem)
-
-  result = c.types.mgetOrPut(finish(bu), c.types.len.uint32)
-
-proc newPayloadType(c; env; elem: TypeId, count: Positive): uint32 =
-  ## Returns a sized payload type for a sequence with element type `elem` and
-  ## `count` number of items.
-  var bu = initBuilder[NodeKind]()
-  let
-    intType = env.types.sizeType
-    intHdr = env.types.headerFor(intType, Canonical)
-    size = env.types.headerFor(elem, Canonical).size(env.types)
-    alignment = env.types.headerFor(elem, Canonical).align
-    arrayStart = align(intHdr.size(env.types), alignment)
-
-  bu.subTree Record:
-    bu.add node(Immediate, uint32(arrayStart + (size * count)))
-    bu.add node(Immediate, uint32 max(alignment, intHdr.align))
-    bu.subTree Field:
-      bu.add node(Immediate, 0)
-      bu.add typeRef(c, env, intType)
-    bu.subTree Field:
-      bu.add node(Immediate, uint32 arrayStart)
-      bu.add node(Type, c.newArrayType(env, elem, count))
-
-  result = c.types.mgetOrPut(finish(bu), c.types.len.uint32)
-
-proc genStrLiteral(c; env; str: StringId): uint32 =
+proc genStrLiteral(c; m; str: StringId): uint32 =
   ## Returns the ID for the global storing the raw character array for `str`,
   ## creating it first if hasn't been yet.
   c.strMap.withValue str, val:
@@ -643,2273 +406,661 @@ proc genStrLiteral(c; env; str: StringId): uint32 =
   do:
     # the character array for a literal string always includes the NUL
     # terminator
-    var data = env[str]
+    var data = m.get(str)
     data.add "\0"
 
-    result = c.spawnGlobal(c.newArrayType(env, CharType, data.len), data)
+    let typ = c.addType bu:
+      bu.subTree Array:
+        bu.add node(Immediate, data.len.uint32) # length
+        bu.add node(Immediate, 1) # alignment
+        bu.add node(Immediate, data.len.uint32) # size
+        bu.add node(UInt, 1)
+
+    result = c.spawnGlobal(typ, data)
     c.strMap[str] = result
 
-proc genConst(c; env; tree; n; dest: Expr, stmts) =
-  ## Emits the construction logic for the MIR constant expression `n`.
-  template putIntoDest(n: Node) =
-    stmts.putInto dest, n
+proc join(bu; label: LabelId) =
+  bu.subTree Join:
+    bu.add node(Immediate, label.uint32)
 
-  iterator args(tree; n): (int, NodePosition) =
-    var i = 0
-    for it in tree.items(n, 0, ^1):
-      yield (i, tree.last(it))
-      inc i
+proc goto(bu; label: LabelId) =
+  bu.subTree Goto:
+    bu.add node(Immediate, label.uint32)
 
-  let typ = env.types.canonical(tree[n].typ)
-
-  case tree[n].kind
-  of mnkIntLit, mnkUIntLit:
-    putIntoDest node(IntVal, c.lit.pack(env.getInt(tree[n].number)))
-  of mnkFloatLit:
-    putIntoDest node(FloatVal, c.lit.pack(env.getFloat(tree[n].number)))
-  of mnkProcVal:
-    putIntoDest node(ProcVal, c.registerProc(tree[n].prc))
-  of mnkNilLit:
-    putIntoDest node(Nil)
-  of mnkArrayConstr:
-    for i, it in tree.args(n):
-      let nDest = makeExpr tree[it].typ:
-        bu.subTree At:
-          bu.useLvalue dest
-          bu.add node(IntVal, c.lit.pack(i))
-      c.genConst(env, tree, it, nDest, stmts)
-  of mnkTupleConstr, mnkClosureConstr:
-    for i, it in tree.args(n):
-      let nDest = makeExpr tree[it].typ:
-        bu.subTree Field:
-          bu.useLvalue dest
-          bu.add node(Immediate, i.uint32)
-      c.genConst(env, tree, it, nDest, stmts)
-  of mnkObjConstr:
-    for it in tree.subNodes(n):
-      let val = tree.last(tree.child(it, 1))
-      let nDest = makeExpr tree[val].typ:
-        c.genField(env, dest, tree[it, 0].field, bu)
-      c.genConst(env, tree, val, nDest, stmts)
-  of mnkStrLit:
-    let str {.cursor.} = env[tree[n].strVal]
-
-    case env.types.headerFor(typ, Canonical).kind
-    of tkCstring:
-      # a cstring is a pointer to a raw character sequence followed by a NUL
-      # terminator
-      if str.len == 0:
-        # an empty cstring is represented as a nil pointer
-        putIntoDest node(Nil)
-      else:
-        stmts.putInto dest, Addr:
-          bu.add node(Global, c.genStrLiteral(env, tree[n].strVal))
-    of tkString:
-      # it's a NimSkull string (a length + payload pointer)
-      stmts.addStmt Asgn:
-        bu.subTree Field:
-          bu.useLvalue dest
-          bu.add node(Immediate, 0)
-        bu.add node(IntVal, c.lit.pack(str.len))
-
-      if str.len > 0:
-        # only set a payload for non-empty strings
-        let
-          payloadTyp = c.newPayloadType(env, CharType, str.len + 1)
-          # +1 for the terminator
-          payload = c.spawnGlobal(payloadTyp)
-          data = c.genStrLiteral(env, tree[n].strVal)
-
-        # emit the capacity initialization:
-        stmts.addStmt Asgn:
-          bu.subTree Field:
-            bu.add node(Global, payload)
-            bu.add node(Immediate, 0)
-          bu.add node(IntVal, c.lit.pack(str.len or StrLitFlag))
-        # emit the payload data initialization (copy the character array):
-        stmts.addStmt Asgn:
-          bu.subTree Field:
-            bu.add node(Global, payload)
-            bu.add node(Immediate, 1)
-          bu.subTree Copy:
-            bu.add node(Global, data)
-
-        # emit the payload pointer initialization:
-        stmts.addStmt Asgn:
-          bu.subTree Field:
-            bu.useLvalue dest
-            bu.add node(Immediate, 1)
-          bu.subTree Addr:
-            bu.add node(Global, payload)
-    else:
-      unreachable()
-  of mnkSeqConstr:
-    let elem = env.types.headerFor(typ, Canonical).elem
-
-    # emit the length assignment:
-    stmts.addStmt Asgn:
-      bu.subTree Field:
-        bu.useLvalue dest
-        bu.add node(Immediate, 0)
-      bu.add node(IntVal, c.lit.pack(tree.len(n)))
-
-    if tree.len(n) > 0:
-      # only create a payload for non-empty seqs
-      let
-        payloadTyp = c.newPayloadType(env, elem, tree.len(n))
-        payload = c.spawnGlobal(payloadTyp)
-
-      # emit the payload field initialization:
-      stmts.addStmt Asgn:
-        bu.subTree Field:
-          bu.useLvalue dest
-          bu.add node(Immediate, 1)
-        bu.subTree Addr:
-          bu.add node(Global, payload)
-
-      # emit the capacity initialization:
-      stmts.addStmt Asgn:
-        bu.subTree Field:
-          bu.add node(Global, payload)
-          bu.add node(Immediate, 0)
-        bu.add node(IntVal, c.lit.pack(tree.len(n) or StrLitFlag))
-
-      # emit the payload data initialization:
-      for i, it in tree.args(n):
-        let nDest = makeExpr elem:
-          bu.subTree At:
-            bu.subTree Field:
-              bu.add node(Global, payload)
-              bu.add node(Immediate, 1)
-            bu.add node(IntVal, c.lit.pack(i))
-
-        c.genConst(env, tree, it, nDest, stmts)
-  of mnkSetConstr:
-    let desc = env.types.headerFor(typ, Lowered)
-
-    # evaluate the constant set first:
-    var bitset: TBitSet
-    bitset.bitSetInit(desc.size(env.types).int)
-
-    for it in tree.items(n, 0, ^1):
-      if tree[it].kind == mnkRange:
-        bitSetInclRange(bitset,
-          env.getInt(tree[it, 0].number) .. env.getInt(tree[it, 1].number))
-      else:
-        bitSetIncl(bitset, env.getInt(tree[it].number))
-
-    if bitset.len > 8:
-      # the set is implemented as an array
-      for i, it in bitset.pairs:
-        # globals are zero-initialized by default, and therefore zero
-        # assignments can be omitted
-        if it != 0:
-          stmts.addStmt Asgn:
-            bu.subTree At:
-              bu.useLvalue dest
-              bu.add node(IntVal, c.lit.pack(i))
-            bu.add node(IntVal, c.lit.pack(it.int))
-    else:
-      # the set fits into an integer
-      var value = 0'i64
-      for i, it in bitset.pairs:
-        value = value or (int64(it) shl (i * 8))
-      putIntoDest node(IntVal, c.lit.pack(value))
-  else:
-    unreachable()
-
-proc newGlobal(c; env: MirEnv, typ: TypeId): uint32 =
-  c.spawnGlobal(c.genType(env.types, typ))
-
-proc newLabel(c: var ProcContext): uint32 =
-  result = c.nextLabel
-  inc c.nextLabel
-
-proc newTemp(c; typ: TypeId): Expr =
-  assert typ != VoidType
-  let id = c.prc.nextLocal + c.prc.temps.len.uint32
-  c.prc.temps.add typ
-  result = makeExpr(@[node(Local, id)], typ)
-
-proc request(c: var ProcContext; label: LabelId): uint32 =
-  if label in c.labelMap:
-    result = c.labelMap[label]
-  else:
-    result = c.newLabel()
-    c.labelMap[label] = result
-
-proc genExit(c; tree; n; bu) =
-  case tree[n].kind
-  of mnkResume:
+proc exitToIL(c; m; pos; bu) =
+  case m.ast[pos].kind
+  of cnkUnwind:
     bu.subTree Unwind:
       discard
-  of mnkLabel:
-    bu.subTree Goto:
-      bu.add node(Immediate, c.prc.request(tree[n].label))
+  of cnkLabel:
+    bu.goto c.prc.labelMap[m.ast[pos].val]
   else:
     unreachable()
 
-proc translateValue(c; env: MirEnv, tree: MirTree, n: NodePosition,
-                    wantValue: bool, bu) =
-  ## `wantValue` tells translation an rvalue expression is expected.
-  template recurse(n: NodePosition, wantValue: bool) =
-    c.translateValue(env, tree, n, wantValue, bu)
+template makeExpr(t: NodePos, code: untyped): Expr =
+  if true:
+    let x = t
+    var bu {.inject.} = initBuilder[NodeKind]()
+    code
+    Expr(nodes: finish(bu), typ: x)
+  else:
+    unreachable()
 
-  template wrapCopy(body: untyped) =
-    if wantValue:
-      bu.subTree Copy: body
-    else:
-      body
+proc use(bu; e: Expr) =
+  bu.add e.nodes
 
-  template wrapCopy(kind: NodeKind, body: untyped) =
-    wrapCopy:
-      bu.subTree kind:
-        body
+proc exprToIL(c; m; pos; bu)
 
-  case tree[n].kind
-  of mnkGlobal:
-    wrapCopy:
-      bu.add node(Global, c.globalsMap[tree[n].global])
-  of mnkNilLit:
-    bu.add node(Nil)
-  of mnkIntLit, mnkUIntLit:
-    bu.add node(IntVal, c.lit.pack(env.getInt(tree[n].number)))
-  of mnkFloatLit:
-    bu.add node(FloatVal, c.lit.pack(env.getFloat(tree[n].number)))
-  of mnkTemp, mnkLocal:
-    # MIR temporaries and locals can never be references
-    wrapCopy:
-      bu.add node(Local, c.prc.localMap[tree[n].local])
-  of mnkParam:
-    if tree[n].local in c.prc.indirectLocals:
-      # needs a pointer indirection
-      bu.subTree (if wantValue: Load else: Deref):
-        bu.add typeRef(c, env, tree[n].typ)
-        bu.subTree Copy:
-          bu.add node(Local, c.prc.localMap[tree[n].local])
-    else:
-      wrapCopy:
-        bu.add node(Local, c.prc.localMap[tree[n].local])
-  of mnkAlias:
-    # aliases are implemented as pointers
-    bu.subTree (if wantValue: Load else: Deref):
-      bu.add typeRef(c, env, tree[n].typ)
-      bu.subTree Copy:
-        bu.add node(Local, c.prc.localMap[tree[n].local])
-  of mnkConst:
-    let id = tree[n].cnst
-    if isAnon(id):
-      # TODO: inline small anonymous constants (e.g., small sets)
-      if extract(id) notin c.dataMap:
-        c.dataMap[extract(id)] = c.newGlobal(env, tree[n].typ)
-
-      wrapCopy:
-        bu.add node(Global, c.dataMap[extract(id)])
-    else:
-      wrapCopy:
-        bu.add node(Global, c.constMap[tree[n].cnst])
-  of mnkProcVal:
-    bu.add node(ProcVal, c.registerProc(tree[n].prc))
-  of mnkDeref, mnkDerefView:
-    bu.subTree (if wantValue: Load else: Deref):
-      bu.add typeRef(c, env, tree[n].typ)
-      recurse(tree.child(n, 0), true)
-  of mnkPathPos:
-    wrapCopy Field:
-      recurse(tree.child(n, 0), false)
-      bu.add node(Immediate, tree[n, 1].imm)
-  of mnkPathNamed:
-    let e = c.gen(env, tree, tree.child(n, 0), false)
-    wrapCopy:
-      c.genField(env, e, tree[n, 1].field, bu)
-  of mnkPathVariant:
-    recurse(tree.child(n, 0), false)
-  of mnkPathArray:
-    let typ = env.types.canonical(tree[n, 0].typ)
-    let desc = env.types.headerFor(typ, Canonical)
-    case desc.kind
-    of tkArray, tkUncheckedArray:
-      wrapCopy At:
-        recurse(tree.child(n, 0), false)
-        recurse(tree.child(n, 1), true)
-    of tkCstring:
-      wrapCopy At:
-        bu.subTree Deref:
-          bu.add node(Type, c.genFlexArrayType(env.types, CharType))
-          recurse(tree.child(n, 0), true)
-        recurse(tree.child(n, 1), true)
-    of tkSeq, tkString:
-      wrapCopy At:
-        bu.subTree Field:
-          bu.subTree Deref:
-            bu.add typeRef(c, env, payloadType(env.types, typ))
-            bu.subTree Copy:
-              bu.subTree Field:
-                recurse(tree.child(n, 0), false)
-                bu.add node(Immediate, 1)
-          bu.add node(Immediate, 1)
-        recurse(tree.child(n, 1), true)
-    of tkOpenArray:
-      wrapCopy At:
-        bu.subTree Deref:
-          bu.add node(Type, c.genFlexArrayType(env.types, elem(desc)))
-          bu.subTree Copy:
-            bu.subTree Field:
-              recurse(tree.child(n, 0), false)
-              bu.add node(Immediate, 0)
-        recurse(tree.child(n, 1), true)
-    else:
-      unreachable()
-  of mnkPathConv:
-    const PointerLike = {tkVar, tkLent, tkRef, tkPtr}
-    let a = env.types.canonical(tree[n].typ)
-    let b = env.types.canonical(tree[n, 0].typ)
-    if a == b:
-      # same canonical type (happens for lvalue conversions involving
-      # ``distinct`` types); a no-op
-      recurse(tree.child(n, 0), wantValue)
-    else:
-      # either an object up- or down-conversion
-      let diff = inheritanceDiff(env.types[a].skipTypes(skipPtrs),
-                                 env.types[b].skipTypes(skipPtrs))
-      if diff < 0:
-        # it's an up conversion. The argument may be either a pointer-to-object
-        # or object
-
-        proc emit(c; env; tree; n; diff: int, src: TypeId, bu) {.nimcall.} =
-          if diff == 0:
-            let desc = env.types.headerFor(src, Lowered)
-            if desc.kind in PointerLike:
-              bu.subTree Deref:
-                bu.add typeRef(c, env, desc.elem())
-                recurse(n, true)
-            else:
-              recurse(n, false)
+proc pathToIL(c; m; target: Expr, pos; num: int): Expr =
+  proc step(c; m; target: Expr, pos; num: int): Expr =
+    if num == 0:
+      return target
+    case m.tast[target.typ].kind
+    of cnkArrayTy:
+      let target = makeExpr resolve(m, m.tast.child(target.typ, 1)):
+        bu.subTree At:
+          bu.use target
+          case m.ast[pos].kind
+          of cnkInt:
+            bu.add node(IntVal, c.lit.pack(m.unpackInt(m.ast[pos].val)))
           else:
-            bu.subTree Field:
-              emit(c, env, tree, n, diff + 1, src, bu)
-              bu.add node(Immediate, 0)
+            c.exprToIL(m, pos, bu)
+      step(c, m, target, m.ast.next(pos), num - 1)
+    of cnkStructTy, cnkUnionTy:
+      let target = makeExpr resolve(m, m.tast.child(m.tast.child(target.typ, 1 + m.unpackInt(m.ast[pos].val)), 0)):
+        bu.subTree Field:
+          bu.use target
+          bu.add node(Immediate, m.unpackUInt(m.ast[pos].val).uint32)
+      step(c, m, target, m.ast.next(pos), num - 1)
+    of cnkOpaqueTy:
+      error(c, toLineInfo(c, m, m.ast[pos].info),
+        "opaque type access is not supported")
+    else:
+      unreachable(m.tast[target.typ].kind)
 
-        if env.types.headerFor(b, Lowered).kind in PointerLike:
-          bu.subTree Addr:
-            emit(c, env, tree, tree.child(n, 0), diff, b, bu)
-        else:
-          wrapCopy:
-            emit(c, env, tree, tree.child(n, 0), diff, b, bu)
-      else:
-        if env.types.headerFor(b, Lowered).kind in PointerLike:
-          # all MIR pointer types map to the same IL pointer type;
-          # nothing special to do
-          recurse(tree.child(n, 0), wantValue)
-        else:
-          assert not wantValue
+  step(c, m, target, pos, num)
+
+proc typeRefToIL(c; m; pos; bu) =
+  bu.add typeRef(c, m, m.ast[pos].val.StringId)
+
+proc nameToIL(c; m; pos): Node =
+  case m.ast[pos].kind
+  of cnkLocal:
+    node(Local, c.prc.localMap[m.ast[pos].val.StringId])
+  of cnkGlobal:
+    node(Global, c.globalsMap[m.ast[pos].val.StringId])
+  of cnkDatum:
+    node(Global, c.dataMap[m.ast[pos].val.Datum])
+  of cnkProc:
+    node(Proc, c.procMap[m.ast[pos].val.StringId])
+  of cnkUnknown:
+    if m.ast[pos, 1].val.StringId in m.globals:
+      node(Global, c.globalsMap[m.ast[pos, 1].val.StringId])
+    elif m.ast[pos, 1].val.StringId in m.procs:
+      node(Proc, c.procMap[m.ast[pos, 1].val.StringId])
+    else:
+      error(c, toLineInfo(c, m, m.ast[pos, 1].info), "")
+  else:
+    unreachable()
+
+proc lvalueToIL(c; m; pos; bu) =
+  case m.ast[pos].kind
+  of cnkLocal, cnkGlobal, cnkUnknown:
+    # may happen for the expression on the LHS of assignments
+    bu.add nameToIL(c, m, pos)
+  of cnkUse:
+    # can only be a name reference
+    bu.add nameToIL(c, m, m.ast.child(pos, 1))
+  of cnkPath:
+    let typ = m.getType(m.ast.child(pos, 1))
+    let target =
+      case m.tast[typ].kind
+      of cnkPtrTy:
+        makeExpr m.resolve(m.tast.child(typ, 0)):
           bu.subTree Deref:
-            bu.add typeRef(c, env, a)
-            bu.subTree Addr:
-              recurse(tree.child(n, 0), false)
+            bu.add typeRef(c, m, m.tast.child(typ, 0))
+            c.exprToIL(m, m.ast.child(pos, 1), bu)
+      else:
+        # the root must be an lvalue
+        makeExpr m.resolve(typ):
+          c.lvalueToIL(m, m.ast.child(pos, 1), bu)
 
-  of mnkStrLit, mnkAstLit:
-    unreachable()
-  of AllNodeKinds - LvalueExprKinds - LiteralDataNodes - {mnkProcVal}:
-    unreachable($tree[n].kind)
-
-proc gen(c; env: MirEnv, tree; n; wantsValue: bool): Expr =
-  ## Translates the MIR value expression into IL code and returns it as an
-  ## `Expr`.
-  var bu = initBuilder[NodeKind]()
-  c.translateValue(env, tree, n, wantsValue, bu)
-  result = makeExpr(finish(bu), tree[n].typ)
-  assert result.nodes.len > 0
-
-proc getTypeInfoV2(c; env: var MirEnv, typ: TypeId): Expr =
-  ## Returns a pointer expression referring to the RTTI global for `typ`.
-  ## The RTTI data is created first if it wasn't already.
-  let rttiType = env.types.add(c.graph.getCompilerProc("TNimTypeV2").typ)
-
-  var global: uint32
-  c.rttiCache.withValue typ, val:
-    global = val[]
-  do:
-    let data = genTypeInfoV2(env, c.graph, typ)
-    c.dataMap.withValue data, id:
-      global = id[]
-    do:
-      global = c.newGlobal(env, rttiType)
-      c.dataMap[data] = global
-
-    c.rttiCache[typ] = global
-
-  result = makeExpr PointerType:
-    bu.subTree Addr:
-      bu.add node(Global, global)
-
-proc genDefault(c; env: var MirEnv; dest: Expr, typ: TypeId, bu) =
-  let typ = env.types.canonical(typ)
-  case env.types.headerFor(typ, Lowered).kind
-  of tkBool, tkChar, tkInt, tkUInt:
-    genAsgn(dest, makeExpr(@[node(IntVal, c.lit.pack(0))], typ), bu)
-  of tkFloat:
-    genAsgn(dest, makeExpr(@[node(FloatVal, c.lit.pack(0.0))], typ), bu)
-  of tkRef, tkPtr, tkVar, tkLent, tkPointer, tkCstring, tkProc:
-    genAsgn(dest, makeExpr(@[node(Nil)], typ), bu)
-  else:
-    # TODO: for seqs, closures, and openarrays, set the fields directly
-    let size = env.types.headerFor(typ, Lowered).size(env.types)
-    bu.subTree Clear:
-      takeAddr(dest, bu)
-      bu.add node(IntVal, c.lit.pack(size))
-
-    # TODO: the original type has to be passed to both hasRttiHeader and
-    #       getTypeInfoV2, otherwise distinct types don't have the
-    #       correct RTTI generated for them
-    if hasRttiHeader(env.types, typ):
-      bu.subTree Asgn:
-        c.genField(env, dest, -1, bu)
-        bu.use c.getTypeInfoV2(env, typ)
-
-    # TODO: implement initialization for RTTI headers in embedded types
-
-proc genField(c; env: MirEnv; tree; n; pos: int32, bu) =
-  c.genField(env, c.gen(env, tree, n, false), pos, bu)
-
-proc genOf(c; env: var MirEnv, tree; e: Expr, typ: TypeId; bu) =
-  bu.subTree Call:
-    bu.add compilerProc(c, env, "isObj")
-    bu.subTree Copy:
-      c.genField(env, e, -1, bu)
-
-    # fetch the type name from the RTTI object
-    # TODO: use the name cstring directly, without first requesting an RTTI
-    #       object
-    let rttiType = env.types.add(c.graph.getCompilerProc("TNimTypeV2").typ)
-    bu.subTree Copy:
-      bu.subTree Field:
-        bu.subTree Deref:
-          bu.add typeRef(c, env, rttiType)
-          bu.use c.getTypeInfoV2(env, typ)
-        bu.add node(Immediate, 3)
-
-proc genLength(c; env: var MirEnv; tree; n; dest: Expr, stmts) =
-  ## Emits an assignment between `dest` and a length query for `n`.
-  let typ = env.types.canonical(tree[n].typ)
-  case env.types.headerFor(typ, Canonical).kind
-  of tkSeq, tkString:
-    stmts.putInto dest, Copy:
-      bu.subTree Field:
-        c.translateValue(env, tree, n, false, bu)
-        bu.add node(Immediate, 0)
-  of tkArray:
-    # XXX: we need to know about empty arrays here, but the MIR array type
-    #      length is always clamped to 1 and thus we cannot rely on it.
-    #      `mirgen` should special-case empty arrays in mSlice operations
-    let L = c.graph.config.lengthOrd(env.types[typ]).toInt
-    stmts.putInto dest, node(IntVal, c.lit.pack(L))
-  of tkOpenArray:
-    stmts.putInto dest, Copy:
-      bu.subTree Field:
-        c.translateValue(env, tree, n, false, bu)
-        bu.add node(Immediate, 1)
-  of tkCstring:
-    # generate ``if x.isNil: 0 else: nimCStrLen(x)``
-    let
-      then = c.prc.newLabel()
-      els  = c.prc.newLabel()
-      exit = c.prc.newLabel()
-    stmts.addStmt Branch:
-      bu.subTree Eq:
-        bu.add typeRef(c, env, CstringType)
-        c.translateValue(env, tree, n, true, bu)
-        bu.add node(Nil)
-      bu.goto els
-      bu.goto then
-    stmts.join then
-    stmts.putInto dest, node(IntVal, 0)
-    stmts.goto exit
-    stmts.join els
-    stmts.putInto dest, Call:
-      bu.add compilerProc(c, env, "nimCStrLen")
-      c.translateValue(env, tree, n, true, bu)
-    stmts.join exit
+    bu.use pathToIL(c, m, target, m.ast.child(pos, 2), m.ast.len(pos) - 2)
   else:
     unreachable()
 
-proc genNumericConv(c; env; val: Expr, to: TypeId, bu) =
-  ## If the types are equal (at the IL level), emits an *unchecked* numeric
-  ## conversion for `val` to type `to`.
-  proc skip(env; t: TypeId): TypeId =
-    result = env.types.canonical(t)
-    # treat imported types as their underlying representation
-    if env.types.headerFor(t, Lowered).kind == tkImported:
-      result = env.skip(env.types.headerFor(t, Lowered).elem)
+proc magicToIL(c; m; pos; bu): bool =
+  ## If possible, emits a custom implementation for the call at `pos` using
+  ## built-in ops. Returns whether a custom implementation was emitted.
+  if m.ast[pos, 0].kind == cnkUse and m.ast[m.ast.child(pos, 0), 1].kind == cnkProc:
+    case m.get(m.ast[m.ast.child(pos, 0), 1].val.StringId)
+    of "nimCopyMem":
+      bu.subTree Blit:
+        c.exprToIL(m, m.ast.child(pos, 1), bu)
+        c.exprToIL(m, m.ast.child(pos, 2), bu)
+        c.exprToIL(m, m.ast.child(pos, 3), bu)
+      result = true
+    of "nimZeroMem":
+      bu.subTree Clear:
+        c.exprToIL(m, m.ast.child(pos, 1), bu)
+        c.exprToIL(m, m.ast.child(pos, 2), bu)
+      result = true
+    else:
+      discard "nothing to do"
 
-  let dst = env.types.headerFor(env.skip(to), Lowered)
-  let src = env.types.headerFor(env.skip(val.typ), Lowered)
+proc exprToIL(c; m; pos; bu) =
+  template recurse(n: NodePos) =
+    c.exprToIL(m, n, bu)
 
-  template convOp(kind: NodeKind) =
+  proc conv(c; m; kind: NodeKind, pos; bu) =
     bu.subTree kind:
-      bu.add typeRef(c, env, to)
-      bu.add typeRef(c, env, val.typ)
-      bu.use val
+      c.typeRefToIL(m, m.ast.child(pos, 0), bu)
+      bu.add typeRef(c, m, m.getType(m.ast.child(pos, 1)))
+      recurse(m.ast.child(pos, 1))
 
-  template sizedConv(narrow, widen: NodeKind) =
-    if dst.size(env.types) < src.size(env.types):
-      convOp narrow
-    elif dst.size(env.types) > src.size(env.types):
-      convOp widen
+  proc unaryOp(c; m; kind: NodeKind, pos; bu) =
+    bu.subTree kind:
+      c.typeRefToIL(m, m.ast.child(pos, 0), bu)
+      recurse(m.ast.child(pos, 1))
+
+  proc binOp(c; m; kind: NodeKind, pos; bu) =
+    bu.subTree kind:
+      c.typeRefToIL(m, m.ast.child(pos, 0), bu)
+      recurse(m.ast.child(pos, 1))
+      recurse(m.ast.child(pos, 2))
+
+  proc cmpOp(c; m; kind: NodeKind, pos; bu) =
+    bu.subTree kind:
+      c.typeRefToIL(m, m.ast.child(pos, 1), bu)
+      recurse(m.ast.child(pos, 2))
+      recurse(m.ast.child(pos, 3))
+
+  case m.ast[pos].kind
+  of cnkUse:
+    let n = nameToIL(c, m, m.ast.child(pos, 1))
+    if n.kind == Proc:
+      bu.add n
     else:
-      # nothing to do
-      bu.use val
-
-  const
-    uints = {tkUInt, tkChar, tkBool}
-    ints  = {tkInt}
-
-  case dst.kind
-  of uints:
-    case src.kind
-    of ints, uints:
-      # conversion to uint is the same as casting to uint
-      sizedConv Trunc, Zext
-    of tkFloat:
-      convOp Conv
-    else:
-      unreachable(src.kind)
-  of ints:
-    case src.kind
-    of ints:    sizedConv Trunc, Sext
-    of uints:   sizedConv Trunc, Zext
-    of tkFloat: convOp Conv
-    else:
-      unreachable(src.kind)
-  of tkFloat:
-    case src.kind
-    of ints, uints:
-      convOp Conv
-    of tkFloat:
-      sizedConv Demote, Promote
-    else:
-      unreachable()
-  of tkPtr, tkPointer, tkProc, tkCstring:
-    # a conversion between pointer types is a no-op. These conversion aren't
-    # really numeric conversions, but it's easier to also include them here
-    bu.use val
-  else:
-    unreachable(dst.kind)
-
-proc genSetElem(c; env; tree; n; styp: TypeId, bu) =
-  ## Emits the expression for loading a value for use in a set-related
-  ## operation. This means turning the value into one relative to the start of
-  ## the set's value range. The resulting value is always of uint16 type.
-  let val = makeExpr tree[n].typ:
-    # shift the operand's value so that its range starts at 0
-    assert env.types[styp].kind == tySet
-    let first = c.graph.config.firstOrd(env.types[styp])
-    if first != Zero:
-      bu.subTree Sub:
-        bu.add typeRef(c, env, tree[n].typ)
-        c.translateValue(env, tree, n, true, bu)
-        bu.add node(IntVal, c.lit.pack(first.toInt))
-    else:
-      c.translateValue(env, tree, n, true, bu)
-
-  # sets cannot have more than 2^16 elements, hence a uint16
-  c.genNumericConv(env, val, UInt16Type, bu)
-
-proc genSetOp(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
-  ## Generates and emits the IL code for a binary set operation.
-  let
-    a = NodePosition tree.argument(n, 0) # always a set
-    b = NodePosition tree.argument(n, 1)
-    # ^^ for some operations a set, for others not
-    m = tree[n, 1].magic
-    typ  = env.types.canonical(tree[a].typ)
-    desc = env.types.headerFor(typ, Lowered)
-
-  # sets with a number of elements <= 64 fit into unsigned integers. All
-  # other sets are implemented as an array of small sets (i.e., sets with
-  # 8 elements, fitting into a uint8)
-
-  template value(n: NodePosition) =
-    c.translateValue(env, tree, n, true, bu)
-
-  template takeAddr(n: NodePosition) =
-    takeAddr(c.gen(env, tree, n, false), bu)
-
-  template elem(n: NodePosition) =
-    # watch out! Don't use the canonical set type, because then the set
-    # range's start value cannot be looked up anymore
-    c.genSetElem(env, tree, n, tree[a].typ, bu)
-
-  template lenValue() =
-    let L = env.types.headerFor(typ, Lowered).arrayLen(env.types)
-    bu.add node(IntVal, c.lit.pack(L))
-
-  if desc.kind == tkArray:
-    case m
-    of mMulSet, mPlusSet, mMinusSet:
-      const Ops = [mMulSet: "skullyMulSet",
-                   mPlusSet: "skullyPlusSet",
-                   mMinusSet: "skullMinusSet"]
-      stmts.addStmt Call:
-        bu.add compilerProc(c, env, Ops[m])
-        takeAddr(dest, bu)
-        takeAddr a
-        takeAddr b
-        lenValue()
-    of mEqSet:
-      stmts.putInto dest, Eq:
-        bu.add typeRef(c, env, BoolType)
-        bu.subTree Call:
-          bu.add compilerProc(c, env, "nimCmpMem")
-          takeAddr a
-          takeAddr b
-          lenValue()
-        bu.add node(IntVal, c.lit.pack(0))
-    of mLeSet, mLtSet:
-      const Ops = [mLeSet: "skullyLeSet", mLtSet: "skullyLtSet"]
-      stmts.putInto dest, Call:
-        bu.add compilerProc(c, env, Ops[m])
-        takeAddr a
-        takeAddr b
-        lenValue()
-    of mIncl, mExcl:
-      const Ops = [mIncl: "skullyIncl", mExcl: "skullyExcl"]
-      stmts.putInto dest, Call:
-        bu.add compilerProc(c, env, Ops[m])
-        takeAddr a
-        elem b
-    of mInSet:
-      stmts.putInto dest, Call:
-        bu.add compilerProc(c, env, "skullyInSet")
-        takeAddr a
-        elem b
-    else:
-      unreachable()
-  else:
-    case m
-    of mMulSet:
-      stmts.putInto dest, BitAnd:
-        bu.add typeRef(c, env, typ)
-        value a
-        value b
-    of mPlusSet:
-      stmts.putInto dest, BitOr:
-        bu.add typeRef(c, env, typ)
-        value a
-        value b
-    of mMinusSet:
-      stmts.putInto dest, BitAnd:
-        bu.add typeRef(c, env, typ)
-        value a
-        bu.subTree BitNot:
-          bu.add typeRef(c, env, typ)
-          value b
-    of mEqSet:
-      stmts.putInto dest, Eq:
-        bu.add typeRef(c, env, typ)
-        value a
-        value b
-    of mLtSet:
-      # generate ``((a and not b) == 0) and (a != b)``
-      let
-        els  = c.prc.newLabel()
-        then = c.prc.newLabel()
-        next = c.prc.newLabel()
-      stmts.addStmt Branch:
-        bu.subTree Eq:
-          bu.add typeRef(c, env, typ)
-          bu.subTree BitAnd:
-            bu.add typeRef(c, env, typ)
-            value a
-            bu.subTree BitNot:
-              bu.add typeRef(c, env, typ)
-              value b
-          bu.add node(IntVal, c.lit.pack(0))
-        bu.goto els
-        bu.goto then
-      stmts.join then
-      stmts.putInto dest, Not:
-        bu.subTree Eq:
-          bu.add typeRef(c, env, typ)
-          value a
-          value b
-      stmts.goto next
-      stmts.join els
-      stmts.putInto dest, node(IntVal, c.lit.pack(0))
-      stmts.join next
-    of mLeSet:
-      # generate ``(a and not b) == 0``
-      stmts.putInto dest, Eq:
-        bu.add typeRef(c, env, typ)
-        bu.subTree BitAnd:
-          bu.add typeRef(c, env, typ)
-          value a
-          bu.subTree BitNot:
-            bu.add typeRef(c, env, tree[b].typ)
-            value b
-        bu.add node(IntVal, c.lit.pack(0))
-    of mIncl:
-      # generate ``dest = dest or (1 shl elem)``
-      let dest = c.gen(env, tree, a, false)
-      stmts.putInto dest, BitOr:
-        bu.add typeRef(c, env, typ)
-        bu.use dest
-        bu.subTree Shl:
-          bu.add typeRef(c, env, typ)
-          bu.add node(IntVal, c.lit.pack(1))
-          elem b
-    of mExcl:
-      # generate ``dest = dest and not (1 shl elem)``
-      let dest = c.gen(env, tree, a, false)
-      stmts.putInto dest, BitAnd:
-        bu.add typeRef(c, env, typ)
-        bu.use dest
-        bu.subTree BitNot:
-          bu.add typeRef(c, env, typ)
-          bu.subTree Shl:
-            bu.add typeRef(c, env, typ)
-            bu.add node(IntVal, c.lit.pack(1))
-            elem b
-    of mInSet:
-      # generate ``(set bitand (1 shl elem)) != 0``
-      stmts.putInto dest, Not:
-        bu.subTree Eq:
-          bu.add typeRef(c, env, typ)
-          bu.subTree BitAnd:
-            bu.add typeRef(c, env, typ)
-            value a
-            bu.subTree Shl:
-              bu.add typeRef(c, env, typ)
-              bu.add node(IntVal, c.lit.pack(1))
-              elem b
-          bu.add node(IntVal, c.lit.pack(0))
-    else:
-      unreachable()
-
-proc genMagic(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
-  template value(n: NodePosition) =
-    c.translateValue(env, tree, n, true, bu)
-
-  template lvalue(n: OpValue) =
-    c.translateValue(env, tree, NodePosition(n), false, bu)
-
-  template value(n: OpValue) =
-    value(NodePosition n)
-
-  template takeAddr(n: NodePosition) =
-    takeAddr(c.gen(env, tree, n, false), bu)
-
-  template wrapAsgn(k: NodeKind, body: untyped) =
-    stmts.putInto dest, k, body
-
-  template wrapAsgn(body: untyped) =
-    if true:
-      var bu {.inject.} = initBuilder[NodeKind]()
-      body
-      genAsgn(dest, makeExpr(finish(bu), dest.typ), stmts)
-
-  case tree[n, 1].magic
-  of mNot:
-    wrapAsgn Not:
-      value(tree.argument(n, 0))
-  of mLtI, mLtF64, mLtEnum, mLtU, mLtCh, mLtPtr:
-    wrapAsgn Lt:
-      bu.add typeRef(c, env, tree[tree.argument(n, 0)].typ)
-      value(tree.argument(n, 0))
-      value(tree.argument(n, 1))
-  of mLeI, mLeF64, mLeEnum, mLeU, mLeCh, mLePtr:
-    wrapAsgn Le:
-      bu.add typeRef(c, env, tree[tree.argument(n, 0)].typ)
-      value(tree.argument(n, 0))
-      value(tree.argument(n, 1))
-  of mEqI, mEqF64, mEqEnum, mEqRef, mEqCh, mEqB:
-    wrapAsgn Eq:
-      bu.add typeRef(c, env, tree[tree.argument(n, 0)].typ)
-      value(tree.argument(n, 0))
-      value(tree.argument(n, 1))
-  of mEqProc:
-    let typ = env.types.canonical(tree[tree.argument(n, 0)].typ)
-    if env.types.headerFor(typ, Lowered).kind == tkProc:
-      # simple pointer equality suffices
-      wrapAsgn Eq:
-        bu.add typeRef(c, env, typ)
-        value(tree.argument(n, 0))
-        value(tree.argument(n, 1))
-    else:
-      # both the procedure pointer and environment pointer need to be
-      # compared (shallow equality)
-      # TODO: use a proper short-circuiting ``and``, not a ``bitand``
-      wrapAsgn BitAnd:
-        bu.add typeRef(c, env, PointerType)
-        bu.subTree Eq:
-          bu.add typeRef(c, env, PointerType)
-          bu.subTree Copy:
-            bu.subTree Field:
-              lvalue tree.argument(n, 0)
-              bu.add node(Immediate, 0)
-          bu.subTree Copy:
-            bu.subTree Field:
-              lvalue tree.argument(n, 1)
-              bu.add node(Immediate, 0)
-        bu.subTree Eq:
-          bu.add typeRef(c, env, PointerType)
-          bu.subTree Copy:
-            bu.subTree Field:
-              lvalue tree.argument(n, 0)
-              bu.add node(Immediate, 1)
-          bu.subTree Copy:
-            bu.subTree Field:
-              lvalue tree.argument(n, 1)
-              bu.add node(Immediate, 1)
-  of mIsNil:
-    wrapAsgn Eq:
-      let arg = tree.argument(n, 0)
-      case env.types.headerFor(tree[arg].typ, Lowered).kind
-      of tkClosure:
-        bu.add typeRef(c, env, tree[arg].typ)
-        bu.subTree Copy:
-          bu.subTree Field:
-            lvalue(arg)
-            bu.add node(Immediate, 0)
-      else:
-        # must be a pointer-like type
-        bu.add typeRef(c, env, tree[arg].typ)
-        value(arg)
-      bu.add node(Nil)
-  of mAddU, mSubU, mMulU, mDivU, mModU:
-    const Map = [mAddU: Add, mSubU: Sub, mMulU: Mul, mDivU: Div, mModU: Mod]
-    wrapAsgn Map[tree[n, 1].magic]:
-      bu.add typeRef(c, env, tree[n].typ)
-      value(tree.argument(n, 0))
-      value(tree.argument(n, 1))
-  of mBitandI:
-    wrapAsgn BitAnd:
-      bu.add typeRef(c, env, tree[n].typ)
-      value(tree.argument(n, 0))
-      value(tree.argument(n, 1))
-  of mBitxorI:
-    wrapAsgn BitXor:
-      bu.add typeRef(c, env, tree[n].typ)
-      value(tree.argument(n, 0))
-      value(tree.argument(n, 1))
-  of mBitnotI:
-    wrapAsgn BitNot:
-      bu.add typeRef(c, env, tree[n].typ)
-      value(tree.argument(n, 0))
-  of mBitorI:
-    wrapAsgn BitOr:
-      bu.add typeRef(c, env, tree[n].typ)
-      value(tree.argument(n, 0))
-      value(tree.argument(n, 1))
-  of mShlI:
-    wrapAsgn Shl:
-      bu.add typeRef(c, env, tree[n].typ)
-      value(tree.argument(n, 0))
-      value(tree.argument(n, 1))
-  of mAshrI, mShrI:
-    wrapAsgn Shr:
-      bu.add typeRef(c, env, tree[n].typ)
-      value(tree.argument(n, 0))
-      value(tree.argument(n, 1))
-  of mOrd, mChr:
-    # it's a conversion, nothing more
-    let input = c.gen(env, tree, NodePosition(tree.argument(n, 0)), true)
-    wrapAsgn:
-      c.genNumericConv(env, input, tree[n].typ, bu)
-  of mIncl, mExcl, mLtSet, mLeSet, mEqSet, mMinusSet, mPlusSet, mMulSet,
-     mInSet:
-    c.genSetOp(env, tree, n, dest, stmts)
-  of mCard:
-    let a = tree.argument(n, 0)
-    let desc = env.types.headerFor(env.types.canonical(tree[a].typ), Lowered)
-    if desc.kind == tkArray:
-      wrapAsgn Call:
-        bu.add compilerProc(c, env, "skullyCard")
-        takeAddr NodePosition(a)
-        bu.add node(IntVal, c.lit.pack(desc.size(env.types)))
-    elif desc.size(env.types) == 8:
-      wrapAsgn Call:
-        bu.add compilerProc(c, env, "countBits64")
-        value a
-    elif desc.size(env.types) == 4:
-      wrapAsgn Call:
-        bu.add compilerProc(c, env, "countBits32")
-        value a
-    else:
-      # also use countBits32, but widen the operand first
-      wrapAsgn Call:
-        bu.add compilerProc(c, env, "countBits32")
-        bu.subTree Zext:
-          bu.add node(UInt, 4)
-          bu.add typeRef(c, env, tree[a].typ)
-          value a
-  of mDefault:
-    c.genDefault(env, dest, tree[n].typ, stmts)
-  of mMaxI, mMinI:
-    let a = c.prc.newLabel()
-    let b = c.prc.newLabel()
-    let after = c.prc.newLabel()
-    stmts.addStmt Branch:
-      var (arg1, arg2) =
-        if tree[n, 1].magic == mMaxI:
-          (0, 1)
-        else:
-          (1, 0)
-
-      bu.subTree Lt:
-        bu.add typeRef(c, env, tree[n].typ)
-        value(tree.argument(n, arg1))
-        value(tree.argument(n, arg2))
-      bu.goto(b)
-      bu.goto(a)
-    stmts.join(a) # then branch
-    wrapAsgn:
-      value(tree.argument(n, 1))
-    stmts.goto(after)
-    stmts.join(b) # else branch
-    wrapAsgn:
-      value(tree.argument(n, 0))
-    stmts.join(after)
-  of mSizeof:
-    let typ = env.types.canonical(tree[tree.argument(n, 0)].typ)
-    let desc = env.types.headerFor(typ, Canonical)
-    if desc.size(env.types) >= 0:
-      wrapAsgn:
-        bu.add node(IntVal, c.lit.pack(desc.size(env.types)))
-    else:
-      unreachable()
-  of mAlignof:
-    let typ = env.types.canonical(tree[tree.argument(n, 0)].typ)
-    let desc = env.types.headerFor(typ, Canonical)
-    if desc.size(env.types) >= 0:
-      wrapAsgn:
-        bu.add node(IntVal, c.lit.pack(desc.align))
-    else:
-      unreachable()
-  of mEqStr:
-    wrapAsgn Call:
-      bu.add compilerProc(c, env, "eqStrings")
-      value(tree.argument(n, 0))
-      value(tree.argument(n, 1))
-  of mLeStr:
-    wrapAsgn Le:
-      bu.add typeRef(c, env, env.types.sizeType)
-      bu.subTree Call:
-        bu.add compilerProc(c, env, "cmpStrings")
-        value(tree.argument(n, 0))
-      bu.add node(IntVal, 0)
-  of mLtStr:
-    wrapAsgn Lt:
-      bu.add typeRef(c, env, env.types.sizeType)
-      bu.subTree Call:
-        bu.add compilerProc(c, env, "cmpStrings")
-        value(tree.argument(n, 0))
-      bu.add node(IntVal, 0)
-  of mFinished:
-    # the status field is stored at the start of the env object, load it and
-    # test whether the value is < 0
-    wrapAsgn Lt:
-      bu.add typeRef(c, env, env.types.sizeType)
-      bu.subTree Load:
-        bu.add typeRef(c, env, env.types.sizeType)
-        bu.subTree Copy:
-          bu.subTree Field:
-            lvalue(tree.argument(n, 0))
-            bu.add node(Immediate, 1)
-
-      bu.add node(IntVal, 0)
-  of mCopyInternal:
-    # the internal part of an object is the RTTI pointer stored in the hidden
-    # field
-    stmts.addStmt Asgn:
-      c.genField(env, tree, NodePosition tree.argument(n, 0), -1, bu)
       bu.subTree Copy:
-        c.genField(env, tree, NodePosition tree.argument(n, 1), -1, bu)
-  of mArrToSeq:
-    let
-      seqType  = env.types.canonical(tree[n].typ)
-      arg      = env.types.canonical(tree[tree.argument(n, 0)].typ)
-      elem     = env.types.canonical(env.types.headerFor(arg, Canonical).elem)
-      elemDesc = env.types.headerFor(elem, Canonical)
-      len      = c.graph.config.lengthOrd(env.types[arg]).toInt
-    # emit the length initialization:
-    stmts.addStmt Asgn:
-      bu.subTree Field:
-        bu.useLvalue dest
-        bu.add node(Immediate, 0)
-      bu.add node(IntVal, c.lit.pack(len))
-    # emit the seq allocation:
-    stmts.addStmt Asgn:
-      bu.subTree Field:
-        bu.useLvalue dest
-        bu.add node(Immediate, 1)
-      bu.subTree Call:
-        bu.add compilerProc(c, env, "newSeqPayload")
-        bu.add node(IntVal, c.lit.pack len)
-        bu.add node(IntVal, c.lit.pack elemDesc.size(env.types))
-        bu.add node(IntVal, c.lit.pack elemDesc.align)
-
-    if len < 10:
-      for i in 0..<len:
-        stmts.addStmt Asgn:
-          bu.subTree At:
-            bu.subTree Field:
-              bu.subTree Deref:
-                bu.add typeRef(c, env, payloadType(env.types, seqType))
-                bu.use dest
-              bu.add node(Immediate, 1)
-            bu.add node(IntVal, c.lit.pack(i))
-          bu.subTree Copy:
-            bu.subTree At:
-              lvalue tree.argument(n, 0)
-              bu.add node(IntVal, c.lit.pack(i))
-    else:
-      # too many elements. Use a blit copy in order to not explode code size
-      stmts.addStmt Blit:
-        bu.subTree Addr:
-          bu.subTree Field:
-            bu.subTree Deref:
-              bu.add typeRef(c, env, payloadType(env.types, seqType))
-              bu.subTree Copy:
-                bu.subTree Field:
-                  bu.useLvalue dest
-                  bu.add node(Immediate, 1)
-            bu.add node(Immediate, 1)
-        takeAddr NodePosition(tree.argument(n, 0))
-        bu.add node(IntVal, c.lit.pack(len * elemDesc.size(env.types)))
-  of mSamePayload:
-    wrapAsgn Eq:
-      bu.add typeRef(c, env, PointerType)
-      bu.subTree Copy:
-        bu.subTree Field:
-          lvalue(tree.argument(n, 0))
-          bu.add node(Immediate, 1)
-      bu.subTree Copy:
-        bu.subTree Field:
-          lvalue(tree.argument(n, 1))
-          bu.add node(Immediate, 1)
-  of mLengthSeq, mLengthOpenArray, mLengthStr:
-    c.genLength(env, tree, NodePosition tree.argument(n, 0), dest, stmts)
-  of mHigh:
-    let tmp = c.newTemp(env.types.sizeType)
-    c.genLength(env, tree, NodePosition tree.argument(n, 0), tmp, stmts)
-    wrapAsgn Sub:
-      bu.add typeRef(c, env, env.types.sizeType)
-      bu.use tmp
-      bu.add node(IntVal, 1)
-  of mSetLengthStr:
-    stmts.addStmt Call:
-      bu.add compilerProc(c, env, "setLengthStrV2")
-      takeAddr NodePosition(tree.argument(n, 0))
-      value(tree.argument(n, 1))
-  of mNewString:
-    wrapAsgn Call:
-      bu.add compilerProc(c, env, "mnewString")
-      value(tree.argument(n, 0))
-  of mNewStringOfCap:
-    wrapAsgn Call:
-      bu.add compilerProc(c, env, "rawNewString")
-      value(tree.argument(n, 0))
-  of mBoolToStr:
-    wrapAsgn Call:
-      bu.add compilerProc(c, env, "nimBoolToStr")
-      value(tree.argument(n, 0))
-  of mCharToStr:
-    wrapAsgn Call:
-      bu.add compilerProc(c, env, "nimCharToStr")
-      value(tree.argument(n, 0))
-  of mCStrToStr:
-    wrapAsgn Call:
-      bu.add compilerProc(c, env, "cstrToNimstr")
-      value(tree.argument(n, 0))
-  of mStrToCStr:
-    wrapAsgn Call:
-      bu.add compilerProc(c, env, "nimToCStringConv")
-      value(tree.argument(n, 0))
-  of mAppendStrStr:
-    # in theory, the appendStrStr magic supports being merged, but this never
-    # happens in practice, meaning that the call expression only ever has
-    # two parameters here
-    stmts.addStmt Call:
-      bu.add compilerProc(c, env, "prepareAdd")
-      takeAddr NodePosition(tree.argument(n, 0))
-      bu.subTree Add:
-        bu.add typeRef(c, env, env.types.sizeType)
-        bu.subTree Copy:
-          bu.subTree Field:
-            lvalue(tree.argument(n, 0))
-            bu.add node(Immediate, 0)
-        bu.subTree Copy:
-          bu.subTree Field:
-            lvalue(tree.argument(n, 1))
-            bu.add node(Immediate, 0)
-
-    stmts.addStmt Call:
-      bu.add compilerProc(c, env, "appendString")
-      takeAddr NodePosition(tree.argument(n, 0))
-      value(tree.argument(n, 1))
-  of mConStrStr:
-    var
-      temp  = c.newTemp(StringType)
-      nodes = newSeq[Node]()
-    # manually construct the node sequence; it's simpler
-
-    # compute the length expression:
-    var i = 0
-    for (_, _, it) in tree.arguments(n):
-      if i < tree.numArgs(n) - 1:
-        nodes.add node(Add, 3)
-        nodes.add typeRef(c, env, env.types.sizeType)
-
-      if tree[it].typ == CharType:
-        nodes.add node(IntVal, 1)
-      else:
-        nodes.add node(Copy, 1)
-        nodes.add node(Field, 2)
-        nodes.add c.gen(env, tree, NodePosition(it), false).nodes
-        nodes.add node(Immediate, 0)
-
-      inc i
-
-    stmts.addStmt Asgn:
-      bu.useLvalue(temp)
-      bu.subTree Call:
-        bu.add compilerProc(c, env, "rawNewString")
-        bu.add nodes # the length expression
-
-    # emit the append calls:
-    for (_, _, it) in tree.arguments(n):
-      if tree[it].typ == CharType:
-        stmts.addStmt Call:
-          bu.add compilerProc(c, env, "appendChar")
-          bu.subTree Addr:
-            bu.useLvalue(temp)
-          value(it)
-      else:
-        stmts.addStmt Call:
-          bu.add compilerProc(c, env, "appendString")
-          bu.subTree Addr:
-            bu.useLvalue(temp)
-          value(it)
-
-    genAsgn(dest, temp, stmts)
-  of mParseBiggestFloat:
-    wrapAsgn Call:
-      bu.add compilerProc(c, env, "nimParseBiggestFloat")
-      value(tree.argument(n, 0))
-      takeAddr NodePosition(tree.argument(n, 1))
-      value(tree.argument(n, 2))
-  of mAppendStrCh:
-    stmts.addStmt Call:
-      bu.add compilerProc(c, env, "nimAddCharV1")
-      takeAddr NodePosition(tree.argument(n, 0))
-      value(tree.argument(n, 1))
-  of mDestroy:
-    let
-      typ    = env.types.canonical(tree[tree.argument(n, 0)].typ)
-      ptrTyp = env.types[env.types.lookupField(typ, 1)].typ
-      els    = c.prc.newLabel()
-
-    var then = c.prc.newLabel()
-
-    # emit the following:
-    #   if x.p != nil and (x.p.cap and NIM_STRLIT_FLAG) == 0:
-    #     dealloc(x.p)
-    stmts.addStmt Branch:
-      bu.subTree Eq:
-        bu.add typeRef(c, env, ptrTyp)
-        bu.subTree Copy:
-          bu.subTree Field:
-            lvalue(tree.argument(n, 0))
-            bu.add node(Immediate, 1)
-        bu.add node(Nil)
-      bu.goto then
-      bu.goto els
-    stmts.join then
-    then = c.prc.newLabel()
-    stmts.addStmt Branch:
-      bu.subTree Eq:
-        bu.add typeRef(c, env, env.types.sizeType)
-        bu.subTree BitAnd:
-          bu.add typeRef(c, env, env.types.sizeType)
-          bu.subTree Copy:
-            bu.subTree Field:
-              bu.subTree Deref:
-                bu.add typeRef(c, env, elem env.types.headerFor(ptrTyp, Lowered))
-                bu.subTree Copy:
-                  bu.subTree Field:
-                    lvalue(tree.argument(n, 0))
-                    bu.add node(Immediate, 1)
-              bu.add node(Immediate, 0)
-          bu.add node(IntVal, c.lit.pack(StrLitFlag))
-        bu.add node(IntVal, 0)
-      bu.goto els
-      bu.goto then
-
-    stmts.join then
-    case env.types.headerFor(typ, Canonical).kind
-    of tkString:
-      stmts.addStmt Call:
-        bu.add compilerProc(c, env, "dealloc")
-        bu.subTree Copy:
-          bu.subTree Field:
-            lvalue(tree.argument(n, 0))
-            bu.add node(Immediate, 1)
-    of tkSeq:
-      stmts.addStmt Call:
-        bu.add compilerProc(c, env, "alignedDealloc")
-        bu.subTree Copy:
-          bu.subTree Field:
-            lvalue(tree.argument(n, 0))
-            bu.add node(Immediate, 1)
-        bu.add node(IntVal, c.lit.pack(env.types.headerFor(typ, Canonical).align))
-    else:
-      unreachable("destroy was not lowered?")
-
-    stmts.join els
-  of mExit:
-    # TODO: implement properly
-    discard
-  of mEcho:
-    # emit the array construction:
-    let tmp = c.newTemp(tree[tree.argument(n, 0)].typ)
-    for i in 1..<tree.numArgs(n):
-      stmts.addStmt Asgn:
-        bu.subTree At:
-          bu.useLvalue(tmp)
-          bu.add node(IntVal, c.lit.pack(i - 1))
-        value(tree.argument(n, i))
-
-    # emit the openArray construction:
-    let
-      prc = c.graph.getCompilerProc("echoBinSafe")
-      oa  = c.newTemp(env.types.add(prc.typ[1]))
-
-    stmts.addStmt Asgn:
-      bu.subTree Field:
-        bu.useLvalue oa
-        bu.add node(Immediate, 0)
+        bu.add n
+  of cnkNilLit:
+    bu.add node(Nil)
+  of cnkValue:
+    case m.ast[pos, 1].kind
+    of cnkBool:
+      bu.add node(IntVal, c.lit.pack(m.unpackInt(m.ast[pos, 1].val)))
+    of cnkInt:
+      bu.add node(IntVal, c.lit.pack(m.unpackInt(m.ast[pos, 1].val)))
+    of cnkFloat:
+      bu.add node(FloatVal, c.lit.pack(m.unpackFloat(m.ast[pos, 1].val)))
+    of cnkString:
+      # must be a pointer to nul-terminated-string
       bu.subTree Addr:
-        bu.useLvalue tmp
-    stmts.addStmt Asgn:
-      bu.subTree Field:
-        bu.useLvalue oa
-        bu.add node(Immediate, 1)
-      bu.add node(IntVal, c.lit.pack(tree.numArgs(n) - 1))
-
-    stmts.addStmt Call:
-      bu.add compilerProc(c, env, "echoBinSafe")
-      bu.use oa
-  of mOf:
-    var typ = tree[tree.argument(n, 1)].typ
-    # the typ is a typedesc, and the only way to retrieve the inner type is
-    # by going through the PType
-    typ = env.types.add(env.types[typ].skipTypes(abstractPtrs))
-
-    let e = c.gen(env, tree, NodePosition tree.argument(n, 0), false)
-    case env.types.headerFor(env.types.canonical(e.typ), Canonical).kind
-    of tkRecord:
-      wrapAsgn:
-        c.genOf(env, tree, e, typ, bu)
-    of tkRef, tkPtr:
-      # emit ``if p == nil: false else: p[] of typ``
-      let
-        then = c.prc.newLabel()
-        els  = c.prc.newLabel()
-        next = c.prc.newLabel()
-      stmts.addStmt Branch:
-        bu.subTree Eq:
-          bu.add typeRef(c, env, e.typ)
-          bu.use e
-          bu.add node(Nil)
-        bu.goto els
-        bu.goto then
-      stmts.join then
-      stmts.putInto dest, node(IntVal, c.lit.pack(0))
-      stmts.goto next
-      stmts.join els
-      let
-        elem = env.types.headerFor(env.types.canonical(e.typ), Canonical).elem
-        objExpr = buildExpr elem:
-          bu.subTree Deref:
-            bu.add typeRef(c, env, elem)
-            bu.use e
-      wrapAsgn:
-        c.genOf(env, tree, objExpr, typ, bu)
-      stmts.join next
+        bu.add node(Global, c.genStrLiteral(m, m.ast[pos, 1].val.StringId))
+    else:
+      unreachable(m.ast[pos, 1].kind)
+  of cnkAddr:
+    case m.ast[pos, 1].kind
+    of cnkPath:
+      bu.subTree Addr:
+        c.lvalueToIL(m, m.ast.child(pos, 1), bu)
+    of cnkLocal, cnkDatum, cnkGlobal, cnkUnknown, cnkProc:
+      let n = nameToIL(c, m, m.ast.child(pos, 1))
+      if n.kind == Proc:
+        bu.add node(ProcVal, n.val)
+      else:
+        bu.subTree Addr:
+          bu.add n
     else:
       unreachable()
-  of mChckBounds:
-    # XXX: bound checks on to-openArray conversion are currently omitted, as
-    #      the implementation would simply be too error-prone at the moment
-    #      (bound checks are fairly involved, see ``cgen`` in the NimSkull
-    #      compiler)
-    discard
-  of mGetTypeInfoV2:
-    let t = tree[tree.argument(n, 0)].typ
-    if isFinal(env.types[t]):
-      # static type information
-      genAsgn(dest, c.getTypeInfoV2(env, t), stmts)
+  of cnkLoad:
+    bu.subTree Load:
+      c.typeRefToIL(m, m.ast.child(pos, 0), bu)
+      recurse(m.ast.child(pos, 1))
+  of cnkPath:
+    # non-lvalue path expression
+    bu.subTree Copy:
+      c.lvalueToIL(m, pos, bu)
+  of cnkConv:
+    # implements numeric/pointer conversion as they work in C
+    let dst = typeRef(c, m, m.ast[pos, 0].val.StringId)
+    let src = typeRef(c, m, m.getType(m.ast.child(pos, 1)))
+    if dst == src:
+      # nothing to do
+      c.exprToIL(m, m.ast.child(pos, 1), bu)
+    elif dst.kind == Ptr or src.kind == Ptr:
+      # TODO: perform a C-style conversion
+      warn(c, toLineInfo(c, m, m.ast[pos].info), "missing conversion")
+    elif dst.kind != src.kind and Float in {src.kind, dst.kind}:
+      # conversion involving a float value
+      conv(c, m, Conv, pos, bu)
+    elif dst.kind == Float and src.kind == Float:
+      let kind =
+        if dst.val < src.val: Demote
+        else:                 Promote
+      conv(c, m, kind, pos, bu)
     else:
-      # dynamic type information; query the object's type header
-      wrapAsgn:
-        c.genField(env, tree, NodePosition tree.argument(n, 0), -1, bu)
-  else:
-    # TODO: implement the remaining magics
-    warn(c, tree[n].info, "magic not implemented: " & $tree[n, 1].magic)
-
-proc genCall(c; env: var MirEnv; tree; n; dest: Expr, stmts; withEnv = false) =
-  ## Translates a MIR call to its IL equivalent. When `withEnv` is true, the
-  ## environment stored in the invoked closure is passed to the procedure.
-  let kind =
-    if tree[n].kind == mnkCall:
-      Call
-    elif tree[n].typ == VoidType:
-      CheckedCall
-    else:
-      CheckedCallAsgn
-
-  proc genOperands(c; env: var MirEnv; tree; n; bu; stmts;
-                   withEnv: bool) {.nimcall.} =
-    var typ: TypeId ## type of the callee
-
-    if tree[n, 1].kind == mnkProc:
-      # a static call
-      typ = env.types.add(env[tree[n, 1].prc].typ)
-      bu.add node(Proc, c.registerProc(tree[n, 1].prc))
-    else:
-      # a dynamic call
-      typ = env.types.canonical(tree[n, 1].typ)
-      let isClosure = env.types.headerFor(typ, Canonical).kind == tkClosure
-
-      # for closure invocations where passing the env is omitted, the
-      # signature type needs to have no env parameter too
-      bu.add c.genProcType(env, typ, isClosure and not withEnv)
-      if isClosure:
-        bu.subTree Copy:
-          bu.subTree Field:
-            c.translateValue(env, tree, tree.child(n, 1), false, bu)
-            bu.add node(Immediate, 0)
+      # C-style integer conversion (try to preserve the numeric value when
+      # converting to signed values; use module arithmetic for
+      # unsigned targets)
+      let kind =
+        if dst.val == src.val:  Reinterp
+        elif dst.val < src.val: Trunc
+        elif src.kind == Int:   Sext
+        else:                   Zext
+      conv(c, m, kind, pos, bu)
+  of cnkPromote: conv(c, m, Promote, pos, bu)
+  of cnkDemote:  conv(c, m, Demote, pos, bu)
+  of cnkUToF: conv(c, m, Conv, pos, bu)
+  of cnkIToF: conv(c, m, Conv, pos, bu)
+  of cnkFToI: conv(c, m, Conv, pos, bu)
+  of cnkFToU: conv(c, m, Conv, pos, bu)
+  of cnkTrunc: conv(c, m, Trunc, pos, bu)
+  of cnkSext: conv(c, m, Sext, pos, bu)
+  of cnkZext: conv(c, m, Zext, pos, bu)
+  of cnkBitcast, cnkPtrCast:
+    let dst = typeRef(c, m, m.ast[pos, 0].val.StringId)
+    let src =
+      if m.ast[pos, 1].kind == cnkNilLit:
+        node(Type, c.addType(bu, bu.add(node(Ptr))))
       else:
-        c.translateValue(env, tree, tree.child(n, 1), true, bu)
-
-    var i = 0
-    for kind, _, it in tree.arguments(n):
-      # ignore compile-time-only arguments
-      if tree[it].kind != mnkNone:
-        # note: not all pass-by-reference arguments use the ``mnkName`` mode
-        if kind == mnkName or isPassByRef(env.types, typ, i):
-          if tree[it].kind in LiteralDataNodes:
-            # the expression doesn't have an address; introduce a temporary
-            let tmp = c.newTemp(tree[it].typ)
-            stmts.addStmt Asgn:
-              bu.useLvalue tmp
-              c.translateValue(env, tree, NodePosition it, true, bu)
-            bu.subTree Addr:
-              bu.useLvalue tmp
-          else:
-            takeAddr(c.gen(env, tree, NodePosition it, false), bu)
-        else:
-          c.translateValue(env, tree, NodePosition it, true, bu)
-
-      inc i
-
-    if withEnv:
-      # pass the environment to the procedure
-      bu.subTree Copy:
-        bu.subTree Field:
-          c.translateValue(env, tree, tree.child(n, 1), false, bu)
-          bu.add node(Immediate, 1)
-
-    if tree[n].kind == mnkCheckedCall:
-      c.genExit(tree, tree.last(n), bu)
-
-  if kind == CheckedCallAsgn:
-    # go through a temporary
-    let tmp = c.newTemp(tree[n].typ)
-    stmts.addStmt CheckedCallAsgn:
-      bu.useLvalue tmp
-      c.genOperands(env, tree, n, bu, stmts, withEnv)
-
-    genAsgn(dest, tmp, stmts)
-  elif tree[n].typ == VoidType:
-    stmts.addStmt kind:
-      c.genOperands(env, tree, n, bu, stmts, withEnv)
-  else:
-    stmts.putInto dest, kind:
-      c.genOperands(env, tree, n, bu, stmts, withEnv)
-
-proc translateExpr(c; env: var MirEnv, tree; n; dest: Expr, stmts) =
-  template value(n: NodePosition) =
-    c.translateValue(env, tree, n, true, bu)
-
-  template lvalue(n: NodePosition) =
-    mixin bu
-    c.translateValue(env, tree, n, false, bu)
-
-  template takeAddr(n: NodePosition) =
-    mixin bu
-    takeAddr(c.gen(env, tree, n, false), bu)
-
-  template wrapAsgn(k: NodeKind, body: untyped) =
-    stmts.putInto dest, k, body
-
-  template wrapAsgn(body: untyped) =
-    if true:
-      var bu {.inject.} = initBuilder[NodeKind]()
-      body
-      genAsgn(dest, makeExpr(finish(bu), dest.typ), stmts)
-
-  case tree[n].kind
-  of LvalueExprKinds, LiteralDataNodes, mnkProcVal:
-    wrapAsgn:
-      value(n)
-  of mnkConv, mnkStdConv:
-    # the high-level MIR conversions are lowered into the more specific
-    # operations of the target IL
-    let input = c.gen(env, tree, tree.child(n, 0), true)
-    wrapAsgn:
-      c.genNumericConv(env, input, tree[n].typ, bu)
-  of mnkCopy, mnkMove, mnkSink:
-    wrapAsgn:
-      value(tree.child(n, 0))
-  of mnkCall, mnkCheckedCall:
-    let callee = tree.callee(n)
-    if tree[callee].kind == mnkMagic:
-      c.genMagic(env, tree, n, dest, stmts)
+        typeRef(c, m, m.getType(m.ast.child(pos, 1)))
+    if dst == src:
+      # nothing to do. May happen for casts involving bool or char types
+      c.exprToIL(m, m.ast.child(pos, 1), bu)
     else:
-      if tree[callee].kind == mnkProc:
-        c.genCall(env, tree, n, dest, stmts)
-      else:
-        # a dynamic call. Closures require special handling, as the dynamic
-        # callee might not have an env parameter. If the closure's env value
-        # is non-nil, the dynamic callee must have one, otherwise it must not
-        if env.types.headerFor(tree[callee].typ, Canonical).kind == tkClosure:
-          let els  = c.prc.newLabel()
-          let then = c.prc.newLabel()
-          let exit = c.prc.newLabel()
-          stmts.addStmt Branch:
-            bu.subTree Eq:
-              bu.add typeRef(c, env, PointerType)
-              bu.subTree Copy:
-                bu.subTree Field:
-                  lvalue callee
-                  bu.add node(Immediate, 1)
-              bu.add node(Nil)
-            bu.goto els
-            bu.goto then
-          stmts.join then
-          c.genCall(env, tree, n, dest, stmts, withEnv = false)
-          stmts.goto exit
-          stmts.join els
-          c.genCall(env, tree, n, dest, stmts, withEnv = true)
-          stmts.join exit
-        else:
-          c.genCall(env, tree, n, dest, stmts)
-  of mnkAddr, mnkView, mnkMutView:
-    wrapAsgn:
-      takeAddr tree.child(n, 0)
-  of mnkAdd, mnkSub, mnkMul, mnkDiv, mnkModI:
-    const Map = [mnkAdd: Add, mnkSub: Sub, mnkMul: Mul, mnkDiv: Div, mnkModI: Mod]
-    wrapAsgn Map[tree[n].kind]:
-      bu.add typeRef(c, env, tree[n, 0].typ)
-      value(tree.child(n, 0))
-      value(tree.child(n, 1))
-  of mnkNeg:
-    wrapAsgn Neg:
-      bu.add typeRef(c, env, tree[n, 0].typ)
-      value(tree.child(n, 0))
-  of mnkObjConstr:
-    c.genDefault(env, dest, tree[n].typ, stmts)
-
-    for it in tree.items(n, 0, ^1):
-      stmts.addStmt Asgn:
-        c.genField(env, dest, tree[it, 0].field, bu)
-        value(tree.last(tree.child(it, 1)))
-  of mnkTupleConstr, mnkClosureConstr:
-    c.genDefault(env, dest, tree[n].typ, stmts)
-
-    var i = 0
-    for it in tree.items(n, 0, ^1):
-      stmts.addStmt Asgn:
-        bu.subTree Field:
-          bu.useLvalue dest
-          bu.add node(Immediate, i.uint32)
-        value(tree.last(it))
-      inc i
-  of mnkArrayConstr:
-    c.genDefault(env, dest, tree[n].typ, stmts)
-
-    var i = 0
-    for it in tree.items(n, 0, ^1):
-      stmts.addStmt Asgn:
-        bu.subTree At:
-          bu.useLvalue dest
-          bu.add node(IntVal, c.lit.pack(i))
-        value(tree.last(it))
-      inc i
-  of mnkSeqConstr:
-    let
-      typ  = env.types.canonical(tree[n].typ)
-      elem = env.types.headerFor(env.types.headerFor(typ, Canonical).elem(),
-                                 Canonical)
-
-    # emit the length initialization
-    stmts.addStmt Asgn:
-      bu.subTree Field:
-        bu.useLvalue dest
-        bu.add node(Immediate, 0)
-      bu.add node(IntVal, c.lit.pack(tree.len(n)))
-
-    # emit the payload initialization:
-    stmts.addStmt Asgn:
-      bu.subTree Field:
-        bu.useLvalue dest
-        bu.add node(Immediate, 1)
+      bu.subTree Reinterp:
+        bu.add dst
+        bu.add src
+        c.exprToIL(m, m.ast.child(pos, 1), bu)
+  of cnkCall:
+    if not magicToIL(c, m, pos, bu):
+      let ctyp = m.getType(m.ast.child(pos, 0))
       bu.subTree Call:
-        bu.add c.compilerProc(env, "newSeqPayload")
-        bu.add node(IntVal, c.lit.pack(tree.len(n)))
-        bu.add node(IntVal, c.lit.pack(size(elem, env.types)))
-        bu.add node(IntVal, c.lit.pack(elem.align))
+        if m.tast[ctyp].kind == cnkPtrTy:
+          # it's an indirect call; use the indirect form
+          bu.add typeRef(c, m, m.tast.child(ctyp, 0))
+        recurse(m.ast.child(pos, 0))
+        for it in m.ast.items(pos, 1):
+          recurse(it)
+  of cnkSizeof:
+    let (size, _) = computeSizeAlign(c, m, m.types[m.ast[pos, 1].val.StringId])
+    bu.add node(IntVal, c.lit.pack(size))
+  of cnkAlignof:
+    let (_, align) = computeSizeAlign(c, m, m.types[m.ast[pos, 1].val.StringId])
+    bu.add node(IntVal, c.lit.pack(align))
+  of cnkOffsetof:
+    var tn = m.types[m.ast[pos, 1].val.StringId]
+    var offset = 0'i64
+    for it in m.ast.items(pos, 2):
+      case m.tast[tn].kind
+      of cnkStructTy:
+        # sum the fields up until the selected one
+        var s = SizeAlignState()
+        var localOffset = 0'i64
+        for i in 0..<m.unpackInt(m.ast[it].val):
+          localOffset = s.addField(c, m, m.tast.child(tn, 1 + i))
 
-    var i = 0
-    for it in tree.items(n, 0, ^1):
-      stmts.addStmt Asgn:
-        bu.subTree At:
-          bu.subTree Field:
-            bu.subTree Deref:
-              bu.add typeRef(c, env, payloadType(env.types, typ))
-              bu.subTree Copy:
-                bu.subTree Field:
-                  bu.useLvalue dest
-                  bu.add node(Immediate, 1)
-            bu.add node(Immediate, 1)
-          bu.add node(IntVal, c.lit.pack(i))
-        value(tree.child(it, 0))
-      inc i
-
-  of mnkToMutSlice, mnkToSlice:
-    let
-      typ  = env.types.canonical(tree[n, 0].typ)
-      els  = c.prc.newLabel()
-      then = c.prc.newLabel()
-      exit = c.prc.newLabel()
-
-    # emit the data pointer initialization:
-    let dataExpr = makeExpr PointerType:
-      bu.subTree Field:
-        bu.useLvalue dest
-        bu.add node(Immediate, 0)
-
-    let startExpr = makeExpr env.types.sizeType:
-      if tree[n].len == 1:
-        bu.add node(IntVal, c.lit.pack(0))
+        offset += localOffset
+        tn = m.resolve(m.tast.child(m.tast.child(tn, 1 + m.unpackInt(m.ast[it].val)), 0))
+      of cnkUnionTy:
+        # the offset doesn't change
+        tn = m.resolve(m.tast.child(m.tast.child(tn, 1 + m.unpackInt(m.ast[it].val)), 0))
+      of cnkArrayTy:
+        tn = m.resolve(m.tast.child(tn, 1))
+        let (size, _) = computeSizeAlign(c, m, tn)
+        offset += size * m.unpackInt(m.ast[pos].val)
+      of cnkOpaqueTy:
+        error(c, toLineInfo(c, m, m.ast[it].info),
+          "accessing opaque types is not supported")
       else:
-        value tree.child(n, 1)
+        unreachable()
 
-    stmts.addStmt Branch:
-      bu.subTree Le:
-        bu.add typeRef(c, env, env.types.sizeType)
-        if tree[n].len == 1:
-          let tmp = c.newTemp(env.types.sizeType)
-          c.genLength(env, tree, tree.child(n, 0), tmp, stmts)
-
-          bu.add node(IntVal, c.lit.pack(0))
-          bu.use tmp
-        else:
-          value tree.child(n, 1)
-          value tree.child(n, 2)
-      bu.goto(els)
-      bu.goto(then)
-
-    stmts.join(then)
-
-    # emit the data pointer initialization:
-    case env.types.headerFor(typ, Canonical).kind
-    of tkCstring:
-      stmts.putInto dataExpr, Addr:
-        bu.subTree At:
-          bu.subTree Deref:
-            bu.add node(Type, c.genFlexArrayType(env.types, CharType))
-            value tree.child(n, 0)
-          bu.use startExpr
-    of tkPtr:
-      # can only be a pointer to an unchecked array
-      let arr  = env.types.headerFor(typ, Canonical).elem
-      stmts.putInto dataExpr, Addr:
-        bu.subTree At:
-          bu.subTree Deref:
-            bu.add c.typeRef(env, arr)
-            value tree.child(n, 0)
-          bu.use startExpr
-    of tkArray:
-      stmts.putInto dataExpr, Addr:
-        bu.subTree At:
-          lvalue tree.child(n, 0)
-          bu.use startExpr
-    of tkSeq, tkString:
-      stmts.putInto dataExpr, Addr:
-        bu.subTree At:
-          bu.subTree Field:
-            bu.subTree Deref:
-              bu.add typeRef(c, env, payloadType(env.types, typ))
-              bu.subTree Copy:
-                bu.subTree Field:
-                  lvalue tree.child(n, 0)
-                  bu.add node(Immediate, 1)
-            bu.add node(Immediate, 1)
-          bu.use startExpr
-    of tkOpenArray:
-      stmts.putInto dataExpr, Addr:
-        bu.subTree At:
-          bu.subTree Field:
-            lvalue tree.child(n, 0)
-            bu.add node(Immediate, 0)
-          bu.use startExpr
-    else:
-      unreachable()
-
-    # emit the length field initialization:
-    if tree[n].len == 1:
-      # the length is provided by the operand
-      let nDest = makeExpr env.types.sizeType:
-        bu.subTree Field:
-          bu.useLvalue dest
-          bu.add node(Immediate, 1)
-      let tmp = c.newTemp(env.types.sizeType)
-      c.genLength(env, tree, tree.child(n, 0), tmp, stmts)
-      genAsgn(nDest, tmp, stmts)
-    else:
-      stmts.addStmt Asgn:
-        bu.subTree Field:
-          bu.useLvalue dest
-          bu.add node(Immediate, 1)
-        bu.subTree Add:
-          bu.add typeRef(c, env, env.types.sizeType)
-          bu.subTree Sub:
-            bu.add typeRef(c, env, env.types.sizeType)
-            value tree.child(n, 2)
-            value tree.child(n, 1)
-          bu.add node(IntVal, c.lit.pack(1))
-
-    stmts.goto(exit)
-
-    stmts.join(els)
-    # if the requested length is zero, both the length and pointer are
-    # initialized to zero
-    stmts.addStmt Asgn:
-      bu.subTree Field:
-        bu.useLvalue dest
-        bu.add node(Immediate, 0)
-      bu.add node(Nil)
-    stmts.addStmt Asgn:
-      bu.subTree Field:
-        bu.useLvalue dest
-        bu.add node(Immediate, 1)
-      bu.add node(IntVal, c.lit.pack(0))
-    stmts.join(exit)
-  of mnkSetConstr:
-    c.genDefault(env, dest, tree[n].typ, stmts)
-
-    proc genIncl(c; env: var MirEnv; dest, elem: Expr, stmts) =
-      let desc = env.types.headerFor(dest.typ, Lowered)
-      if desc.kind == tkArray:
-        stmts.addStmt Call:
-          bu.add compilerProc(c, env, "skullyIncl")
-          takeAddr(dest, bu)
-          bu.use elem
-      else:
-        stmts.putInto dest, BitOr:
-          bu.add typeRef(c, env, dest.typ)
-          bu.use dest
-          bu.subTree Shl:
-            bu.add typeRef(c, env, dest.typ)
-            bu.add node(IntVal, c.lit.pack(1))
-            bu.use elem
-
-    for it in tree.items(n, 0, ^1):
-      if tree[it].kind == mnkRange:
-        # a range constructor. Include all elements part of the range in the
-        # set
-        let
-          startLab = c.prc.newLabel()
-          exitLab = c.prc.newLabel()
-          bodyLab = c.prc.newLabel()
-          idx = c.newTemp(UInt16Type)
-
-        stmts.addStmt Asgn:
-          bu.useLvalue idx
-          c.genSetElem(env, tree, tree.child(it, 0), tree[n].typ, bu)
-
-        stmts.join(startLab)
-        stmts.addStmt Branch:
-          bu.subTree Le:
-            bu.add node(UInt, 2)
-            bu.use idx
-            c.genSetElem(env, tree, tree.child(it, 1), tree[n].typ, bu)
-          bu.goto(exitLab)
-          bu.goto(bodyLab)
-
-        stmts.join(bodyLab)
-        c.genIncl(env, dest, idx, stmts)
-
-        # increment the index:
-        stmts.addStmt Asgn:
-          bu.useLvalue(idx)
-          bu.subTree Add:
-            bu.add node(UInt, 8)
-            bu.use(idx)
-            bu.add node(IntVal, 1)
-
-        stmts.addStmt Loop:
-          bu.add node(Immediate, startLab)
-        stmts.join(exitLab)
-      else:
-        let e = makeExpr tree[it].typ:
-          c.genSetElem(env, tree, it, tree[n].typ, bu)
-        c.genIncl(env, dest, e, stmts)
-  of mnkCast:
-    proc canon(env: TypeEnv, id: TypeId): TypeId =
-      ## Skips to the non-imported canonical type.
-      result = env.canonical(id)
-      if env.headerFor(result, Lowered).kind == tkImported:
-        result = canon(env, env.headerFor(result, Lowered).elem)
-
-    let dst = env.types.canon(tree[n].typ)
-    let src = env.types.canon(tree[n, 0].typ)
-    let tdst = c.genType(env.types, dst)
-    let tsrc = c.genType(env.types, src)
-    if tdst == tsrc:
-      # a no-op; assign the source expression unchanged
-      genAsgn(dest, c.gen(env, tree, tree.child(n, 0), true), stmts)
-    elif env.types.headerFor(dst, Lowered).kind in {tkRecord, tkArray, tkUnion} or
-         env.types.headerFor(src, Lowered).kind in {tkRecord, tkArray, tkUnion}:
-      # either the target or source type is an aggregate type -> use a blit copy
-      let size = min(env.types.headerFor(dst, Lowered).size(env.types),
-                     env.types.headerFor(src, Lowered).size(env.types))
-      stmts.addStmt Blit:
-        takeAddr(dest, bu)
-        takeAddr tree.child(n, 0)
-        bu.add node(IntVal, c.lit.pack(size))
-    else:
-      template isInt(id: TypeId): bool =
-        env.types.headerFor(id, Lowered).kind in
-          {tkInt, tkUInt, tkBool, tkChar}
-
-      let a = env.types.headerFor(dst, Lowered).size(env.types)
-      let b = env.types.headerFor(src, Lowered).size(env.types)
-      # for the implementation, keep in mind that Reinterp only supports
-      # operands of the same size
-      if a == b: # same size, only reinterpret
-        wrapAsgn Reinterp:
-          bu.add typeRef(c, env, dst)
-          bu.add typeRef(c, env, src)
-          value tree.child(n, 0)
-      else:
-        let op = if a < b: Trunc else: Zext
-        var val = c.gen(env, tree, tree.child(n, 0), true)
-        # non-integer values cannot be truncated/extended directly; the value
-        # has to be bitcast into an int first
-        if not isInt(src):
-          val = makeExpr env.types.usizeType:
-            bu.subTree Reinterp:
-              bu.add typeRef(c, env, env.types.usizeType)
-              bu.add typeRef(c, env, src)
-              bu.use val
-
-        if isInt(dst):
-          wrapAsgn op:
-            bu.add typeRef(c, env, dst)
-            bu.add typeRef(c, env, val.typ)
-            bu.use val
-        else:
-          wrapAsgn Reinterp:
-            bu.add typeRef(c, env, dst)
-            bu.add typeRef(c, env, env.types.usizeType)
-            bu.subTree op:
-              bu.add typeRef(c, env, env.types.usizeType)
-              bu.add typeRef(c, env, val.typ)
-              bu.use val
-  else:
+    bu.add node(IntVal, c.lit.pack(offset))
+  of cnkNeg: unaryOp(c, m, Neg, pos, bu)
+  of cnkAdd: binOp(c, m, Add, pos, bu)
+  of cnkSub: binOp(c, m, Sub, pos, bu)
+  of cnkMul: binOp(c, m, Mul, pos, bu)
+  of cnkDiv: binOp(c, m, Div, pos, bu)
+  of cnkMod: binOp(c, m, Mod, pos, bu)
+  of cnkNot:
+    bu.subTree Not:
+      recurse(m.ast.child(pos, 1))
+  of cnkShl: binOp(c, m, Shl, pos, bu)
+  of cnkShr: binOp(c, m, Shr, pos, bu)
+  of cnkBitAnd: binOp(c, m, BitAnd, pos, bu)
+  of cnkBitOr: binOp(c, m, BitOr, pos, bu)
+  of cnkBitXor: binOp(c, m, BitXor, pos, bu)
+  of cnkBitNot: unaryOp(c, m, BitNot, pos, bu)
+  of cnkEq: cmpOp(c, m, Eq, pos, bu)
+  of cnkLt: cmpOp(c, m, Lt, pos, bu)
+  of cnkLe: cmpOp(c, m, Le, pos, bu)
+  of cnkCheckedAdd, cnkCheckedSub, cnkCheckedMul:
+    # TODO: implement these. While the L25 has checked arithmetic operations,
+    #       they require the destination operand to be the name of a local,
+    #       which is not the case for the CGIR destination operand, and
+    #       emitting a temporary + assignment here is not easily doable
     unreachable()
+  of AllNodes - cnkExprs:
+    unreachable(m.ast[pos].kind)
 
-proc translateStmt(env: var MirEnv, tree; n; stmts; c) =
-  template guardActive() =
-    if not c.prc.active:
-      return
-
-  # XXX: the "is active" tracking is currently necessary because ``mirgen``
-  #      doesn't perform local dead-code elimination correctly for closure
-  #      iterators doesn't work
-
-  case tree[n].kind
-  of mnkAsgn, mnkSwitch, mnkDef, mnkDefCursor, mnkInit:
-    guardActive()
-    var dest = c.gen(env, tree, tree.child(n, 0), false)
-    if tree[n, 0].kind == mnkPathVariant:
-      # ``mnkPathVariant`` refers to the tag field here, *not* to the union
-      let
-        root = tree.child(n, 0)
-        field = tree[root, 1].field
-      # note: `tree[root].typ` yields the object type, even though it may
-      # not look like it does
-      let typ = env.types[env.types.lookupField(tree[root].typ, field)].typ
-      dest = makeExpr typ:
-        c.genField(env, dest, field, bu)
-
-    if tree[n, 1].kind != mnkNone:
-      c.translateExpr(env, tree, tree.child(n, 1), dest, stmts)
-    elif tree[n, 0].kind != mnkParam:
-      # ignore param defs; they only mark ``sink`` parameters as going live
-      c.genDefault(env, dest, tree[n, 0].typ, stmts)
-  of mnkBind, mnkBindMut:
-    guardActive()
-    c.prc.indirectLocals.incl tree[n, 0].local
-    stmts.addStmt Asgn:
-      bu.add node(Local, c.prc.localMap[tree[n, 0].local])
-      takeAddr(c.gen(env, tree, tree.child(n, 1), false), bu)
-  of mnkVoid:
-    guardActive()
-    c.translateExpr(env, tree, tree.child(n, 0), Expr(typ: VoidType), stmts)
-    if tree[n, 0].kind in {mnkCall, mnkCheckedCall}:
-      # handle noreturn calls; they need to be followed by an Unreachable
-      let callee = tree.callee(tree.child(n, 0))
-      if (tree[callee].kind == mnkMagic and tree[callee].magic == mExit) or
-         (tree[callee].kind == mnkProc and
-          sfNoReturn in env[tree[callee].prc].flags):
-        stmts.addStmt Unreachable:
-          discard
-        c.prc.active = false
-  of mnkScope, mnkEndScope:
-    discard "nothing to do"
-  of mnkLoop:
-    guardActive()
-    stmts.addStmt Loop:
-      bu.add node(Immediate, c.prc.labelMap[tree[n, 0].label])
-    c.prc.active = false
-  of mnkIf:
-    guardActive()
-    let label = c.prc.newLabel()
-    stmts.addStmt Branch:
-      c.translateValue(env, tree, tree.child(n, 0), true, bu)
-      c.genExit(tree, tree.child(n, 1), bu)
-      bu.goto label
-    stmts.join label
-  of mnkEndStruct:
-    var label: uint32
-    # ``EndStruct`` can mark the end of both an ``If`` or ``Except``. Only
-    # the ones marking the end of an ``If`` need to be turned into a join here
-    if c.prc.labelMap.pop(tree[n, 0].label, label):
-      stmts.join(label)
-      c.prc.active = true
-  of mnkGoto:
-    guardActive()
-    stmts.goto(c.prc.request(tree[n, 0].label))
-    c.prc.active = false
-  of mnkJoin:
-    var label: uint32
-    if c.prc.labelMap.pop(tree[n, 0].label, label):
-      stmts.join(label)
-      c.prc.active = true
-  of mnkLoopJoin:
-    guardActive()
-    let label = c.prc.newLabel()
-    c.prc.labelMap[tree[n, 0].label] = label
-    stmts.join(label)
-  of mnkCase:
-    guardActive()
-    # translate to a chain of ``If`` statements, as the target IL doesn't
-    # support case statements ranges as labels
-    let tmp = c.newTemp(tree[n, 0].typ)
-    stmts.addStmt Asgn:
-      bu.useLvalue tmp
-      c.translateValue(env, tree, tree.child(n, 0), true, bu)
-
-    var next = c.prc.newLabel()
-    for b in tree.items(n, 1, ^1):
-      let then = c.prc.request(tree[tree.last(b)].label)
-
-      for it in tree.items(b, 0, ^2):
-        stmts.join next
-        next = c.prc.newLabel()
-        if tree[it].kind == mnkRange:
-          let other = c.prc.newLabel()
-          stmts.addStmt Branch:
-            bu.subTree Le:
-              bu.add typeRef(c, env, tree[n, 0].typ)
-              c.translateValue(env, tree, tree.child(it, 0), true, bu)
-              bu.use tmp
-            bu.goto(next)
-            bu.goto(other)
-          stmts.join other
-          stmts.addStmt Branch:
-            bu.subTree Le:
-              bu.add typeRef(c, env, tree[n, 0].typ)
-              bu.use tmp
-              c.translateValue(env, tree, tree.child(it, 1), true, bu)
-            bu.goto(next) # continue with the next check
-            bu.goto(then) # jump to the body of the branch
+proc constrToIL(c; m; pos; dest: Expr, bu) =
+  ## Emits an IL assignment of `dest` to the expression at `pos`.
+  case m.ast[pos].kind
+  of cnkNilLit, cnkAddr, cnkUse, cnkBitCast, cnkPtrCast, cnkSizeof, cnkAlignof,
+     cnkOffsetof:
+    bu.subTree Asgn:
+      bu.use dest
+      c.exprToIL(m, pos, bu)
+  of cnkValue:
+    if isArray(m, m.ast[pos, 0].val.StringId):
+      # special handling for character array initialization
+      bu.subTree Blit:
+        bu.subTree Addr:
+          bu.use dest
+        bu.subTree Addr:
+          bu.add node(Global, c.genStrLiteral(m, m.ast[pos, 1].val.StringId))
+        bu.add node(IntVal, c.lit.pack(m.get(m.ast[pos, 1].val.StringId).len))
+      # the remaining slots are filled with zeros already
+    else:
+      bu.subTree Asgn:
+        bu.use dest
+        c.exprToIL(m, pos, bu)
+  of cnkConstr:
+    let isArray = isArray(m, m.ast[pos, 0].val.StringId)
+    var i = 0
+    for it in m.ast.items(pos, 1):
+      let nDest =
+        if isArray:
+          makeExpr m.resolve(m.tast.child(dest.typ, 1)):
+            bu.subTree At:
+              bu.use dest
+              bu.add node(IntVal, c.lit.pack(i))
         else:
-          stmts.addStmt Branch:
-            bu.subTree Eq:
-              bu.add typeRef(c, env, tree[n, 0].typ)
-              bu.use tmp
-              c.translateValue(env, tree, it, true, bu)
-            bu.goto(next)
-            bu.goto(then)
+          makeExpr m.resolve(m.tast.child(m.tast.child(dest.typ, 1 + i), 0)):
+            bu.subTree Field:
+              bu.use dest
+              bu.add node(Immediate, c.lit.pack(i))
+      c.constrToIL(m, it, nDest, bu)
+      inc i
+  of cnkRecConstr:
+    for it in m.ast.items(pos, 1):
+      let nDest = pathToIL(c, m, dest, m.ast.child(it, 0), m.ast.len(it) - 1)
+      c.constrToIL(m, m.ast.last(it), nDest, bu)
+  else:
+    unreachable(m.ast[pos].kind)
 
-      if tree[b].len == 1:
-        # it's an 'else' branch
-        stmts.join next
-        stmts.goto then
+proc isTrueLit(m; pos): bool =
+  m.ast[pos].kind == cnkValue and
+    m.ast[pos, 1].kind == cnkBool and
+    m.unpackInt(m.ast[pos, 1].val) == 1
 
-    if tree[tree.last(n)].len != 1:
-      # there's no 'else' branch
-      stmts.join next
-      stmts.addStmt Unreachable:
-        discard
+proc stmtToIL(c; m; pos; bu): bool =
+  ## Translates the CGIR statement at `pos` to the IL, returning whether the
+  ## statement returns.
+  result = true # unless stated otherwise, the statement returns
+  case m.ast[pos].kind
+  of cnkDef:
+    # ignore the register, noalias, and volatile flags
+    let typ = m.types[m.ast[pos, 2].val.StringId]
+    let (_, a) = computeSizeAlign(c, m, typ)
+    if m.unpackInt(m.ast[pos, 0].val) > a or a > 8:
+      warn(c, toLineInfo(c, m, m.ast[pos].info),
+        "over-alignment of locals is not supported; the requirement is ignored")
+    c.prc.registerLocal(m.ast[pos, 3].val.StringId, typeRef(c, m, typ))
+  of cnkAsgn:
+    bu.subTree Asgn:
+      c.lvalueToIL(m, m.ast.child(pos, 0), bu)
+      c.exprToIL(m, m.ast.child(pos, 1), bu)
+  of cnkStore:
+    bu.subTree NodeKind.Store:
+      bu.add typeRef(c, m, m.tast.child(m.getType(m.ast.child(pos, 0)), 0))
+      c.exprToIL(m, m.ast.child(pos, 0), bu)
+      c.exprToIL(m, m.ast.child(pos, 1), bu)
+  of cnkDrop:
+    bu.subTree Drop:
+      c.exprToIL(m, m.ast.child(pos, 0), bu)
+  of cnkStmtList:
+    for it in m.ast.items(pos):
+      result = c.stmtToIL(m, it, bu)
+  of cnkScope:
+    result = c.stmtToIL(m, m.ast.child(pos, 0), bu)
+  of cnkCall:
+    c.exprToIL(m, pos, bu)
+  of cnkCheckedCall:
+    let ctyp = m.getType(m.ast.child(pos, 0))
+    bu.subTree CheckedCall:
+      if m.tast[ctyp].kind == cnkPtrTy:
+        # it's an indirect call; use the indirect form
+        bu.add typeRef(c, m, m.tast.child(ctyp, 0))
+      c.exprToIL(m, m.ast.child(pos, 0), bu)
+      for it in m.ast.items(pos, 1, ^2):
+        c.exprToIL(m, it, bu)
+      c.exitToIL(m, m.ast.last(pos), bu)
+  of cnkCheckedCallAsgn:
+    let ctyp = m.getType(m.ast.child(pos, 1))
+    # the target IL only supports locals in the destination slot; go through
+    # a temporary
+    let tmp = c.prc.newTemp(typeRef(c, m, m.getType(m.ast.child(pos, 0))))
+    bu.subTree CheckedCallAsgn:
+      bu.add tmp
+      if m.tast[ctyp].kind == cnkPtrTy:
+        # it's an indirect call; use the indirect form
+        bu.add typeRef(c, m, m.tast.child(ctyp, 0))
+      c.exprToIL(m, m.ast.child(pos, 1), bu)
+      for it in m.ast.items(pos, 2, ^2):
+        c.exprToIL(m, it, bu)
+      c.exitToIL(m, m.ast.last(pos), bu)
+    bu.subTree Asgn:
+      c.lvalueToIL(m, m.ast.child(pos, 0), bu)
+      bu.subTree Copy:
+        bu.add tmp
+  of cnkWhile:
+    let start = c.prc.newLabel()
+    bu.join start
+    if isTrueLit(m, m.ast.child(pos, 0)):
+      if c.stmtToIL(m, m.ast.child(pos, 1), bu):
+        bu.subTree Loop:
+          bu.add node(Immediate, start.uint32)
+      result = false # a 'while true' loop doesn't return
+    else:
+      let exit = c.prc.newLabel()
+      let next = c.prc.newLabel()
+      bu.subTree Branch:
+        c.exprToIL(m, m.ast.child(pos, 0), bu)
+        bu.goto exit
+        bu.goto next
+      bu.join next
+      if c.stmtToIL(m, m.ast.child(pos, 1), bu):
+        bu.subTree Loop:
+          bu.add node(Immediate, start.uint32)
 
-    c.prc.active = false
-  of mnkExcept:
-    var label: uint32
-    if not c.prc.labelMap.pop(tree[n, 0].label, label):
-      return
+      bu.join exit
+  of cnkIf:
+    let then = c.prc.newLabel()
+    let els = c.prc.newLabel()
+    bu.subTree Branch:
+      c.exprToIL(m, m.ast.child(pos, 0), bu)
+      bu.goto els
+      bu.goto then
+    bu.join then
+    result = c.stmtToIL(m, m.ast.child(pos, 1), bu)
+    if m.ast.len(pos) == 3:
+      if result:
+        let after = c.prc.newLabel()
+        bu.goto after
+        bu.join els
+        result = c.stmtToIL(m, m.ast.child(pos, 2), bu)
+        bu.join after
+      else:
+        bu.join els
+        result = c.stmtToIL(m, m.ast.child(pos, 2), bu)
+    else:
+      result = true # a single-branch if statement always returns
+      bu.join els
+  of cnkBreak:
+    bu.goto c.prc.labelMap[m.ast[pos, 0].val]
+    result = false
+  of cnkUnreachable:
+    bu.subTree Unreachable: discard
+    result = false
+  of cnkBlock:
+    c.prc.pushLabel(m.ast[pos, 0])
+    discard c.stmtToIL(m, m.ast.child(pos, 1), bu)
+    bu.join c.prc.labelMap[m.ast[pos, 0].val]
+  of cnkDispatch:
+    # translate to a chain of ``If`` statements, as the target IL doesn't
+    # support case statement ranges as labels
+    let typ = m.getType(m.ast.child(pos, 0))
+    let tmp = c.prc.newTemp(typeRef(c, m, typ))
+    bu.subTree Asgn:
+      bu.add tmp
+      c.exprToIL(m, m.ast.child(pos, 0), bu)
 
-    let temp = c.newTemp(PointerType)
-    stmts.addStmt Except:
-      bu.add node(Immediate, label)
-      bu.add temp.nodes
-    if tree[n].len > 1:
-      # it's not a catch-all branch. The exception's dynamic type needs to be
-      # compared against the expected types
+    var after = none(LabelId)
+    var next = none(LabelId)
+    for b in m.ast.items(pos, 1):
       let then = c.prc.newLabel()
-      var els = c.prc.newLabel()
-
-      let
-        ex = c.newTemp(PointerType)
-        excType = env.types.add(c.graph.getCompilerProc("Exception").typ)
-        expr = buildExpr excType:
-          bu.subTree Deref:
-            bu.add typeRef(c, env, excType)
-            bu.use ex
-
-      stmts.putInto ex, Call:
-        bu.add compilerProc(c, env, "nimBorrowCurrentException")
-
-      for it in tree.items(n, 1, ^2):
-        stmts.join(els)
-        els = c.prc.newLabel()
-        stmts.addStmt Branch:
-          c.genOf(env, tree, expr, tree[it].typ, bu)
-          bu.goto(els)
+      for it in m.ast.items(b, 0, ^2):
+        if next.isSome:
+          bu.join next.unsafeGet
+        next = some c.prc.newLabel()
+        bu.subTree Branch:
+          bu.subTree Eq:
+            bu.add typeRef(c, m, typ)
+            bu.subTree Copy:
+              bu.add tmp
+            c.exprToIL(m, it, bu)
+          bu.goto(next.unsafeGet)
           bu.goto(then)
 
-      stmts.join(els)
-      # the exception needs to be re-raised if none of the types match
-      stmts.addStmt Raise:
-        bu.use temp
-        c.genExit(tree, tree.last(n), bu)
-      stmts.join(then)
+      if m.ast.len(b) == 1:
+        # it's a catch-all target
+        if next.isSome:
+          bu.join next.unsafeGet
+        next = none(LabelId)
+        bu.goto then
 
-    c.prc.active = true
-  of mnkFinally:
-    var label: uint32
-    if c.prc.labelMap.pop(tree[n, 0].label, label):
-      let temp = c.newTemp(PointerType)
-      stmts.addStmt Except:
-        bu.add node(Immediate, label)
-        bu.add temp.nodes
-      c.prc.active = true
-  of mnkContinue:
-    guardActive()
-    stmts.addStmt Raise:
+      bu.join then
+      if c.stmtToIL(m, m.ast.last(b), bu):
+        if after.isNone:
+          after = some c.prc.newLabel()
+        bu.goto after.unsafeGet
+
+    if next.isSome:
+      # there's no catch-all target
+      bu.join next.unsafeGet
+      bu.subTree Unreachable:
+        discard
+
+    result = after.isSome
+    if result:
+      bu.join after.unsafeGet
+  of cnkTry:
+    c.prc.pushLabel(m.ast[pos, 0])
+    discard c.stmtToIL(m, m.ast.child(pos, 1), bu)
+
+    let typ = c.addType bu:
+      bu.add node(Ptr)
+
+    let tmp = c.prc.newTemp(node(Type, typ))
+    bu.subTree Except:
+      bu.add node(Immediate, uint32 c.prc.labelMap[m.ast[pos, 0].val])
+      bu.add tmp
+  of cnkRaise:
+    bu.subTree Raise:
       bu.add node(Nil)
-      c.genExit(tree, tree.child(n, 0), bu)
-    c.prc.active = false
-  of mnkRaise:
-    guardActive()
-    # NimSkull exceptions are managed separately; there's nothing to pass
-    # along to ``Raise``
-    stmts.addStmt Raise:
-      bu.add node(Nil)
-      c.genExit(tree, tree.child(n, 0), bu)
-    c.prc.active = false
-  of mnkEmit, mnkAsm:
+      c.exitToIL(m, m.ast.child(pos, 0), bu)
+    result = false
+  of cnkReturn:
+    bu.subTree Return:
+      if m.ast.len(pos) == 1:
+        c.exprToIL(m, m.ast.child(pos, 0), bu)
+    result = false
+  of cnkEmit, cnkAsm:
     # XXX: ignore these statements for now
-    warn(c, tree[n].info, "unsupported statement")
-  else:
-    unreachable()
-
-proc genAll(env: var MirEnv, tree: MirTree, bu; c) =
-  var n = NodePosition 0
-  while ord(n) < tree.len:
-    translateStmt(env, tree, n, bu, c)
-    n = tree.sibling(n)
-
-proc isFilled(t: seq[Node]): bool =
-  t.len != 0
+    warn(c, toLineInfo(c, m, m.ast[pos].info), "unsupported statement")
+  of AllNodes - cnkStmts - cnkBlocks + {cnkTailCall}:
+    unreachable(m.ast[pos].kind)
 
 proc reset(c: var ProcContext) =
   c.localMap.clear()
   c.labelMap.clear()
-  c.temps.shrink(0)
-  c.params.shrink(0)
-  c.indirectLocals.clear()
-  c.sources.reset()
+  c.locals.shrink(0)
+  c.nextLabel = 0
+  c.nextLocal = 0
 
-proc complete(c; env: MirEnv, typ: Node, prc: ProcContext, body: MirBody,
-              content: seq[Node]): seq[Node] =
-  ## Assembles the complete IL definition for a procedure. `typ` is a
-  ## reference to the signature type, `prc` is the procedure's translation
-  ## context, and `content` is the statement list that makes up the body.
-  var bu = initBuilder[NodeKind](ProcDef)
-  bu.add typ
-  bu.subTree Params:
-    for it in prc.params.items:
-      bu.add node(Local, it)
-  bu.subTree Locals:
-    for id, it in body.locals.pairs:
-      if env.types.canonical(it.typ) != VoidType:
-        if id in prc.indirectLocals:
-          bu.add typeRef(c, env, PointerType)
-        else:
-          bu.add typeRef(c, env, it.typ)
-
-    for it in c.prc.temps.items:
-      bu.add typeRef(c, env, it)
-
-  bu.add content
-  result = bu.finish()
-
-proc translateProc(c; env: var MirEnv, procType: TypeId,
-                   body: sink MirBody): seq[Node] =
-  ## Translates the full body of a procedure (with signature `procType`) to
-  ## a semantically equivalent IL ``ProcDef``, returning the latter.
+proc procToIL(c; m; pos): seq[Node] =
+  ## Translates the CGIR procedure definition at `pos` to the IL.
   c.prc.reset()
-  c.prc.sources = move body.source
 
-  var bias = 0
-  for id, it in body.locals.pairs:
-    if env.types.canonical(it.typ) == VoidType:
-      inc bias
-    else:
-      c.prc.localMap[id] = uint32(id.ord - bias)
-
-  let procTypeDesc = env.types.headerFor(procType, Canonical)
-
-  # gather the list of IL parameters
-  for (i, typ, flags) in env.types.params(procTypeDesc):
-    if env.types.canonical(typ) != VoidType:
-      c.prc.params.add c.prc.localMap[LocalId(i + 1)]
-      if pfByRef in flags:
-        c.prc.indirectLocals.incl LocalId(i + 1)
-
-  if procTypeDesc.kind == tkClosure:
-    # register the environment parameter
-    c.prc.params.add c.prc.localMap[LocalId(procTypeDesc.numParams() + 1)]
-
-  c.prc.nextLabel = body.nextLabel.uint32
-  c.prc.nextLocal = uint32(body.locals.nextId.ord - bias)
-  c.prc.active = true
+  let params = m.ast.child(pos, 3)
+  let tp = m.types[m.ast[pos, 1].val.StringId]
+  for i, it in m.ast.pairs(params):
+    c.prc.registerLocal(m.ast[it, 1].val.StringId,
+      typeRef(c, m, m.tast.child(tp, i + 2)))
 
   # translate the body:
-  let content = block:
+  let body = block:
     var bu = initBuilder[NodeKind](Stmts)
-    genAll(env, body.code, bu, c)
-
-    if c.prc.active:
-      # a return statement is required if control-flow falls through at the
-      # end
-      bu.subTree Return:
-        if body[LocalId 0].typ != VoidType:
-          bu.subTree Copy:
-            bu.add node(Local, c.prc.localMap[LocalId 0])
-
+    discard stmtToIL(c, m, m.ast.child(pos, 4), bu)
     bu.finish()
 
-  let typ = c.genProcType(env, procType)
-  c.complete(env, typ, c.prc, body, content)
+  # wrap in a def:
+  var bu = initBuilder[NodeKind](ProcDef)
+  bu.add typeRef(c, m, m.ast[pos, 1].val.StringId)
+  bu.subTree Params:
+    for it in m.ast.items(params):
+      bu.add node(Local, c.prc.localMap[m.ast[it, 1].val.StringId])
+  bu.subTree Locals:
+    for it in c.prc.locals.items:
+      bu.add it
 
-proc replaceProcAst(config: ConfigRef, prc: PSym, with: PNode) =
-  ## Replaces the ``PSym.ast`` of `prc` with the routine AST `with`,
-  ## reparenting all symbols found in the body. This is crude, brittle, and
-  ## best described as "don't do this" -- we rely on the patched-with
-  ## procedure bodies to be simple enough for this to not cause any problems.
-  assert with.kind in {nkProcDef, nkFuncDef}
-  var map: Table[int, PSym]
-  var prev = with[namePos].sym
+  bu.add body
+  result = bu.finish()
 
-  proc patch(n: PNode) =
-    case n.kind
-    of nkSym:
-      if n.sym.owner == prev:
-        map.withValue n.sym.id, it:
-          n.sym = it[]
-        do:
-          # IDs for locals only need to be unique within their parent
-          # procedure, so duplicating the ID here is fine
-          let s = copySym(n.sym, n.sym.itemId)
-          s.owner = prc # reparent
-          map[s.id] = s
-          n.sym = s
+proc generateMain(c; m): seq[Node] =
+  ## Generates and returns the IL for the low-level entry procedure.
+  let typ = c.addType bu:
+    bu.subTree ProcTy:
+      bu.add node(Int, 4)
 
-    of nkArgList, nkWithoutSons - {nkSym}:
-      discard "nothing to do"
-    of nkTypeSection, callableDefs:
-      config.internalError(n.info, "too complex to patch")
-    else:
-      for it in n.items:
-        patch(it)
+  var bu = initBuilder(NodeKind.ProcDef)
+  bu.add node(Type, typ)
+  bu.subTree Params: discard
+  bu.subTree Locals: discard
+  bu.subTree Stmts:
+    # emit the initialization for all anonymous constants:
+    for datum, id in c.dataMap.pairs:
+      let pos = m.data[datum]
+      let dest = makeExpr m.types[m.ast[pos, 0].val.StringId]:
+        bu.add node(Global, id)
+      c.constrToIL(m, pos, dest, bu)
 
-  var n = copyTree(with)
-  n[namePos] = newSymNode(prc)
-  # don't patch the name
-  for i in (namePos + 1)..<n.len:
-    patch(n[i])
-
-  prc.ast = n
-  # the proc type also contains symbols; it needs to be updated too
-  prc.typ = copyType(with[namePos].sym.typ, with[namePos].sym.typ.itemId, prc)
-  patch(prc.typ.n)
-
-proc processEvent(env: var MirEnv, bodies: var ProcMap,
-                  partial: var Table[ProcedureId, Builder[NodeKind]],
-                  graph: ModuleGraph,
-                  c;
-                  evt: sink BackendEvent) =
-  case evt.kind
-  of bekModule, bekConstant:
-    discard "nothing to do"
-  of bekDiscovered:
-    case evt.entity.kind
-    of mnkGlobal:
-      c.globalsMap[evt.entity.global] =
-        c.newGlobal(env, env.types.add(env[evt.entity.global].typ))
-    of mnkConst:
-      # constants are translated to IL globals too
-      c.constMap[evt.entity.cnst] =
-        c.newGlobal(env, env.types.add(env[evt.entity.cnst].typ))
-    of mnkProc:
-      let prc = env.procedures[evt.entity.prc]
-      if sfImportc in prc.flags:
-        # replace importc'ed procedures with their corresponding overrides
-        let override = graph.getCompilerProc("hook_" & prc.extName)
-        if override.isNil:
-          graph.config.internalError(prc.info):
-            "no override for importc'ed procedure found"
-        else:
-          replaceProcAst(graph.config, prc, override.ast)
-          # copy all data that is relevant to code generation from the
-          # override:
-          prc.info = override.info
-          prc.owner = override.owner
-          prc.flags = override.flags
-          prc.options = override.options
-          prc.extname = override.extname
-          prc.extFlags = override.extFlags
-          prc.annex = override.annex
-          prc.constraint = override.constraint
-
-      if sfImportc in prc.flags:
-        # the procedure is still imported, but now we know that it's deliberate
-        var bu = initBuilder[NodeKind]()
-        bu.subTree Import:
-          bu.add c.genProcType(env, env.types.add(prc.typ))
-          bu.add node(StringVal, c.lit.pack(prc.extname))
-        bodies[c.registerProc(evt.entity.prc)] = finish(bu)
+    # emit the initialization for all globals:
+    for name, id in c.globalsMap.pairs:
+      let pos = m.globals[name]
+      case m.ast[pos].kind
+      of cnkGlobalDef, cnkGlobalExp:
+        if m.ast.len(pos) == 6:
+          let dest = makeExpr m.types[m.ast[pos, 3].val.StringId]:
+            bu.add node(Global, id)
+          c.constrToIL(m, m.ast.child(pos, 5), dest, bu)
+      of cnkGlobalImp:
+        discard "nothing to do"
       else:
-        # register the procedure on discovery, to keep the IL IDs in roughly
-        # the same order as the MIR IDs. This is only relevant for
-        # debuggability
-        discard c.registerProc(evt.entity.prc)
+        unreachable()
 
-    else:
-      unreachable()
-  of bekPartial:
-    # a new procedure is created for each fragment, with a call to the new
-    # procedure then being appended to the partial procedure. This is much
-    # easier to implement than trying to append all fragments directly to the
-    # partial procedure
-    if evt.id notin partial:
-      partial[evt.id] = initBuilder(Stmts)
+    # emit a call to the high-level entry point:
+    bu.subTree Return:
+      bu.subTree Call:
+        bu.add node(Proc, c.procMap[StringId m.strings.getKeyId("main")])
+        bu.add node(IntVal, c.lit.pack(0))
+        bu.add node(Nil)
 
-    var body = evt.body
-    apply(body, env) # apply the additional MIR passes
+  result = finish(bu)
 
-    let
-      procType = env.types.add(evt.sym.typ)
-      r = c.translateProc(env, procType, body)
-    # important: do **not** inline `r`. The translateProc call may modify
-    # nextProc, which would then lead to the wrong slot being assigned to
-    bodies[c.nextProc] = r
-    inc c.nextProc
-
-    # add a call of the sub-procedure to the partial procedure:
-    partial[evt.id].add @[node(Call, 1), node(Proc, c.nextProc-1)]
-  of bekProcedure:
-    var body = evt.body
-    apply(body, env) # apply the additional MIR passes
-
-    let procType = env.types.add(evt.sym.typ)
-    bodies[c.registerProc(evt.id)] = c.translateProc(env, procType, body)
-  of bekImported:
-    # dynlib procedures are not supported
-    c.graph.config.localReport(evt.sym.info,
-      SemReport(kind: rsemUserError,
-                str: "dynlib procedures are not supported"))
-
-proc generateCodeForMain(c; env: var MirEnv; m: Module,
-                         modules: ModuleList): (PSym, seq[Node]) =
-  ## Generates the IL for the entry procedure, that is, the top-level procedure
-  ## representing the whole program.
-
-  # we use the compiler-provided main procedure generation here, but ignore
-  # the body, as we're only interested in the symbol
-  let prc = generateMainProcedure(c.graph, m.idgen, modules)
-
-  # we cannot use the standard MIR translation, because:
-  # * the ``process`` iterator is done already
-  # * we need to inject additional IL code at the start of the body
-  let body = generateCode(c.graph, env, prc, TranslationConfig(),
-                          prc.ast[bodyPos])
-  c.prc.reset()
-
-  # manually setup the mapping for the result variable
-  c.prc.localMap[LocalId(0)] = 0'u32
-
-  var bu = initBuilder(Stmts)
-  # make sure a global exists for all data underlying the constants:
-  for cnst, id in c.constMap.pairs:
-    let data = env.dataFor(cnst)
-    if data notin c.dataMap:
-      c.dataMap[data] = c.newGlobal(env, env.types.add(env[cnst].typ))
-
-  # emit the initialization for all data globals:
-  for cnst, id in c.dataMap.pairs:
-    let typ = env[cnst][0].typ
-    let dest = makeExpr typ:
-      bu.add node(Global, id)
-
-    c.genConst(env, env[cnst], NodePosition(0), dest, bu)
-
-  # emit the initialization for constants. While not required by the
-  # NimSkull specification, we give each constant its own unique location
-  for cnst, id in c.constMap.pairs:
-    bu.subTree Asgn:
-      bu.add node(Global, id)
-      bu.subTree Copy:
-        bu.add node(Global, c.dataMap[env.dataFor(cnst)])
-
-  c.prc.active = true
-  genAll(env, body.code, bu, c)
-  bu.subTree Return:
-    bu.subTree Copy:
-      bu.add node(Local, 0)
-
-  let typ = c.genProcType(env, env.types.add(prc.typ))
-  result = (prc, c.complete(env, typ, c.prc, body, finish(bu)))
-
-proc generateCode*(graph: ModuleGraph): PackedTree[NodeKind] =
+proc generateCode*(graph: ModuleGraph, mlist: sink ModuleList): PackedTree[NodeKind] =
   ## Generates the IL code for the full program represented by `graph` and
   ## returns the result as a single self-contained IL module.
   block:
@@ -2923,45 +1074,35 @@ proc generateCode*(graph: ModuleGraph): PackedTree[NodeKind] =
     s.typ.size = szUncomputedSize
     discard graph.config.getSize(s.typ)
 
-  # --- run the MIR processing and translate the MIR code
-  let config =
-    BackendConfig(
-      noImported: true, # prefer not using FFI procedures
-      tconfig: TranslationConfig(
-        magicsToKeep: MagicsToKeep,
-        options: {goTailCallElim}
-      ))
+  let (m, _) = generateCode(graph, mlist, {capExceptions})
 
-  var
-    discovery: DiscoveryData
-    procs: ProcMap
-    partial: Table[ProcedureId, Builder[NodeKind]]
+  var c = Context(graph: graph, ptrSize: graph.config.target.ptrSize)
+  # fill the mapping tables:
+  for name in m.procs.keys:
+    c.procMap[name] = c.procMap.len.uint32
+  for name, pos in m.globals.pairs:
+    let id = c.spawnGlobal(typeToIL(c, m, m.ast[pos, 3].val.StringId))
+    c.globalsMap[name] = id
+  for datum, pos in m.data.pairs:
+    let id = c.spawnGlobal(typeToIL(c, m, m.ast[pos, 0].val.StringId))
+    c.dataMap[datum] = id
 
-    mlist = graph.takeModuleList()
-    c = Context(graph: graph)
-    env = initMirEnv(graph)
+  # translate all procedures:
+  var procs = newSeq[seq[Node]](c.procMap.len)
+  for name, pos in m.procs.pairs:
+    case m.ast[pos].kind
+    of cnkProcDef, cnkProcExp:
+      let body = procToIL(c, m, pos)
+      procs[c.procMap[name]] = body
+    of cnkProcImp:
+      var bu = initBuilder(Import)
+      bu.add typeRef(c, m, m.ast[pos, 1].val.StringId)
+      bu.add node(StringVal, c.lit.pack(m.get(m.ast[pos, 2].val.StringId)))
+      procs[c.procMap[name]] = finish(bu)
+    else:
+      unreachable()
 
-  # discover and generate code for all alive procedures:
-  for ac in process(graph, mlist, env, discovery, config):
-    processEvent(env, procs, partial, graph, c, ac)
-
-  for id, it in partial.mpairs:
-    # complete the statement list:
-    it.subTree Return: discard
-
-    var bu = initBuilder(ProcDef)
-    # all partial procedure have signature ``proc()``. The main module's init
-    # procedure does too, therefore its type can be used here
-    bu.add c.genProcType(env, env.types.add(mlist.mainModule().init.typ))
-    bu.subTree Params: discard
-    bu.subTree Locals: discard
-    bu.add finish(it)
-    procs[c.registerProc(id)] = finish(bu)
-
-  # now that all live entities are known, emit the main procedure:
-  block:
-    let (id, body) = generateCodeForMain(c, env, mainModule(mlist), mlist)
-    procs[c.registerProc(env.procedures.add(id))] = body
+  procs.add generateMain(c, m)
 
   # compute some statistics about the generated code:
   block:
@@ -2977,7 +1118,7 @@ proc generateCode*(graph: ModuleGraph): PackedTree[NodeKind] =
     echo "total: ", num, " average: ", (num / count)
 
   # assemble the final tree from the various fragments:
-  var bu = initBuilder[NodeKind](NodeKind.Module)
+  var bu = initBuilder(NodeKind.Module)
   bu.subTree TypeDefs:
     for it in c.types.keys:
       bu.add it

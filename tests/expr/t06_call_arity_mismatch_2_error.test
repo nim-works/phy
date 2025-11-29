@@ -1,0 +1,12 @@
+discard """
+  description: "
+    The number of supplied arguments must match the number of parameters.
+  "
+  reject: true
+"""
+(Module
+  (ProcDecl (Ident "test") (UnitTy)
+    (Params (ParamDecl (Ident "x") (UnitTy)))
+    (TupleCons))
+  (ProcDecl (Ident "main") (UnitTy) (Params)
+    (Call (Ident "test"))))

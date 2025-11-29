@@ -68,10 +68,7 @@ proc typeToString*(typ: SemType): string =
   of tkPointer:
     unreachable("pointer types should never reach rendering")
   of tkError:
-    # diagnostic messages should not show error types, therefore rendering is
-    # not implemented for them. If control-flow reaches here, it usually means
-    # that a guard against error types is missing somewhere
-    unreachable()
+    "?"
 
 proc `$`*(typ: SemType): string =
   ## A shortcut for `typeToString <#typeToString,SemType>`_.

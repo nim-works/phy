@@ -52,7 +52,8 @@ type
 const
   AggregateTypes* = {tkArray, tkTuple, tkRecord, tkUnion, tkSeq}
   ComplexTypes*   = AggregateTypes + {tkProc}
-    ## non-primitive types
+    ## non-scalar types made up of other complex or scalar types
+  AllTypes*       = {low(TypeKind) .. high(TypeKind)}
 
 proc cmp*(a, b: SemType): int =
   ## Establishes a total order for types, intended mainly for sorting them.

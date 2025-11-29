@@ -229,6 +229,14 @@ proc expectNot(c; typ: sink SemType, kind: TypeKind): SemType =
     c.error("type not allowed in this context")
     result = errorType()
 
+proc unify(c; a, b: SemType): SemType =
+  ## Unifies `a` and `b`, reporting and returning error an when this is
+  ## not possible.
+  result = commonType(a, b)
+  if result.kind == tkError and tkError notin {a.kind, b.kind}:
+    c.error("'$1' and '$2' cannot be unified into a single type" %
+            [$a, $b])
+
 proc unionOf(types: openArray[SemType]): tuple[typ: SemType, folded: bool] =
   ## Attempts to create a union type from `types`. If the resulting union would
   ## only consist of a single type, the single type is returned and `folded` is
@@ -253,6 +261,7 @@ proc evalType(c; t; n: NodeIndex): SemType =
   of VoidTy:  prim(tkVoid)
   of UnitTy:  prim(tkUnit)
   of BoolTy:  prim(tkBool)
+  of CharTy:  prim(tkChar)
   of IntTy:   prim(tkInt)
   of FloatTy: prim(tkFloat)
   of SourceKind.ArrayTy:
@@ -272,18 +281,11 @@ proc evalType(c; t; n: NodeIndex): SemType =
     else:
       var tup = SemType(kind: tkTuple)
       for it in t.items(n):
-        tup.elems.add evalType(c, t, it)
-        case tup.elems[^1].kind
-        of tkError:
-          tup = errorType()
-          break
-        of tkVoid:
+        var elem = evalType(c, t, it)
+        if elem.kind == tkVoid:
           c.error("'void' type cannot be part of tuple type")
-          tup = errorType()
-          break
-        else:
-          discard "all good"
-
+          elem = errorType()
+        tup.elems.add elem
       tup
   of RecordTy:
     var rec = SemType(kind: tkRecord)
@@ -610,6 +612,17 @@ proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
             newCall(c.getTypeBoundOp(opCopy, it), newFieldExpr(src, i)))
 
       body.add newReturn(dst)
+    of tkRecord:
+      body = IrNode(kind: Stmts)
+      for i, it in typ.fields.pairs:
+        if isTriviallyCopyable(it.typ):
+          body.add newAsgn(newFieldExpr(dst, i),
+            newFieldExpr(src, i))
+        else:
+          body.add newAsgn(newFieldExpr(dst, i),
+            newCall(c.getTypeBoundOp(opCopy, it.typ), newFieldExpr(src, i)))
+
+      body.add newReturn(dst)
     of tkUnion:
       body = IrNode(kind: Stmts)
       # copy the tag:
@@ -629,7 +642,7 @@ proc genTypeBoundOp(c; op: TypeAttachedOp, typ: SemType): uint32 =
 
       body.add caseStmt
       body.add newReturn(dst)
-    else:
+    of AllTypes - AggregateTypes:
       unreachable() # no copy procedure needed
   of opAt:
     case typ.kind
@@ -847,6 +860,8 @@ proc fitExprStrict(c; e: sink Expr, typ: SemType): Expr =
   ## returning an error-expression if not.
   if e.typ == typ:
     result = e # all good
+  elif tkError in {e.typ.kind, typ.kind}:
+    result = e # don't report follow-up errors
   else:
     c.error("expected expression of type $1 but got type $2" %
             [$typ, $e.typ])
@@ -1023,7 +1038,7 @@ proc userCallToIL(c; t; n: NodeIndex, expr; stmts): SemType =
         # only try fitting the argument if there's a corresponding parameter
         let arg =
           if i < prc.elems.len:
-            c.fitExprStrict(c.exprToIL(t, it), prc.elems[i])
+            c.fitExpr(c.exprToIL(t, it), prc.elems[i])
           else:
             c.exprToIL(t, it)
 
@@ -1230,15 +1245,8 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       body = exprToIL(c, t, b)
       els = if t.len(n) == 3: exprToIL(c, t, t.child(n, 2))
             else:             unitExpr
-      typ = commonType(body.typ, els.typ)
-      (fb, fe) =
-        case typ.kind
-        of tkError:
-          c.error("if ($1) and else ($2) branches cannot be unified into a single type" %
-                  [$body.typ, $els.typ])
-          (body, els)
-        else:
-          (c.fitExpr(body, typ), c.fitExpr(els, typ))
+      typ = unify(c, body.typ, els.typ)
+      (fb, fe) = (c.fitExpr(body, typ), c.fitExpr(els, typ))
       tmp = c.newTemp(typ)
 
     stmts.add newIf(use(c, cond, stmts), wrap(c, fb, tmp), wrap(c, fe, tmp))
@@ -1290,10 +1298,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
           c.error("element cannot be of type 'void'")
           args[i].typ = errorType()
 
-        if elem.kind != tkError:
-          elem = commonType(elem, args[i].typ)
-          if elem.kind == tkError and args[i].typ.kind != tkError:
-            c.error("cannot unify types")
+        elem = unify(c, elem, args[i].typ)
 
       result = arrayType(length, elem) + {}
       expr = c.newTemp(result.typ)
@@ -1314,15 +1319,14 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       # assigned individually
       let tmp = c.newTemp(errorType())
       for i, it in t.pairs(n):
-        let e = c.exprToIL(t, it)
-        elems[i] = e.typ
-
-        if e.typ.kind == tkError:
-          return errorType() + {}
-        elif e.typ.kind == tkVoid:
+        var e = c.exprToIL(t, it)
+        if e.typ.kind == tkVoid:
           c.error("tuple element cannot be 'void'")
-          return errorType() + {}
+          # turn into an error expression:
+          e.typ = errorType()
+          e.expr = IrNode(kind: None)
 
+        elems[i] = e.typ
         # add an assignment for the field:
         stmts.add newAsgn(newFieldExpr(tmp, i), use(c, e, stmts))
 
@@ -1619,12 +1623,7 @@ proc exprToIL(c; t: InTree, n: NodeIndex, expr, stmts): ExprType =
       let body = c.exprToIL(t, bodyNode)
       c.closeScope()
 
-      let newResult = commonType(res, body.typ)
-      if tkError notin {res.kind, body.typ.kind} and
-         newResult.kind == tkError:
-        c.error("'$1' and '$2' cannot be unified into a single type" %
-                [$res, $body.typ])
-      res = newResult
+      res = unify(c, res, body.typ)
 
       if at >= got.len or got[at] != typ:
         got.insert typ, at

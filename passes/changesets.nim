@@ -386,8 +386,8 @@ macro buildTree*[T](c: var ChangeSet[T], op: TreeOperand): VirtualTree =
       error("unknown tree operand", n)
 
   let
-    nstart = genSym(nskLet, "nstart")
-    cstart = genSym(nskLet, "cstart")
+    nstart = genSym("nstart")
+    cstart = genSym("cstart")
     op     = if op.kind == nnkStmtListExpr: op[^1] else: op
 
   result = newTree(nnkStmtList)
