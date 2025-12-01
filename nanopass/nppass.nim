@@ -3,10 +3,11 @@
 import std/[genasts, macros, packedsets, tables]
 import nanopass/[asts, nplang, nplangdef, npmatch, nptransform]
 
-template embed(lang: typedesc, arg: untyped): untyped =
-  mixin pack, storage
+template embed(storage, arg: untyped): untyped =
+  ## Implements terminal value construction.
+  mixin pack
   let tmp = arg
-  Value[typeof(tmp)](index: pack(storage, tmp))
+  Value[typeof(tmp)](index: pack(storage[], tmp))
 
 macro transformOutImpl(lang: static LangDef, name, def: untyped) =
   ## Implements the transformation for processors in an *->language pass.
@@ -175,6 +176,8 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
   ## proc definition, `call` the call to the pass' implementation.
   let input = ident"in.ast"
   let output = ident"out.ast"
+  let storage = ident"io.storage"
+  let storageTy = ident"Literals" # TODO: don't hardcode
   let hasIn = src != nil
   let hasOut = dst != nil
 
@@ -217,22 +220,24 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
 
       template val[T](v: nanopass.Value[T]): T {.used.} =
         # TODO: return a `lent T` where ``unpack`` does too (this is tricky...)
-        unpack(storage, v.index, typeof(T))
+        # XXX: consider renaming this template to `get`
+        unpack(`storage`[], v.index, typeof(T))
 
   if hasOut:
-    let embed = bindSym("embed", brClosed)
+    let embed = bindSym"embed"
     body.add quote do:
       template terminal(x: untyped): untyped {.used.} =
-        `embed`(`name`, x)
+        `embed`(`storage`, x)
       template build(n: typedesc[Metavar], body: untyped): untyped {.used.} =
         build(`output`, n, body)
 
-  # temporarily move the storage object into a local, so that it can
-  # be captured
-  body.add quote do:
-    var storage: Literals
-    swap(storage, st)
-    defer: swap(storage, st)
+  if hasIn:
+    # re-use the data storage object from the input
+    body.add quote do:
+      let `storage` = `input`.storage
+  else:
+    body.add quote do:
+      let `storage` = new(`storageTy`)
 
   if hasIn:
     # shadow the input tree with a cursor to prevent a costly copy when
@@ -244,7 +249,10 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
       var `output`: PackedTree[uint8]
       let index = `call`.index
       # turn the AST with indirections into one without
-      result = Ast[dst](tree: finish(`output`, index))
+      result = Ast[dst, `storageTy`](
+        tree: finish(`output`, index),
+        storage: `storage`,
+      )
   else:
     body.add quote do:
       result = `call`
@@ -253,12 +261,9 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
   # patch the signature:
   if hasIn:
     def.params[1][^2] = ident"NodeIndex"
-    def.params.insert(1, newIdentDefs(ident"in.ast", quote do: Ast[`src`]))
+    def.params.insert(1, newIdentDefs(input, quote do: Ast[`src`, `storageTy`]))
   if hasOut:
-    def.params[0] = nnkBracketExpr.newTree(ident"Ast", dst)
-
-  def.params.insert(2 + ord(hasIn),
-    newIdentDefs(ident"st", nnkVarTy.newTree(ident"Literals")))
+    def.params[0] = nnkBracketExpr.newTree(ident"Ast", dst, storageTy)
 
   result = def
 

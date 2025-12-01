@@ -6,8 +6,10 @@ import passes/trees
 type
   # note: the fields are exported so that the nanopass machinery can access
   # them. User code should, in most cases, not access the fields directly
-  Ast*[L: object] = object
+  Ast*[L: object, Storage: object] = object
     tree*: PackedTree[uint8]
+      ## leaked implementation detail, don't use
+    storage*: ref Storage
       ## leaked implementation detail, don't use
 
   Metavar*[L: object, N: static string] = object

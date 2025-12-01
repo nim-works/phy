@@ -128,11 +128,20 @@ macro buildImpl(to: var PackedTree[uint8], lang: static LangInfo,
     if name in lang.map:
       # can only be a terminal
       n.expectLen 2
-      let valueType = ident(lang.types[lang.map[name]].name)
+      let mvar = ident(name)
       let sym = genSym()
+      let tmp = genSym()
       let cons = n[1]
+      let storage = ident"io.storage"
+      # ensure the operand having the right type via a conversion, but only
+      # when there's no `is`, so as to not interfere with sinking
       test.add quote do:
-        let `sym` = Value[`valueType`](index: pack(storage, `cons`))
+        let `tmp` = `cons`
+        let `sym` = dst.`mvar`(index: pack(`storage`[],
+          (when `tmp` is dst.`mvar`.T:
+            `tmp`
+           else:
+            dst.`mvar`.T(`tmp`))))
       body.add genAst(typ, to, sym) do:
         append[typ.L](to, sym)
       nnkPar.newTree(sym)
