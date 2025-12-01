@@ -11,7 +11,9 @@ proc lookup[E; M: tuple](): auto {.compileTime.} =
       return it[1]
 
 proc append[L, U](to: var PackedTree[uint8], x: Value[U]) =
-  to.nodes.add TreeNode[uint8](kind: typeof(lookup[U, L.meta.term_map]()).V)
+  to.nodes.add TreeNode[uint8](
+    kind: typeof(lookup[U, L.meta.term_map]()).V,
+    val: x.index)
 
 proc append[L](to: var PackedTree[uint8], x: Metavar) =
   to.nodes.add TreeNode[uint8](kind: RefTag, val: uint32(x.index))
@@ -128,10 +130,9 @@ macro buildImpl(to: var PackedTree[uint8], lang: static LangInfo,
       n.expectLen 2
       let valueType = ident(lang.types[lang.map[name]].name)
       let sym = genSym()
-      discard n[1]
-      # TODO: add the value to the environment
+      let cons = n[1]
       test.add quote do:
-        let `sym` = Value[`valueType`]()
+        let `sym` = Value[`valueType`](index: pack(storage, `cons`))
       body.add genAst(typ, to, sym) do:
         append[typ.L](to, sym)
       nnkPar.newTree(sym)

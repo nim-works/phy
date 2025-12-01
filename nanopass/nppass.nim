@@ -3,10 +3,10 @@
 import std/[genasts, macros, packedsets, tables]
 import nanopass/[asts, nplang, nplangdef, npmatch, nptransform]
 
-template embed*(lang: typedesc, arg: untyped): untyped =
-  # TODO: implement, and don't export
+template embed(lang: typedesc, arg: untyped): untyped =
+  mixin pack, storage
   let tmp = arg
-  Value[typeof(tmp)]()
+  Value[typeof(tmp)](index: pack(storage, tmp))
 
 macro transformOutImpl(lang: static LangDef, name, def: untyped) =
   ## Implements the transformation for processors in an *->language pass.
@@ -216,15 +216,23 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
         `input`[x, i]
 
       template val[T](v: nanopass.Value[T]): T {.used.} =
-        # TODO: look up the value of the terminal. Also, return a `lent T`
-        default(typeof(T))
+        # TODO: return a `lent T` where ``unpack`` does too (this is tricky...)
+        unpack(storage, v.index, typeof(T))
 
   if hasOut:
+    let embed = bindSym("embed", brClosed)
     body.add quote do:
       template terminal(x: untyped): untyped {.used.} =
-        embed(`name`, x)
+        `embed`(`name`, x)
       template build(n: typedesc[Metavar], body: untyped): untyped {.used.} =
         build(`output`, n, body)
+
+  # temporarily move the storage object into a local, so that it can
+  # be captured
+  body.add quote do:
+    var storage: Literals
+    swap(storage, st)
+    defer: swap(storage, st)
 
   if hasIn:
     # shadow the input tree with a cursor to prevent a costly copy when
@@ -248,6 +256,9 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
     def.params.insert(1, newIdentDefs(ident"in.ast", quote do: Ast[`src`]))
   if hasOut:
     def.params[0] = nnkBracketExpr.newTree(ident"Ast", dst)
+
+  def.params.insert(2 + ord(hasIn),
+    newIdentDefs(ident"st", nnkVarTy.newTree(ident"Literals")))
 
   result = def
 

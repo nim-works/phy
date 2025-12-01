@@ -16,7 +16,7 @@ export nppatterns.matches
 export npbuild.build, npmatch.match
 export nppass.pass, nppass.inpass, nppass.outpass
 
-export nppass.genProcessor, nppass.embed
+export nppass.genProcessor
 # TODO: ^^ bind the symbols; don't mix them in
 
 template isAtom*(x: uint8): bool =
