@@ -8,14 +8,17 @@ import
     strutils,
     tables
   ],
+  experimental/[
+    sexp_parse
+  ],
   nanopass/nanopass,
-  experimental/sexp_parse,
-  passes/trees,
+  passes/literals,
   phy/[reporting, default_reporting]
+
+import passes/trees except Literals
 
 type
   Symbol = object
-  Ident = distinct string
 
 defineLanguage Lsrc:
   n(int)
@@ -943,7 +946,7 @@ macro defineCompiler(name, names: untyped) =
       body.add newLetStmt(tmp, g)
     prev = tmp
   result = quote do:
-    proc `name`(e: Ast[Lsrc]): auto =
+    proc `name`(e: Ast[Lsrc, Literals]): auto =
       `body`
       result = `prev`
 
