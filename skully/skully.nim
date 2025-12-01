@@ -12,6 +12,7 @@ import
     condsyms,
     commands,
     cmdlinehelper,
+    msgs
   ],
   compiler/sem/[
     passes,
@@ -78,6 +79,7 @@ proc main(args: openArray[string]) =
     stdout.writeLine(output)
   config.writeHook = proc(r: ConfigRef, output: string, flags: MsgFlags) =
     stdout.write(output)
+  config.diagHandler = msgs.defaultDiagHandler
 
   let
     ids   = newIdentCache()
@@ -102,6 +104,10 @@ proc main(args: openArray[string]) =
   config.exc = excGoto
   config.backend = backendC
   initDefines(config.symbols)
+
+  # remove any C compiler specific defines (no C compiler is used)
+  for c in CC:
+    undefSymbol(config, c.name)
 
   # the maximum heap size is fixed at compile-time, with the possibility to
   # override the default value
@@ -130,13 +136,12 @@ proc main(args: openArray[string]) =
   # needs for operation and/or code generation have to be compiled (after
   # the system module, of course)
   graph.compileSystemModule()
-  discard graph.compileModule(findPatchFile(config, "setimpl.nim"), {})
   discard graph.compileModule(findPatchFile(config, "io_helper.nim"), {})
   discard graph.compileModule(findPatchFile(config, "overrides.nim"), {})
 
   graph.compileProject(config.projectMainIdx)
 
-  let m = generateCode(graph)
+  let m = generateCode(graph, graph.takeModuleList())
   writeFile(args[1], pretty(m, trees.NodeIndex(0)))
 
 main(getExecArgs())
