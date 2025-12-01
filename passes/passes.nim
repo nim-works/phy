@@ -9,7 +9,8 @@ import
     tables
   ],
   experimental/[
-    sexp_parse
+    sexp_parse,
+    sexp
   ],
   nanopass/nanopass,
   passes/literals,
@@ -750,6 +751,12 @@ proc calleeToSymbol(x: L11): L12 {.pass.} =
         let tmp = terminal Symbol()
         build Let(tmp, Stmts([Asgn(tmp, ^expr(e0))], Call(t, tmp, e1)))
 
+proc toSexp(x: SomeInteger): SexpNode = newSInt(x)
+proc toSexp(x: float): SexpNode = newSFloat(x)
+proc toSexp(x: string): SexpNode = newSString(x)
+proc toSexp(x: Ident): SexpNode = newSSymbol(x.string)
+
+proc render*(x: Lsrc.m): SexpNode {.renderer.}
 
 # TODO: fix the symbol binding in the pass DSL such that `vmenv` can be
 #       imported at the top (at the moment, ambiguity errors ensue)
