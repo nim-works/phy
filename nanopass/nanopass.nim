@@ -9,11 +9,11 @@
 
 import
   passes/[trees],
-  nanopass/[asts, nplangdef, nplanggen, npmatch, npbuild, nppass, nppatterns]
+  nanopass/[asts, nplangdef, nplanggen, npmatch, npbuild, nppass, nppatterns, npsexpr]
 
 export asts
 export nppatterns.matches
-export npbuild.build, npmatch.match
+export npbuild.build, npmatch.match, npsexpr.renderer
 export nppass.pass, nppass.inpass, nppass.outpass
 
 export nppass.genProcessor
