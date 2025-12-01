@@ -81,3 +81,14 @@ proc buildLangInfo*(def: LangDef): LangInfo =
     let id = result.map[name]
     for v in it.vars.items:
       result.types[id].sub.add result.map[v]
+
+proc ntags*(lang: LangInfo, typ: LangType): seq[int] =
+  ## Returns a list with all possible node tags productions of `typ` can have.
+  for it in typ.forms.items:
+    result.add lang.forms[it].ntag
+
+  for it in typ.sub.items:
+    if lang.types[it].terminal:
+      result.add lang.types[it].ntag
+    else:
+      result.add ntags(lang, lang.types[it])

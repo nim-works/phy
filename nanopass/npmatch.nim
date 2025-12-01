@@ -4,17 +4,6 @@ import std/[macros, intsets, strformat, tables]
 import passes/trees
 import nanopass/[asts, helper, nplang]
 
-proc ntags*(lang: LangInfo, typ: LangType): seq[int] =
-  ## Returns a list with all possible node tags productions of `typ` can have.
-  for it in typ.forms.items:
-    result.add lang.forms[it].ntag
-
-  for it in typ.sub.items:
-    if lang.types[it].terminal:
-      result.add lang.types[it].ntag
-    else:
-      result.add ntags(lang, lang.types[it])
-
 proc matchImpl*(lang: LangInfo, src: int, ast, sel, rules: NimNode
                ): (seq[NimNode], IntSet) =
   ## Implements the core of the `match` macro:
