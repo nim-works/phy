@@ -136,6 +136,13 @@ proc isSubtypeOf*(a, b: SemType): bool =
   elif a.kind == tkVoid:
     # void is the subtype of all other types
     b.kind != tkVoid
+  else:
+    false
+
+proc isMorphableInto*(a, b: SemType): bool =
+  ## Computes whether `a` can morph into `b`.
+  if b.kind == tkError:
+    true
   elif b.kind == tkUnion:
     b.elems.find(a) != -1
   else:
@@ -223,13 +230,13 @@ proc paddedSize*(t: SemType): SizeUnit =
   (size(t) + mask) and not mask
 
 proc commonType*(a, b: SemType): SemType =
-  ## Finds the common type between `a` and `b`, or produces an error.
-  if a == b or b.isSubtypeOf(a):
+  ## Finds the type both `a` and `b` fit.
+  if a == b or b.isSubtypeOf(a) or b.isMorphableInto(a):
     a
-  elif a.isSubtypeOf(b):
+  elif a.isSubtypeOf(b) or a.isMorphableInto(b):
     b
   else:
-    errorType()
+    errorType() # all types fit the error type
 
 proc isTriviallyCopyable*(typ: SemType): bool =
   ## Whether a value of `typ` can be trivially copied (that is, via a

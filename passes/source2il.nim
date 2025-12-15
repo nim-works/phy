@@ -810,11 +810,11 @@ proc inlineLvalue(c; e: sink Expr; stmts): IrNode =
 
 proc fitExpr(c; e: sink Expr, target: SemType): Expr =
   ## Makes sure `e` fits into the `target` type, returning the expression
-  ## with the appropriate conversion operation applied. If the type of `e`
-  ## is not the same as or a subtype of `target`, an error is reported.
+  ## with the appropriate conversion operation applied. If `target` is not a
+  ## possible morph for the type of `e`, an error is reported.
   if e.typ == target:
     result = e
-  elif e.typ.isSubtypeOf(target):
+  elif e.typ.isSubtypeOf(target) or e.typ.isMorphableInto(target):
     if e.typ.kind == tkVoid:
       result = e
     else:
