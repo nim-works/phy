@@ -57,7 +57,7 @@ The body consists of a sequence of terminal and non-terminal definitions.
   import nanopass/nanopass
 
   defineLanguage L0:
-    i(int)         # definition of a terminal
+    int(i)         # definition of a terminal
     expr(e) ::= i  # definition of a non-terminal
 
   # this defines a language `L0` with:
@@ -74,8 +74,8 @@ Meta-variables must be unique.
   import nanopass/nanopass
 
   defineLanguage L0:
-    i(int)
-    i(float) # error: 'i' name already in use
+    int(i)
+    float(i) # error: 'i' name already in use
 
 .. code-block:: nim
     :test: "nim c $1"
@@ -84,7 +84,7 @@ Meta-variables must be unique.
   import nanopass/nanopass
 
   defineLanguage L0:
-    i(int)
+    int(i)
     integer(i) ::= i # error: 'i' name already in use
 
 All meta-variables defined in the body are accessible in all non-terminals,
@@ -97,7 +97,7 @@ regardless of the declarations' order.
 
   defineLanguage L0:
     expr(e) ::= i
-    i(int)
+    int(i)
 
 Each non-terminals must have a unique name.
 
@@ -108,7 +108,7 @@ Each non-terminals must have a unique name.
   import nanopass/nanopass
 
   defineLanguage L0:
-    i(int)
+    int(i)
     expr(e) ::= i
     expr(b) ::= i # error: 'expr' name already in use
 
@@ -123,7 +123,7 @@ and vice versa.
   import nanopass/nanopass
 
   defineLanguage L0:
-    i(int)
+    int(i)
     i(e) ::= i # error: 'i' already in use
 
 For terminals, the type expression must be an identifier, more complex
@@ -136,7 +136,7 @@ expressions are not allowed.
   import nanopass/nanopass
 
   defineLanguage L0:
-    i(ref int) # error: not an identifier
+    (ref int)(i) # error: not an identifier
     expr(e) ::= i
 
 The identifier must also refer to a type that exists at the time
@@ -149,7 +149,7 @@ The identifier must also refer to a type that exists at the time
   import nanopass/nanopass
 
   defineLanguage L0:
-    i(MyType)
+    MyType(i)
     expr(e) ::= i
 
   type MyType = object # too late, must be defined before the language
