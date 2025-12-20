@@ -22,10 +22,10 @@ type
   Symbol = object
 
 defineLanguage Lsrc:
-  n(int)
-  fl(float)
-  str(string)
-  x(Ident)
+  int(n)
+  float(fl)
+  string(str)
+  Ident(x)
 
   rec_field(rf) ::= Field(x, e)
   field_decl(f) ::= Field(x, t)
@@ -81,7 +81,7 @@ defineLanguage L3, L2:
 
 defineLanguage L4, L3:
   ## Language with symbols instead of raw identifiers.
-  +s(Symbol)
+  +Symbol(s)
   expr(e) ::= -x | +s |
               -Let(x, e, e) | +Let(s, e, e)
   typ(t)  ::= -x | +s
