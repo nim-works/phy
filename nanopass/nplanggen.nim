@@ -15,8 +15,9 @@ macro makeLanguageType(def: static LangDef, typName: untyped) =
   # the programmer
   let mvar = bindSym"Metavar"
   for name, it in def.terminals.pairs:
-    fields.add newIdentDefs(ident(name),
-      nnkBracketExpr.newTree(bindSym"Value", ident(it.typ)))
+    for m in it.mvars.items:
+      fields.add newIdentDefs(ident(m),
+        nnkBracketExpr.newTree(bindSym"Value", ident(name)))
   for name, it in def.nterminals.pairs:
     for m in it.mvars.items:
       fields.add newIdentDefs(ident(m),
@@ -26,7 +27,7 @@ macro makeLanguageType(def: static LangDef, typName: untyped) =
           newStrLitNode(name)))
 
   let ntType = nnkTupleTy.newTree()
-  let (csym, fsym, vsym) = (bindSym"PChoice", bindSym"PForm", bindSym"Value")
+  let (csym, fsym) = (bindSym"PChoice", bindSym"PForm")
   # add the descriptions for the non-terminals
   for name, nt in def.nterminals.pairs:
     let ln = ident(typName.strVal)
@@ -37,14 +38,9 @@ macro makeLanguageType(def: static LangDef, typName: untyped) =
         `csym`[`p`, `fsym`[`id`]]
 
     for v in nt.vars.items:
-      if v in def.terminals:
-        let id = ident(def.terminals[v].typ)
-        p = quote do:
-          `csym`[`p`, `vsym`[`id`]]
-      else:
-        let id = ident(v)
-        p = quote do:
-          `csym`[`p`, `ln`.`id`]
+      let id = ident(v)
+      p = quote do:
+        `csym`[`p`, `ln`.`id`]
 
     ntType.add newIdentDefs(ident(name), p)
 
@@ -60,10 +56,10 @@ macro makeLanguageType(def: static LangDef, typName: untyped) =
 
   # create the terminal->tag map:
   let tup = nnkTupleConstr.newTree()
-  for it in def.terminals.values:
+  for name, it in def.terminals.pairs:
     let n = it.tag
     tup.add nnkTupleConstr.newTree(
-      ident(it.typ),
+      ident(name),
       nnkBracketExpr.newTree(bindSym"Static", newIntLitNode(n)))
 
   metaType.add newIdentDefs(ident"term_map", tup)

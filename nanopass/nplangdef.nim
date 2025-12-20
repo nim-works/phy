@@ -25,6 +25,13 @@ type
     semantic*: int
       ## index of the semantic representation
 
+  Terminal* = object
+    mvars*: seq[string]
+      ## the meta-variables for ranging over values of the type
+    tag*: int
+      ## the integer ID through which a tree node is identified as being
+      ## an instance of the terminal
+
   NonTerminal* = object
     mvars*: seq[string]
       ## the meta-variables for ranging over the productions
@@ -36,7 +43,7 @@ type
   LangDef* = object
     ## A checked and pre-processed language definition, carrying enough
     ## source-level information necessary for implementing, e.g., inheritance.
-    terminals*: Table[string, tuple[typ: string, tag: int]]
+    terminals*: Table[string, Terminal]
       ## the terminals of the language
     nterminals*: Table[string, NonTerminal]
       ## the non-terminals of the language
@@ -102,7 +109,7 @@ proc checkName(target: LangDef, vars: Table[string, string], name: string,
   elif name in target.nterminals:
     error(fmt"non-terminal with name {name} already exists", info)
   elif name in vars:
-    error(fmt"'{name}' is already used by a meta-variable for '{vars[name]}'", info)
+    error(fmt"'{name}' is already the name of a meta-variable for '{vars[name]}'", info)
 
 proc parseForm(n: NimNode): ParsedForm =
   ## Parses a form in the context of a language definition. No semantic checks
@@ -159,17 +166,18 @@ proc buildLanguage(add, sub: seq[NimNode],
   # 1. inherit; carry over everything not explicitly removed
   # 2. extension; make the additions
 
-  proc processTerminal(n: NimNode): (string, string) =
+  proc processTerminal(n: NimNode): string =
     n.expectKind nnkCall
-    n.expectLen 2
+    n.expectMinLen 2
     n[0].expectKind nnkIdent
-    n[1].expectKind nnkIdent
-    result = (n[0].strVal, n[1].strVal)
+    for i in 1..<n.len:
+      n[i].expectKind nnkIdent
+    result = n[0].strVal
 
   # apply the terminal removals and carry over the remaining ones:
   for it in sub.items:
-    let (name, typ) = processTerminal(it)
-    if name notin base.terminals or base.terminals[name].typ != typ:
+    let name = processTerminal(it)
+    if name notin base.terminals:
       error("terminal does not exist in the base language", it)
     base.terminals.del(name)
 
@@ -231,7 +239,11 @@ proc buildLanguage(add, sub: seq[NimNode],
       # remove the old names:
       base.nterminals[name].mvars.shrink(0)
 
-  # update the var list with the to-be-inherited non-terminal meta-vars:
+  # update the var list with the to-be-inherited meta-vars:
+  for name, it in base.terminals.pairs:
+    for n in it.mvars.items:
+      vars[n] = name
+
   for name, it in base.nterminals.pairs:
     for n in it.mvars.items:
       vars[n] = name
@@ -278,11 +290,17 @@ proc buildLanguage(add, sub: seq[NimNode],
 
   # ---- phase 2: make all additions
   for it in add.items:
-    let (name, typ) = processTerminal(it)
+    let name = processTerminal(it)
     checkName(result, vars, name, it)
+    var tm = Terminal(tag: -1)
     # the node tag is filled in later
-    result.terminals[name] = (typ, -1)
-    vars[name] = name
+    for i in 1..<it.len:
+      let mvar = it[i].strVal
+      checkName(result, vars, mvar, it)
+      tm.mvars.add mvar
+      vars[mvar] = name
+
+    result.terminals[name] = tm
 
   proc addProd(def: var LangDef, n: NimNode, to: string) =
     proc addForm(def: var LangDef, p: ParsedForm): OrigForm =

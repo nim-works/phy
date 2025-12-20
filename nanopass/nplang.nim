@@ -49,12 +49,15 @@ proc buildLangInfo*(def: LangDef): LangInfo =
 
   for name, it in def.terminals.pairs:
     result.types.add LangType(
-      name: it.typ,
-      mvar: name,
+      name: name,
+      mvar: it.mvars[0],
       terminal: true,
       ntag: it.tag
     )
+    # add the name-to-type mappings:
     result.map[name] = high(result.types)
+    for x in it.mvars.items:
+      result.map[x] = high(result.types)
 
   for name, it in def.nterminals.pairs:
     result.types.add LangType(
