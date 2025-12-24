@@ -310,7 +310,7 @@ const lang* = language:
 
   func common(a, b: typ) -> typ =
     ## Computes the least type both `a` and `b` fit. The function
-    ## is not total, as not all two types have a a type both fit.
+    ## is not total, as not all two types have a type that both fit.
     if a == b:     a
     else:
       if a =~ b:   b
