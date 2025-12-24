@@ -245,11 +245,6 @@ const lang* = language:
       ## itself.
       condition typ_1 != VoidTy()
       conclusion VoidTy(), typ_1
-    rule "union-subtyping":
-      ## A type is a subtype of a union if it's a part of the union (in
-      ## any position).
-      condition typ_1 in typ_2
-      conclusion typ_1, UnionTy(+typ_2)
 
   func `==`(a, b: typ) -> bool =
     ## Type equality.
@@ -285,6 +280,25 @@ const lang* = language:
       condition typ_1 <: typ_2
       conclusion typ_1, typ_2
 
+  inductive `~=>`(inp typ, inp typ):
+    ## "morphable" relationship. The judgement `a ~=> b` means "a value of
+    ## type `a` can morph into a value of type `b`". This is a form of
+    ## "widening".
+    rule "union-element":
+      # a type part of a union can morph into said union
+      condition typ_1 in typ_2
+      conclusion typ_1, UnionTy(+typ_2)
+
+  inductive `=~`(inp typ, inp typ):
+    ## "fits" relationship. The judgement `a =~ b` means "all values of type
+    ## `a` fit type `b`".
+    rule "equal-or-subtype":
+      condition typ_1 <:= typ_2
+      conclusion typ_1, typ_2
+    rule "morph":
+      condition typ_1 ~=> typ_2
+      conclusion typ_1, typ_2
+
   ## Typing Judgment
   ## ---------------
   ##
@@ -295,18 +309,18 @@ const lang* = language:
   ## :math:`C` is the symbol environment.
 
   func common(a, b: typ) -> typ =
-    ## Computes the closest common ancestor type for a type pair. The function
-    ## is not total, as not all two types have a common ancestor type.
+    ## Computes the least type both `a` and `b` fit. The function
+    ## is not total, as not all two types have a type that both fit.
     if a == b:     a
     else:
-      if a <: b:   b
+      if a =~ b:   b
       else:
-        if b <: a: a
-        else:      fail # no common type
+        if b =~ a: a
+        else:      fail # no common morph target
 
   func commonAll(list: *typ) -> typ =
-    ## Computes the closest common ancestor of all types in the list, or
-    ## fails, if there's no such type.
+    ## Computes the least type all types can morph into, or fails, if there's
+    ## no such type.
     case list
     of [typ_1, typ_2, +typ_3]:
       common(common(typ_1, typ_2), commonAll(typ_3))
@@ -445,7 +459,7 @@ const lang* = language:
       premise ttypes(C_1, texpr_1, typ_1)
       condition typ_1 != VoidTy()
       premise ...mtypes(C_1, e_2, typ_2)
-      condition ...(typ_2 <:= typ_1)
+      condition ...(typ_2 =~ typ_1)
       conclusion C_1, Seq(texpr_1, *e_2), SeqTy(typ_1)
 
     axiom "S-string-cons", C, Seq(StringVal(string)), SeqTy(CharTy())
@@ -453,11 +467,11 @@ const lang* = language:
     rule "S-return":
       premise mtypes(C_1, e_1, typ_1)
       condition typ_1 != VoidTy()
-      condition typ_1 <:= C_1.ret
+      condition typ_1 =~ C_1.ret
       conclusion C_1, Return(e_1), VoidTy()
 
     rule "S-return-unit":
-      condition UnitTy() <:= C_1.ret
+      condition UnitTy() =~ C_1.ret
       conclusion C_1, Return(), VoidTy()
 
     rule "S-field":
@@ -515,13 +529,13 @@ const lang* = language:
       premise mtypes(C_1, e_1, typ_1)
       premise ttypes(C_1, texpr_1, typ_2)
       condition typ_2 != VoidTy()
-      condition typ_1 <:= typ_2
+      condition typ_1 =~ typ_2
       conclusion C_1, As(e_1, texpr_1), typ_2
 
     rule "S-asgn":
       premise types(C_1, e_1, mut(typ_1))
       premise mtypes(C_1, e_2, typ_2)
-      condition typ_2 <:= typ_1
+      condition typ_2 =~ typ_1
       conclusion C_1, Asgn(e_1, e_2), UnitTy()
 
     rule "S-let":
@@ -667,7 +681,7 @@ const lang* = language:
     rule "S-builtin-concat":
       premise mtypes(C_1, e_1, SeqTy(typ_1))
       premise mtypes(C_1, e_2, typ_2)
-      condition typ_2 <:= typ_1
+      condition typ_2 =~ typ_1
       conclusion C_1, Call(Ident("concat"), e_1, e_2), SeqTy(typ_1)
 
     rule "S-builtin-write":
@@ -686,12 +700,12 @@ const lang* = language:
       premise mtypes(C_1, e_1, typ_1)
       where ProcTy(typ_r, *typ_p), typ_1
       premise ...mtypes(C_1, e_2, typ_a)
-      condition ...(typ_a <:= typ_p)
+      condition ...(typ_a =~ typ_p)
       conclusion C_1, Call(e_1, *e_2), typ_r
 
     rule "S-Frame":
       premise types(C_1, e_1, typ_2)
-      condition typ_2 <:= typ_1
+      condition typ_2 =~ typ_1
       conclusion C_1, Frame(typ_1, e_1), typ_1
 
     rule "S-proc-val":
@@ -701,7 +715,7 @@ const lang* = language:
       premise mtypes(C_1, e_1, typ_1)
       premise mtypes(C_1, e_2, typ_3)
       where SeqTy(typ_2), typ_1
-      condition typ_3 <:= typ_2
+      condition typ_3 =~ typ_2
       conclusion C_1, With(e_1, n_1, e_2), typ_1
 
     rule "S-tuple-with":
@@ -709,7 +723,7 @@ const lang* = language:
       premise mtypes(C_1, e_2, typ_2)
       where TupleTy(+typ_4), typ_1
       where typ_3, typ_4[n_1]
-      condition typ_2 <:= typ_3
+      condition typ_2 =~ typ_3
       conclusion C_1, With(e_1, n_1, e_2), typ_3
 
   inductive toplevel(inp C, inp (decl + module), out C, out typ):
@@ -734,7 +748,7 @@ const lang* = language:
       let C_2 = C_1 + C(symbols: {string_1: typ_3})
       let C_3 = C_2 + C(ret: typ_1, symbols: map(zip(string_2, typ_2)))
       premise types(C_3, e_1, typ_4)
-      condition typ_4 <:= typ_1
+      condition typ_4 =~ typ_1
       conclusion C_1, ProcDecl(Ident(string_1), texpr_1, Params(*ParamDecl(Ident(string_2), texpr_2)), e_1), C_2, typ_3
 
     axiom "S-empty-module", C_1, Module(), C_1, VoidTy()
