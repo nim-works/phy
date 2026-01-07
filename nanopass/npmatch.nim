@@ -323,7 +323,9 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
   ## an `nnkElse` tree used for handling the rest of match, or nil, in which
   ## case how to handle the rest of a match is dictated by `config`.
   let cursor = genSym("cursor")
-  var stack: seq[NimNode] ## stack of `len` symbols
+  let backup = genSym("backup")
+
+  var stack: seq[tuple[len, saved: NimNode]] ## cursor context stack
   var top: NimNode
     ## the topmost non-union match expression enclosing the currently
     ## processed one
@@ -336,31 +338,31 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
         # commit the current cursor to a local with the given name
         if e[0].kind == nnkBracket:
           let bias = e[2]
-          let len = stack[^1] # can only be non-empty
-          to.add newLetStmt(e[1], quote do: (`cursor`, `len` - `bias`))
+          let len = stack[^1].len # can only be non-empty
+          to.add newLetStmt(e[1], quote do: (pos(`cursor`), `len` - `bias`))
         else:
-          to.add newLetStmt(e[1], cursor)
+          to.add newLetStmt(e[1], quote do: get(`ast`, `cursor`))
 
       # only emit a cursor movement when the moved cursor is actually observed
       if e[^1].kind in {nnkCall, nnkCurly, nnkPar}:
         case e[0].kind
         of nnkPar:
           let nlen = genSym"len"
+          let saved = genSym"saved"
           to.add quote do:
-            let `nlen` = `ast`[`cursor`].val
-          to.add quote do:
-            `cursor` = `ast`.child(`cursor`, 0)
+            let `nlen` = `ast`[pos(`cursor`)].val
+            let `saved` = enter(`ast`, `cursor`)
 
-          stack.add nlen
+          stack.add (nlen, saved)
         of nnkEmpty, nnkIntLit:
           to.add quote do:
-            `cursor` = `ast`.next(`cursor`)
+            advance(`ast`, `cursor`)
         of nnkBracket:
           let bias = e[2]
-          let len = stack[^1] # can only be non-empty
+          let len = stack[^1].len # can only be non-empty
           to.add quote do:
             for _ in 0 ..< (`len` - `bias`):
-              `cursor` = `ast`.next(`cursor`)
+              advance(`ast`, `cursor`)
         else:
           unreachable(e[0].kind)
 
@@ -372,8 +374,10 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
     of nnkPar:
       # move the current cursor to the end of the subtree and pop it from
       # the stack
-      discard stack.pop()
-      result = aux(lang, e[1], to)
+      let (_, saved) = stack.pop()
+      to.add quote do:
+        restore(`ast`, `cursor`, `saved`)
+      result = aux(lang, e[0], to)
     of nnkCurly:
       # a dispatcher
       proc genOfBranch(lang: LangInfo, typ: LangType, used: var IntSet,
@@ -394,7 +398,7 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
 
       let stackLen = stack.len
       let typ = e[0].intVal.int
-      var caseStmt = nnkCaseStmt.newTree(quote do: `ast`[`cursor`].kind)
+      var caseStmt = nnkCaseStmt.newTree(quote do: `ast`[pos(`cursor`)].kind)
       var used = initIntSet()
       for i in 1..<e.len:
         let it = e[i]
@@ -457,20 +461,22 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
             allCovered = false
             break
 
+        # important: the `backup` cursor has to be used here, as it still
+        # points to the original node, whereas `cursor` has been moved already
         if allCovered:
           discard "nothing to do"
         elif top[0].len == 1:
           # simple case. The form ID is known statically
           caseStmt.add nnkElse.newTree(
-            config.fillForm(lang, top[0][0].intVal.int, sel, info))
+            config.fillForm(lang, top[0][0].intVal.int, backup, info))
         else:
           # complex case. The form ID is only known at run-time; dispatch over
           # the entry-level node's kind for detecting the form
           let inner = nnkCaseStmt.newTree(
-            quote do: `ast`.nodes[`sel`].kind)
+            quote do: `ast`.nodes[pos(`backup`)].kind)
           for it in top[0].items:
             inner.add nnkOfBranch.newTree(it,
-              config.fillForm(lang, it.intVal.int, sel, info))
+              config.fillForm(lang, it.intVal.int, backup, info))
           inner.add nnkElse.newTree(newCall(bindSym"unreachable"))
           caseStmt.add nnkElse.newTree(inner)
       else:
@@ -551,6 +557,7 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
 
   result = nnkStmtList.newTree()
   result.add newVarStmt(cursor, sel)
+  result.add newVarStmt(backup, cursor)
   discard aux(lang, e, result)
 
 proc patternToMatch(n: NimNode): tuple[head, tail: NimNode] =
@@ -798,7 +805,7 @@ proc matchImpl*(lang: LangInfo, src: int, name, ast, sel, rules: NimNode,
   result = generateForMatch(lang, name, ast, sel, optimize(total), els, config)
 
 macro matchImpl(lang: static LangInfo, nterm: static string,
-                name: typed, ast: PackedTree[uint8], sel: NodeIndex,
+                name: typed, ast: PackedTree[uint8], cursor: untyped,
                 info: untyped, rules: varargs[untyped]): untyped =
   ## The internal implementation `match` dispatches to.
   # report an error for all missing form and type handling
@@ -807,16 +814,14 @@ macro matchImpl(lang: static LangInfo, nterm: static string,
     fillType: nil
   )
 
-  copyLineInfo(sel, info) # for better source locations
-  result = matchImpl(lang, lang.map[nterm], name, ast, sel, rules, config)
+  copyLineInfo(cursor, info) # for better source locations
+  result = matchImpl(lang, lang.map[nterm], name, ast, cursor, rules, config)
 
-template match*(ast: PackedTree[uint8], nt: Metavar,
-                branches: varargs[untyped]): untyped =
-  ## Type-unsafe version of match, meant for internal usage.
+template match*[L; N: static](ast: PackedTree[uint8], cursor, info: untyped,
+                              branches: varargs[untyped]): untyped =
+  ## Type-unsafe version of ``match``, meant for internal usage.
   bind matchImpl
-  let idx = nt.index
-  matchImpl(idef(typeof(nt).L), typeof(nt).N, typeof(nt).L, ast, idx, nt,
-            branches)
+  matchImpl(idef(typeof(L)), N, typeof(L), ast, cursor, info, branches)
 
 template match*[L, N](ast: Ast[L, auto], nt: Metavar[L, N],
                       branches: varargs[untyped]): untyped =
@@ -830,5 +835,4 @@ template match*[L, N](ast: Ast[L, auto], nt: Metavar[L, N],
   ##   of ...: discard
   ##   else:   discard
   bind matchImpl
-  let idx = nt.index
-  matchImpl(idef(typeof(L)), N, L, ast.tree, idx, nt, branches)
+  matchImpl(idef(typeof(L)), N, L, ast.tree, Cursor(nt.index), nt, branches)

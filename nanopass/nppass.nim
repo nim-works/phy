@@ -50,7 +50,7 @@ macro processorMatchImpl(lang: static LangInfo, src: static string,
       quote do:
         # TODO: use the tag of the destination language
         `output`.nodes.add:
-          TreeNode[uint8](kind: uint8(`id`), val: `input`[`n`].val)
+          TreeNode[uint8](kind: uint8(`id`), val: `input`[pos(`n`)].val)
         (typeof(result))(index: NodeIndex(`output`.nodes.high))
     else:
       # TODO: consider inlining the transformer if it's auto-generated.
@@ -60,7 +60,7 @@ macro processorMatchImpl(lang: static LangInfo, src: static string,
       # dispatch to the processor and convert to the expected type
       quote do:
         (typeof(result))(
-          index: `callee`(src.`name`(index: `n`), dst.`name`).index)
+          index: `callee`(src.`name`(index: pos(`n`)), dst.`name`).index)
 
   let config = ExpandConfig(
     fillForm: fillForm,
@@ -79,7 +79,7 @@ macro genProcessor*(index, nterm: untyped): untyped =
   #       memcopy
   let sym = bindSym"processorMatchImpl"
   result = quote do:
-    `sym`(idef(src), `nterm`, `index`)
+    `sym`(idef(src), `nterm`, Cursor(`index`))
 
 proc hasPragma(def: NimNode, name: string): bool =
   if def.pragma.kind == nnkPragma:
@@ -117,7 +117,8 @@ macro transformInOutImpl(lang: static LangDef, name, def: untyped) =
 
   proc transformCase(n: NimNode): NimNode =
     result = genAst(arg=n[0]):
-      processorMatchImpl(idef(src), typeof(arg).N, arg.index)
+      processorMatchImpl(idef(src), typeof(arg).N, Cursor(arg.index))
+    copyLineInfo(result, n)
     for i in 1..<n.len:
       result.add n[i]
 
@@ -195,8 +196,8 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
   if hasIn:
     let inj = ident"[]"
     body.add quote do:
-      template match(sel: Metavar, branches: varargs[untyped]): untyped {.used.} =
-        match(`input`.tree, sel, branches)
+      template match[N](sel: Metavar[src, N], branches: varargs[untyped]): untyped {.used.} =
+        match[src, N](`input`.tree, Cursor(sel.index), sel, branches)
 
       template `inj`(x: ChildSlice, i: SomeInteger): untyped {.used.} =
         `input`.tree[x, i]

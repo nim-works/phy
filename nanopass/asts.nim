@@ -37,6 +37,9 @@ type
     start: NodeIndex
     len: uint32
 
+  Cursor* = distinct NodeIndex
+    ## A cursor into a tree where without indirections.
+
 const
   RefTag* = 128'u8
     ## the node used internally for indirections
@@ -73,3 +76,39 @@ proc `[]`*[T](t: PackedTree[uint8], s: ChildSlice[T], i: SomeInteger): T =
 
 proc len*(s: ChildSlice): int = int(s.len)
 proc high*(s: ChildSlice): int = int(s.len) - 1
+
+# ----- internal cursor API -----
+
+# the cursor interface consists of these routines:
+# * ``advance(PackedTree[uint8], var Cursor)``:
+#   moves the cursor to the sibling of the current node
+# * ``get(PackedTree[uint8], Cursor): NodeIndex``:
+#   returns the resolved index of the node the cursor points to
+# * ``pos(Cursor): NodeIndex``:
+#   returns the unresolved index of the node the cursor points to
+# * ``enter(PackedTree[uint8], var Cursor): Savepoint``:
+#   enters the subtree at the current cursor position
+# * ``restore(PackedTree[uint8], var Cursor, Savepoint)``:
+#   exits the current subtree
+# XXX: this should use static interfaces once supported by NimSkull
+
+{.push stacktrace: off, inline.}
+
+proc advance*(tree: PackedTree[uint8], cr: var Cursor) {.inline.} =
+  NodeIndex(cr) = next(tree, NodeIndex(cr))
+
+proc get*(tree: PackedTree[uint8], cr: Cursor): NodeIndex {.inline.} =
+  NodeIndex cr
+
+template pos*(cr: Cursor): NodeIndex =
+  NodeIndex cr
+
+proc enter*(tree: PackedTree[uint8], cr: var Cursor): Cursor {.inline.} =
+  # nothing to step into and thus no cursor to save
+  result = cr
+  cr = Cursor(tree.child(NodeIndex(cr), 0))
+
+template restore*(tree: PackedTree[uint8], cr: Cursor, saved: untyped) =
+  discard # nothing to restore
+
+{.pop.}

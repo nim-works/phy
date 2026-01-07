@@ -27,7 +27,7 @@ proc append(to: var PackedTree[uint8], i: var int, x: Metavar) =
 
 macro transform*(src, dst: static LangInfo, nterm: static string,
                  form: static int, input, output: PackedTree[uint8],
-                 n: untyped): untyped =
+                 cursor: untyped): untyped =
   ## Generates the transformation from the given source language form
   ## to a compatible target language production of the non-terminal with
   ## name `nterm`.
@@ -57,7 +57,8 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
     to.add render(src, x)
 
   if morphability in {None, Ambiguous}:
-    return makeError(fmt"cannot generate transformer for '{src.forms[form]}'", n)
+    return
+      makeError(fmt"cannot generate transformer for '{src.forms[form]}'", cursor)
 
   # important: the generated code being efficient is of major importance! Most
   # transformations will be auto-generated, and they should thus be as fast as
@@ -72,12 +73,13 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
   result = newStmtList()
   # add the root node:
   let body = quote do:
-    var tmp {.used.} = `input`.child(`n`, 0)
+    let len = `input`.len(pos(`cursor`))
+    discard enter(`input`, `cursor`)
     let root = `output`.nodes.len.NodeIndex
     var i = `output`.nodes.len
-    # the node sequence needs output be contiguous, so it's allocated upfront
-    `output`.nodes.setLen(i + `input`.len(`n`) + 1)
-    `output`.nodes[i] = TreeNode[uint8](kind: `id`, val: `input`[`n`].val)
+    # the node sequence has to be contiguous, so it's allocated upfront
+    `output`.nodes.setLen(i + len + 1)
+    `output`.nodes[i] = TreeNode[uint8](kind: `id`, val: uint32(len))
     inc i
 
   # call the transformers and emit the nodes in one go:
@@ -87,7 +89,8 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
     let toTerminal   = dst.types[b.typ].terminal
     if fromTerminal != toTerminal or
        (toTerminal and src.types[a.typ].name != dst.types[b.typ].name):
-      body.add makeError(fmt"cannot generate transformer for '{src.forms[form]}'", n)
+      body.add makeError(
+        fmt"cannot generate transformer for '{src.forms[form]}'", cursor)
       break
 
     let call =
@@ -95,13 +98,13 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
         if src.types[a.typ].ntag == dst.types[b.typ].ntag:
           # just copy the node
           quote do:
-            `output`.nodes[i] = `input`[tmp]
+            `output`.nodes[i] = `input`[pos(`cursor`)]
             inc i
         else:
           # repack with the new tag
           let tag = dst.types[b.typ].ntag
           quote do:
-            `output`.nodes[i] = TreeNode[uint8](kind: `tag`, val: `input`[tmp].val)
+            `output`.nodes[i] = TreeNode[uint8](kind: `tag`, val: `input`[pos(`cursor`)].val)
             inc i
       else:
         let append = bindSym"append"
@@ -110,18 +113,18 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
         let d = newStrLitNode(dst.types[b.typ].name)
         quote do:
           `append`(`output`, i,
-            `op`(Metavar[src, `s`](index: tmp), Metavar[dst, `d`]))
+            `op`(Metavar[src, `s`](index: get(`input`, `cursor`)), Metavar[dst, `d`]))
 
     if a.repeat:
       let bias = src.forms[form].elems.len - 1
       body.add quote do:
-        for _ in 0..<(`input`.len(`n`) - `bias`):
+        for _ in 0..<(len - `bias`):
           `call`
-          tmp = `input`.next(tmp)
+          advance(`input`, `cursor`)
     else:
       body.add quote do:
         `call`
-        tmp = `input`.next(tmp)
+        advance(`input`, `cursor`)
 
   result.add body
   # the callsite takes care of fitting the index to the right type
