@@ -190,7 +190,12 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
       template match[N](sel: Metavar[src, N], branches: varargs[untyped]): untyped {.used.} =
         match[src, N](`input`.tree, Cursor(sel.index), sel, branches)
 
-      template `inj`(x: ChildSlice, i: SomeInteger): untyped {.used.} =
+      template slice[N](T: typedesc[Metavar[src, N]]): typedesc {.used.} =
+        ChildSlice[T, Cursor]
+      template slice(T: typedesc[asts.Value[auto]]): typedesc {.used.} =
+        ChildSlice[T, Cursor]
+
+      template `inj`(x: ChildSlice[auto, Cursor], i: SomeInteger): untyped {.used.} =
         `input`.tree[x, i]
 
       template val[T](v: nanopass.Value[T]): T {.used.} =

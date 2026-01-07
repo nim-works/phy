@@ -339,7 +339,7 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
         if e[0].kind == nnkBracket:
           let bias = e[2]
           let len = stack[^1].len # can only be non-empty
-          to.add newLetStmt(e[1], quote do: (pos(`cursor`), `len` - `bias`))
+          to.add newLetStmt(e[1], quote do: (`cursor`, `len` - `bias`))
         else:
           to.add newLetStmt(e[1], quote do: get(`ast`, `cursor`))
 

@@ -32,9 +32,9 @@ type
     index*: uint32
       ## leaked implementation detail, don't use
 
-  ChildSlice*[T: Metavar or Value] = object
+  ChildSlice*[T: Metavar or Value, Cursor] = object
     ## A lightweight reference to a slice of contiguous children of a tree.
-    start: NodeIndex
+    start: Cursor
     len: uint32
 
   Cursor* = distinct NodeIndex
@@ -48,19 +48,24 @@ template isAtom*(x: uint8): bool =
   ## The predicate required for using an uint8 as a ``PackedTree`` tag.
   x >= RefTag
 
-proc slice*[T](start: NodeIndex, len: uint32): ChildSlice[T] =
-  ChildSlice[T](start: start, len: len)
+# ----- slice implementation -----
 
-iterator items*[T](t: PackedTree[uint8], s: ChildSlice[T]): T =
+proc slice*[T, C](start: C, len: uint32): ChildSlice[T, C] =
+  ChildSlice[T, C](start: start, len: len)
+
+iterator items*[T, C](t: PackedTree[uint8], s: ChildSlice[T, C]): T =
+  mixin advance
   var c = s.start
   for _ in 0..<s.len:
     when T is Metavar:
-      yield T(index: c)
+      yield T(index: get(t, c))
     else:
-      yield T(index: t[c].val)
-    c = t.next(c)
+      yield T(index: t[pos(c)].val)
+    advance(t, c)
 
-proc `[]`*[T](t: PackedTree[uint8], s: ChildSlice[T], i: SomeInteger): T =
+proc `[]`*[T, C](t: PackedTree[uint8], s: ChildSlice[T, C], i: SomeInteger): T =
+  mixin advance, get
+
   when compileOption("boundchecks"):
     when i is SomeSignedInt:
       if i < 0 or uint64(i) >= uint64(s.len):
@@ -71,8 +76,12 @@ proc `[]`*[T](t: PackedTree[uint8], s: ChildSlice[T], i: SomeInteger): T =
 
   var n = s.start
   for _ in 0..<i:
-    n = t.next(n)
-  result = T(index: n)
+    advance(t, n)
+
+  when T is Metavar:
+    result = T(index: get(t, n))
+  else:
+    result = T(index: t[n].val)
 
 proc len*(s: ChildSlice): int = int(s.len)
 proc high*(s: ChildSlice): int = int(s.len) - 1
