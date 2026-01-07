@@ -3,6 +3,12 @@
 
 import passes/trees
 
+export trees.NodeIndex
+# export some fundamental tree traversal and query operations, so that the
+# nanopass implementation doesn't have to use bindSym everywhere
+export trees.`[]`, trees.next, trees.child, trees.len
+export trees.TreeNode
+
 type
   # note: the fields are exported so that the nanopass machinery can access
   # them. User code should, in most cases, not access the fields directly

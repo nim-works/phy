@@ -246,7 +246,7 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
       let `input` {.cursor.} = `input`.tree
   if hasOut:
     body.add quote do:
-      var `output`: PackedTree[uint8]
+      var `output`: Ast[dst, `storageTy`].tree
       let index = `call`.index
       # turn the AST with indirections into one without
       result = Ast[dst, `storageTy`](
@@ -260,7 +260,7 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
   def.body = body
   # patch the signature:
   if hasIn:
-    def.params[1][^2] = ident"NodeIndex"
+    def.params[1][^2] = bindSym"NodeIndex"
     def.params.insert(1, newIdentDefs(input, quote do: Ast[`src`, `storageTy`]))
   if hasOut:
     def.params[0] = nnkBracketExpr.newTree(ident"Ast", dst, storageTy)
