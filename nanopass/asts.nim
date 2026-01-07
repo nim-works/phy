@@ -37,10 +37,6 @@ type
     start: NodeIndex
     len: uint32
 
-  Storage*[T] = object
-    ## The container AST fragments use for storing embedded datums.
-    data: seq[T] # TODO: use a BiTable
-
 proc slice*[T](start: NodeIndex, len: uint32): ChildSlice[T] =
   ChildSlice[T](start: start, len: len)
 
@@ -69,12 +65,3 @@ proc `[]`*[T](t: PackedTree[uint8], s: ChildSlice[T], i: SomeInteger): T =
 
 proc len*(s: ChildSlice): int = int(s.len)
 proc high*(s: ChildSlice): int = int(s.len) - 1
-
-# ------- Storage implementation --------
-
-proc pack*[T](s: Storage[T], val: sink T): uint32 =
-  s.data.add val
-  result = s.data.high.uint32
-
-proc unpack*[T](s: Storage[T], id: uint32): lent T =
-  s.data[id]
