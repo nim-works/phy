@@ -9,8 +9,6 @@ type
     numbers*: seq[uint64] ## a list of bit patterns
     strings*: seq[string]
 
-  Ident* = distinct string
-
 proc pack*(s: var Literals, val: SomeInteger): uint32 {.inline.} =
   ## Adds the bit-representation of `val` to `s` and returns an ID to refer
   ## to the value with later.
@@ -28,11 +26,6 @@ proc pack*(s: var Literals, val: string): uint32 {.inline.} =
   result = uint32(s.strings.len)
   s.strings.add val
 
-proc pack*(s: var Literals, val: Ident): uint32 {.inline.} =
-  ## Adds the `val` to `s` and returns an ID to refer to the value with later.
-  result = uint32(s.strings.len)
-  s.strings.add string(val)
-
 proc unpack*[T: SomeNumber](s: Literals, id: uint32, _: typedesc[T]): T {.inline.} =
   ## Returns the bit-representation stored under `id` interpreted as `T`.
   when T is uint64: # prevent warnings
@@ -43,10 +36,6 @@ proc unpack*[T: SomeNumber](s: Literals, id: uint32, _: typedesc[T]): T {.inline
 proc unpack*(s: Literals, id: uint32, _: typedesc[string]): lent string {.inline.} =
   ## Returns the string stored under `id`.
   s.strings[id]
-
-proc unpack*(s: Literals, id: uint32, _: typedesc[Ident]): lent Ident {.inline.} =
-  ## Returns the string stored under `id`, treated as an ``Ident``.
-  s.strings[id].Ident
 
 # TODO: remove the temporary overloads for objects again
 

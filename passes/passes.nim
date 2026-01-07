@@ -20,6 +20,7 @@ import passes/trees except Literals
 
 type
   Symbol = object
+  Ident = distinct string
 
 defineLanguage Lsrc:
   int(n)
@@ -213,6 +214,12 @@ defineLanguage L12, L11:
   ## Language with only simple callee expressions.
   expr(e)  ::= -Call(t, e, ...e) | +Call(t, s, ...e)
   stmt(st) ::= -Call(t, e, ...e) | +Call(t, s, ...e)
+
+proc pack(s: var Literals, val: Ident): uint32 {.inline.} =
+  pack(s, string(val))
+
+proc unpack(s: Literals, id: uint32, _: typedesc[Ident]): lent Ident {.inline.} =
+  Ident unpack(s, id, string)
 
 proc eatString(s: var SexpParser): string =
   result = s.captureCurrString()
