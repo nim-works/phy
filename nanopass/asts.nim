@@ -39,6 +39,8 @@ type
 
   Cursor* = distinct NodeIndex
     ## A cursor into a tree where without indirections.
+  IndCursor* = distinct NodeIndex
+    ## A cursor into a tree with indirections.
 
 const
   RefTag* = 128'u8
@@ -119,5 +121,35 @@ proc enter*(tree: PackedTree[uint8], cr: var Cursor): Cursor {.inline.} =
 
 template restore*(tree: PackedTree[uint8], cr: Cursor, saved: untyped) =
   discard # nothing to restore
+
+# implementation for a cursor into a tree with indirections follows
+
+proc advance*(tree: PackedTree[uint8], cr: var IndCursor) =
+  NodeIndex(cr) = next(tree, NodeIndex(cr))
+
+proc get*(tree: PackedTree[uint8], cr: IndCursor): NodeIndex =
+  if tree[NodeIndex(cr)].kind == 128:
+    NodeIndex tree[NodeIndex(cr)].val
+  else:
+    NodeIndex cr
+
+template pos*(cr: IndCursor): NodeIndex =
+  NodeIndex cr
+
+type Savepoint = tuple[origin: IndCursor, stepped: bool]
+
+proc enter*(tree: PackedTree[uint8], cr: var IndCursor): Savepoint =
+  result = (cr, tree[NodeIndex(cr)].kind == 128)
+  if result.stepped:
+    cr = IndCursor tree[NodeIndex(cr)].val
+  else:
+    cr = IndCursor tree.child(NodeIndex(cr), 0)
+
+template restore*(tree: PackedTree[uint8], cr: var IndCursor,
+                  saved: Savepoint) =
+  if saved.stepped:
+    cr = saved.origin
+    advance(tree, cr)
+  # else: the cursor is at the correct position already
 
 {.pop.}
