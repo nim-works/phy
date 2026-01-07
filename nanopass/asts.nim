@@ -47,7 +47,10 @@ proc slice*[T](start: NodeIndex, len: uint32): ChildSlice[T] =
 iterator items*[T](t: PackedTree[uint8], s: ChildSlice[T]): T =
   var c = s.start
   for _ in 0..<s.len:
-    yield c
+    when T is Metavar:
+      yield T(index: c)
+    else:
+      yield T(index: t[c].val)
     c = t.next(c)
 
 proc `[]`*[T](t: PackedTree[uint8], s: ChildSlice[T], i: int): T =
