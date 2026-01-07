@@ -199,6 +199,9 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
         # XXX: consider renaming this template to `get`
         unpack(`input`.storage[], v.index, typeof(T))
 
+      template equal[N](a, b: Metavar[src, N]): bool {.used.} =
+        equal(`input`.tree, Cursor(a.index), Cursor(b.index))
+
   if hasOut:
     let embed = bindSym"embed"
     body.add quote do:
@@ -210,6 +213,9 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
         match[dst, N](`output`.tree, IndCursor(sel.index), sel, branches)
       template slice[N](T: typedesc[Metavar[dst, N]]): typedesc {.used.} =
         ChildSlice[T, IndCursor]
+
+      template equal[N](a, b: Metavar[dst, N]): bool {.used.} =
+        equal(`output`.tree, IndCursor(a.index), IndCursor(b.index))
 
   if hasIn:
     # shadow the input tree with a cursor to prevent a costly copy when

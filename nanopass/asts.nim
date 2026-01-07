@@ -163,3 +163,67 @@ template restore*(tree: PackedTree[uint8], cr: var IndCursor,
   # else: the cursor is at the correct position already
 
 {.pop.}
+
+# ------ additional tree operations --------
+
+proc equal*(tree: PackedTree[uint8], a, b: Cursor): bool =
+  ## Compares the nodes/sub-trees at `a` and `b` for structural equality.
+  if pos(a) == pos(b):
+    return true
+
+  var (a, b) = (a, b)
+  var i = 1'u32
+  while i > 0:
+    let n = tree[pos(a)]
+    if n != tree[pos(b)]:
+      return false
+    elif not isAtom(n.kind):
+      i += n.val
+    advance(tree, a)
+    advance(tree, b)
+    dec i
+
+  result = true
+
+proc equal*(tree: PackedTree[uint8], a, b: IndCursor): bool =
+  ## Compares the nodes/sub-trees at `a` and `b` for structural equality.
+  if pos(a) == pos(b):
+    return true
+
+  # needs a stack for bookkeeping
+  var (a, b) = (a, b)
+  var stack: seq[(IndCursor, IndCursor, uint32)]
+  var i = 1'u32
+  while true:
+    let na = tree[pos(a)]
+    let nb = tree[pos(b)]
+    if na != nb:
+      if na.kind == RefTag:
+        stack.add (a, b, i)
+        i = 1
+        a = IndCursor(na.val)
+        continue
+      elif nb.kind == RefTag:
+        stack.add (a, b, i)
+        i = 1
+        b = IndCursor(nb.val)
+        continue
+      return false
+    elif na.kind == RefTag:
+      stack.add (a, b, i)
+      i = 1
+      a = IndCursor(na.val)
+      b = IndCursor(nb.val)
+      continue
+    elif not isAtom(na.kind):
+      i += na.val
+    dec i
+    if i == 0:
+      if stack.len == 0:
+        break
+      (a, b, i) = stack.pop()
+    else:
+      advance(tree, a)
+      advance(tree, b)
+
+  result = true
