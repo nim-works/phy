@@ -1,6 +1,7 @@
 ## Implements the language definition parsing and processing.
 
 import std/[macros, intsets, sets, strformat, tables]
+from nanopass/asts import RefTag
 
 type
   # Core types capturing a defined language
@@ -66,8 +67,6 @@ type
     add: seq[NimNode]
 
 const
-  RefTag* = 128'u8
-    ## the node used internally for indirections
   FirstTerminalTag* = RefTag + 1
     ## the start of the terminals' tag space
 

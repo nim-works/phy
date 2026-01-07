@@ -9,7 +9,7 @@
 
 import
   passes/[trees],
-  nanopass/[asts, nplangdef, nplanggen, npmatch, npbuild, nppass, nppatterns, npsexpr]
+  nanopass/[asts, nplanggen, npmatch, npbuild, nppass, nppatterns, npsexpr]
 
 export asts
 export nppatterns.matches
@@ -18,10 +18,6 @@ export nppass.pass, nppass.inpass, nppass.outpass
 
 export nppass.genProcessor
 # TODO: ^^ bind the symbols; don't mix them in
-
-template isAtom*(x: uint8): bool =
-  ## The predicate required for using an uint8 as a ``PackedTree`` tag.
-  x >= RefTag
 
 macro defineLanguage*(name, body: untyped) =
   ## Creates a language definition and binds it to a const symbol with the

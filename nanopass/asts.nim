@@ -37,6 +37,14 @@ type
     start: NodeIndex
     len: uint32
 
+const
+  RefTag* = 128'u8
+    ## the node used internally for indirections
+
+template isAtom*(x: uint8): bool =
+  ## The predicate required for using an uint8 as a ``PackedTree`` tag.
+  x >= RefTag
+
 proc slice*[T](start: NodeIndex, len: uint32): ChildSlice[T] =
   ChildSlice[T](start: start, len: len)
 

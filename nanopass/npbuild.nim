@@ -2,7 +2,7 @@
 
 import std/[genasts, macros, strformat, tables]
 import passes/trees
-import nanopass/[asts, helper, nplang, nplangdef, nppatterns]
+import nanopass/[asts, helper, nplang, nppatterns]
 
 proc lookup[E; M: tuple](): auto {.compileTime.} =
   var x: M

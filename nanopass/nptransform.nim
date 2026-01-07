@@ -2,7 +2,7 @@
 
 import std/[macros, strformat, tables]
 import passes/[trees]
-import nanopass/[asts, helper, nplang, nplangdef]
+import nanopass/[asts, helper, nplang]
 
 type
   Morphability = enum
