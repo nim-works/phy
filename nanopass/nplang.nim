@@ -95,3 +95,14 @@ proc ntags*(lang: LangInfo, typ: LangType): seq[int] =
       result.add lang.types[it].ntag
     else:
       result.add ntags(lang, lang.types[it])
+
+proc render*(lang: LangInfo, form: SForm): string =
+  result.add form.name
+  result.add "("
+  for i, it in form.elems.pairs:
+    if i > 0:
+      result.add ", "
+    if it.repeat:
+      result.add "..."
+    result.add lang.types[it.typ].mvar
+  result.add ")"

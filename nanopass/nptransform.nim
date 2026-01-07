@@ -21,17 +21,6 @@ proc canMorph(src, dst: LangInfo, a, b: SForm): Morphability =
   else:
     result = None
 
-proc render(lang: LangInfo, form: SForm): string =
-  result.add form.name
-  result.add "("
-  for i, it in form.elems.pairs:
-    if i > 0:
-      result.add ", "
-    if it.repeat:
-      result.add "..."
-    result.add lang.types[it.typ].mvar
-  result.add ")"
-
 proc append(to: var PackedTree[uint8], i: var int, x: Metavar) =
   to.nodes[i] = TreeNode[uint8](kind: RefTag, val: uint32(x.index))
   inc i
