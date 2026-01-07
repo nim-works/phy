@@ -225,7 +225,7 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
       let pos = `call`
       # turn the AST with indirections into one without
       `output`.tree = finish(`output`.tree, pos.index)
-      result = move `output`
+      result = (move `output`, typeof(pos)(index: NodeIndex(0)))
   else:
     body.add quote do:
       result = `call`
@@ -233,10 +233,14 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
   def.body = body
   # patch the signature:
   if hasIn:
-    def.params[1][^2] = bindSym"NodeIndex"
-    def.params.insert(1, newIdentDefs(input, quote do: Ast[`src`, `storageTy`]))
+    def.params.insert(1,
+      newIdentDefs(input,
+        nnkBracketExpr.newTree(ident"Ast", src, storageTy)))
   if hasOut:
-    def.params[0] = nnkBracketExpr.newTree(ident"Ast", dst, storageTy)
+    def.params[0] =
+      nnkTupleConstr.newTree(
+        nnkBracketExpr.newTree(ident"Ast", dst, storageTy),
+        def.params[0])
 
   result = def
 
@@ -282,15 +286,14 @@ macro passImpl(src, dst, srcnterm, dstnterm: typedesc, def: untyped) =
   # entry processor
   if def.body[^1].kind == nnkProcDef:
     # ^^ a heuristic, but should work okay enough
-    def.body.add newCall(ident"->", def.params[1][0],
-      newDotExpr(newDotExpr(dst, ident"meta"), ident"entry"))
+    def.body.add newCall(ident"->", def.params[1][0], dstnterm)
 
   def.body = newStmtList(preamble, def.body)
+  def.params[0] = dstnterm
+  def.params[1][^2] = srcnterm
 
   let lambda = newProc(newEmptyNode(), body=def.body, procType=nnkProcDef)
   lambda.params = copyNimTree(def.params)
-  lambda.params[0] = dstnterm
-  lambda.params[1][^2] = srcnterm
 
   let call = newCall(lambda)
   # forward the original parameters to the lambda:
@@ -298,14 +301,13 @@ macro passImpl(src, dst, srcnterm, dstnterm: typedesc, def: untyped) =
     for j in 0..<def.params[i].len-2:
       call.add def.params[i][j]
 
-  call[1] = nnkObjConstr.newTree(srcnterm,
-    nnkExprColonExpr.newTree(ident"index", call[1]))
   result = assemblePass(src, dst, def, call)
 
 macro inpassImpl(name, nterm: typedesc, def: untyped) =
+  def.params[0] = nterm
+
   let lambda = newProc(newEmptyNode(), body=def.body, procType=nnkProcDef)
   lambda.params = copyNimTree(def.params)
-  lambda.params[0] = nterm
 
   let call = newCall(lambda)
   # forward the original parameters to the lambda:
@@ -316,9 +318,10 @@ macro inpassImpl(name, nterm: typedesc, def: untyped) =
   result = assemblePass(nil, name, def, call)
 
 macro outpassImpl(name, nterm: typedesc, def: untyped) =
+  def.params[1][^2] = nterm
+
   let lambda = newProc(newEmptyNode(), body=def.body, procType=nnkProcDef)
   lambda.params = copyNimTree(def.params)
-  lambda.params[1][^2] = nterm
 
   let call = newCall(lambda)
   # forward the original parameters to the lambda:
@@ -326,9 +329,13 @@ macro outpassImpl(name, nterm: typedesc, def: untyped) =
     for j in 0..<def.params[i].len-2:
       call.add def.params[i][j]
 
-  call[1] = nnkObjConstr.newTree(nterm,
-    nnkExprColonExpr.newTree(ident"index", call[1]))
   result = assemblePass(name, nil, def, call)
+
+template nterm(x: typedesc[Metavar]): typedesc = x
+template nterm(x: typedesc): typedesc          = x.meta.entry
+
+template lang(x: typedesc[Metavar]): typedesc = x.L
+template lang(x: typedesc): typedesc          = x
 
 macro inpass*(p: untyped) =
   ## Turns a procedure definition into a pass that takes arbitrary data as
@@ -346,11 +353,7 @@ macro inpass*(p: untyped) =
     error("a return type is required, but none is provided", p.params[0])
 
   result = genAst(typ, p):
-    when typ is Metavar:
-      inpassImpl(typ.L, typ, p)
-    else:
-      # use the entry non-terminal
-      inpassImpl(typ, typ.meta.entry, p)
+    inpassImpl(lang(typ), nterm(typ), p)
 
 macro pass*(p: untyped) =
   ## Turns a procedure definition into a language->language pass, that is a
@@ -366,11 +369,7 @@ macro pass*(p: untyped) =
     error("the input parameter is missing", p.params)
 
   result = genAst(input = p.params[1][^2], target, p):
-    when target is Metavar:
-      passImpl(input, target.L, input, target, p)
-    else:
-      # use the entry non-terminal
-      passImpl(input, target, input.meta.entry, target.meta.entry, p)
+    passImpl(lang(input), lang(target), nterm(input), nterm(target), p)
 
 macro outpass*(p: untyped) =
   ## Turns a procedure definition into a language->* pass, that is, a pass
@@ -384,9 +383,5 @@ macro outpass*(p: untyped) =
   if p.params.len == 1:
     error("the input parameter is missing", p.params)
 
-  result = genAst(typ = p.params[1][^2], p):
-    when typ is Metavar:
-      outpassImpl(typ.L, typ, p)
-    else:
-      # use the entry non-terminal
-      outpassImpl(typ, typ.meta.entry, p)
+  result = genAst(input = p.params[1][^2], p):
+    outpassImpl(lang(input), nterm(input), p)
