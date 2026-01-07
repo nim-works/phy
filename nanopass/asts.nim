@@ -67,6 +67,7 @@ proc `[]`*[T](t: PackedTree[uint8], s: ChildSlice[T], i: SomeInteger): T =
     n = t.next(n)
   result = T(index: n)
 
+proc len*(s: ChildSlice): int = int(s.len)
 proc high*(s: ChildSlice): int = int(s.len) - 1
 
 # ------- Storage implementation --------
