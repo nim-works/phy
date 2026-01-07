@@ -337,6 +337,7 @@ macro inpassImpl(name, nterm: typedesc, def: untyped) =
 macro outpassImpl(name, nterm: typedesc, def: untyped) =
   let lambda = newProc(newEmptyNode(), body=def.body, procType=nnkProcDef)
   lambda.params = copyNimTree(def.params)
+  lambda.params[1][^2] = nterm
 
   let call = newCall(lambda)
   # forward the original parameters to the lambda:
@@ -344,6 +345,8 @@ macro outpassImpl(name, nterm: typedesc, def: untyped) =
     for j in 0..<def.params[i].len-2:
       call.add def.params[i][j]
 
+  call[1] = nnkObjConstr.newTree(nterm,
+    nnkExprColonExpr.newTree(ident"index", call[1]))
   result = assemblePass(name, nil, def, call)
 
 macro inpass*(p: untyped) =
@@ -402,7 +405,7 @@ macro outpass*(p: untyped) =
 
   result = genAst(typ = p.params[1][^2], p):
     when typ is Metavar:
-      outpassImpl(typ, typ, p)
+      outpassImpl(typ.L, typ, p)
     else:
       # use the entry non-terminal
-      outpassImpl(typ, typ.entry, p)
+      outpassImpl(typ, typ.meta.entry, p)
