@@ -41,6 +41,12 @@ proc finish*(ast: PackedTree[uint8], n: NodeIndex): PackedTree[uint8] =
   template dst: untyped = result.nodes
   const size = sizeof(TreeNode[uint8])
 
+  template append(start, fin: uint32) =
+    let pos = dst.len
+    let num = int(fin - start)
+    dst.setLen(pos + num)
+    copyMem(addr dst[pos], addr src[start], num * size)
+
   # search for runs of contiguous nodes. When encountering an indirection,
   # copy the run and move the source cursor to the indirection's
   # target; repeat.
@@ -55,9 +61,7 @@ proc finish*(ast: PackedTree[uint8], n: NodeIndex): PackedTree[uint8] =
         elif src[i].kind == RefTag:
           if i > prev:
             # copy everything we got so far
-            let pos = dst.len
-            dst.setLen(pos + int(i - prev))
-            copyMem(addr dst[pos], addr src[prev], int(i - prev) * size)
+            append(prev, i)
 
           stack[^1] = (i + 1, last)
           let next = src[i].val
@@ -68,8 +72,6 @@ proc finish*(ast: PackedTree[uint8], n: NodeIndex): PackedTree[uint8] =
 
       if i > prev:
         # copy the rest
-        let pos = dst.len
-        dst.setLen(pos + int(i - prev))
-        copyMem(addr dst[pos], addr src[prev], int(i - prev) * size)
+        append(prev, i)
 
       stack.shrink(stack.len - 1)
