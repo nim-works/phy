@@ -1,7 +1,5 @@
 ## Implements the macros for converting between ASTs and S-expressions.
 
-# TODO: implement a macro for generating the inverse of `renderer` (i.e.,
-#       S-expr to AST translation)
 # TODO: instead of assembling a S-expression directly, the renderer should
 #       emit a stream of S-expression tokens (ideally as an iterator, but's
 #       that not really possible today, at least in an efficient manner)
