@@ -534,7 +534,7 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
             pos # the source is already a slice (bound to an identifier)
           else:
             quote do:
-              slice[`name`.`mvar`](`pos`[0], uint32(`pos`[1]))
+              slice[`name`.`mvar`](addr `ast`, `pos`[0], uint32(`pos`[1]))
         else:
           unreachable()
 

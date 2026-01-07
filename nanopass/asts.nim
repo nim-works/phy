@@ -33,7 +33,9 @@ type
       ## leaked implementation detail, don't use
 
   ChildSlice*[T: Metavar or Value, Cursor] = object
-    ## A lightweight reference to a slice of contiguous children of a tree.
+    ## A lightweight reference to a sequence of sibling nodes. The reference
+    ## must not outlive the spawned-from tree.
+    tree: ptr PackedTree[uint8]
     start: Cursor
     len: uint32
 
@@ -52,21 +54,32 @@ template isAtom*(x: uint8): bool =
 
 # ----- slice implementation -----
 
-proc slice*[T, C](start: C, len: uint32): ChildSlice[T, C] =
-  ChildSlice[T, C](start: start, len: len)
+proc slice*[T, C](tree: ptr PackedTree[uint8], start: C, len: uint32
+                 ): ChildSlice[T, C] =
+  ## Creates a reference to `len` sibling nodes starting at `start`.
+  ChildSlice[T, C](tree: tree, start: start, len: len)
 
-iterator items*[T, C](t: PackedTree[uint8], s: ChildSlice[T, C]): T =
+template load[T, C](tree: PackedTree[uint8], c: C): T =
+  mixin get, pos
+  when T is Metavar: T(index: get(tree, c))
+  else:              T(index: tree[pos(c)].val)
+
+iterator items*[T, C](s: ChildSlice[T, C]): T =
   mixin advance
   var c = s.start
   for _ in 0..<s.len:
-    when T is Metavar:
-      yield T(index: get(t, c))
-    else:
-      yield T(index: t[pos(c)].val)
-    advance(t, c)
+    yield load[T](s.tree[], c)
+    advance(s.tree[], c)
 
-proc `[]`*[T, C](t: PackedTree[uint8], s: ChildSlice[T, C], i: SomeInteger): T =
-  mixin advance, get
+iterator pairs*[T, C](s: ChildSlice[T, C]): (int, T) =
+  mixin advance
+  var c = s.start
+  for i in 0..<s.len:
+    yield (int(i), load[T](s.tree[], c))
+    advance(s.tree[], c)
+
+proc `[]`*[T, C](s: ChildSlice[T, C], i: SomeInteger): T =
+  mixin advance
 
   when compileOption("boundchecks"):
     when i is SomeSignedInt:
@@ -78,12 +91,9 @@ proc `[]`*[T, C](t: PackedTree[uint8], s: ChildSlice[T, C], i: SomeInteger): T =
 
   var n = s.start
   for _ in 0..<i:
-    advance(t, n)
+    advance(s.tree[], n)
 
-  when T is Metavar:
-    result = T(index: get(t, n))
-  else:
-    result = T(index: t[n].val)
+  result = load[T](s.tree[], n)
 
 proc len*(s: ChildSlice): int = int(s.len)
 proc high*(s: ChildSlice): int = int(s.len) - 1

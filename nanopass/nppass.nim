@@ -185,7 +185,6 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
       template dst: untyped {.used.} = `dst`
 
   if hasIn:
-    let inj = ident"[]"
     body.add quote do:
       template match[N](sel: Metavar[src, N], branches: varargs[untyped]): untyped {.used.} =
         match[src, N](`input`.tree, Cursor(sel.index), sel, branches)
@@ -195,16 +194,12 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
       template slice(T: typedesc[asts.Value[auto]]): typedesc {.used.} =
         ChildSlice[T, Cursor]
 
-      template `inj`(x: ChildSlice[auto, Cursor], i: SomeInteger): untyped {.used.} =
-        `input`.tree[x, i]
-
       template val[T](v: nanopass.Value[T]): T {.used.} =
         # TODO: return a `lent T` where ``unpack`` does too (this is tricky...)
         # XXX: consider renaming this template to `get`
         unpack(`input`.storage[], v.index, typeof(T))
 
   if hasOut:
-    let inj = ident"[]"
     let embed = bindSym"embed"
     body.add quote do:
       template terminal(x: untyped): untyped {.used.} =
@@ -215,20 +210,6 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
         match[dst, N](`output`.tree, IndCursor(sel.index), sel, branches)
       template slice[N](T: typedesc[Metavar[dst, N]]): typedesc {.used.} =
         ChildSlice[T, IndCursor]
-
-      template `inj`(x: ChildSlice[auto, IndCursor], i: SomeInteger): untyped {.used.} =
-        `output`.tree[x, i]
-
-      template foreach[T](s: ChildSlice[T, IndCursor], it, body: untyped) {.used.} =
-        for it in items(`output`.tree, s):
-          body
-
-      template foreach[T](s: ChildSlice[T, IndCursor], idx, it, body: untyped) {.used.} =
-        var i = -1
-        for it in items(`output`.tree, s):
-          inc i
-          let idx = i
-          body
 
   if hasIn:
     # shadow the input tree with a cursor to prevent a costly copy when
