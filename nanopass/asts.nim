@@ -53,8 +53,15 @@ iterator items*[T](t: PackedTree[uint8], s: ChildSlice[T]): T =
       yield T(index: t[c].val)
     c = t.next(c)
 
-proc `[]`*[T](t: PackedTree[uint8], s: ChildSlice[T], i: int): T =
-  assert i < int(s.len)
+proc `[]`*[T](t: PackedTree[uint8], s: ChildSlice[T], i: SomeInteger): T =
+  when compileOption("boundchecks"):
+    when i is SomeSignedInt:
+      if i < 0 or uint64(i) >= uint64(s.len):
+        raise IndexDefect.newException("index out of bounds")
+    else:
+      if uint64(i) >= uint64(s.len):
+        raise IndexDefect.newException("index out of bounds")
+
   var n = s.start
   for _ in 0..<i:
     n = t.next(n)

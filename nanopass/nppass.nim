@@ -215,7 +215,7 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
       template match(sel: Metavar, branches: varargs[untyped]): untyped {.used.} =
         match(`input`, sel, branches)
 
-      template `inj`(x: ChildSlice, i: int): untyped {.used.} =
+      template `inj`(x: ChildSlice, i: SomeInteger): untyped {.used.} =
         `input`[x, i]
 
       template val[T](v: nanopass.Value[T]): T {.used.} =
