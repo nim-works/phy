@@ -129,3 +129,56 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
   result.add body
   # the callsite takes care of fitting the index to the right type
   result.add ident"root"
+
+macro transformType*(src, dst: static LangInfo, nterm: static string,
+                     typ: static int, input, output: PackedTree[uint8],
+                     cursor: untyped): untyped =
+  ## Transforms the instance of type `typ` (may be either a terminal or non-
+  ## terminal) at `cursor` to an AST fitting the destination non-terminal
+  ## `nterm` and appends the result to `output`.
+  proc contains(lang: LangInfo, typ: LangType, search: int): bool =
+    for it in typ.sub.items:
+      result = it == search
+      if not result and not lang.types[it].terminal:
+        result = contains(lang, typ, search)
+      if result:
+        break
+
+  let dtyp = dst.map.getOrDefault(src.types[typ].name, -1)
+  if src.types[typ].terminal:
+    if dtyp == -1:
+      # target language doesn't have the terminal
+      result = makeError(
+        fmt"cannot transform '{src.types[typ].name}' to '{nterm}'",
+        cursor)
+    elif contains(dst, dst.types[dst.map[nterm]], dtyp):
+      if src.types[typ].ntag == dst.types[dtyp].ntag:
+        # copy the node as it is
+        result = quote do:
+          `output`.nodes.add `input`[pos(`cursor`)]
+          NodeIndex(`output`.nodes.high)
+      else:
+        # re-tag the node
+        let tag = dst.types[dtyp].ntag.uint8
+        result = quote do:
+          `output`.nodes.add TreeNode[uint8](
+            kind: `tag`,
+            val: `input`[get(`input`, `cursor`)].val
+          )
+          NodeIndex(`output`.nodes.high)
+    else:
+      # target non-terminal doesn't include the terminal
+      result = makeError(
+        fmt"cannot transform terminal '{src.types[typ].name}' to '{nterm}'",
+        cursor)
+  else:
+    let smvar = ident(src.types[typ].mvar)
+    # prefer a direct processor (i.e. 'a -> a') over 'a -> b'
+    let dmvar =
+      if dtyp != -1 and contains(dst, dst.types[dst.map[nterm]], dtyp):
+        ident(dst.types[dtyp].mvar)
+      else:
+        ident(dst.types[dst.map[nterm]].mvar)
+
+    result = quote do:
+      (src.`smvar`(index: get(`input`, `cursor`)) -> dst.`dmvar`).index

@@ -38,29 +38,20 @@ macro processorMatchImpl(lang: static LangInfo, src: static string,
   proc fillForm(lang: LangInfo, form: int, n, info: NimNode): NimNode =
     ## Generates a form transformer.
     let sym = bindSym"transform"
-    quote do:
+    result = quote do:
       (typeof(result))(
         index: `sym`(idef(src), idef(dst), typeof(result).N, `form`,
                      `input`, `output`, `n`))
+    copyLineInfo(result[1][1][^1], info)
 
   proc fillType(lang: LangInfo, typ: int, n, info: NimNode): NimNode =
     ## Generates a call to the type transformer for `typ`.
-    if lang.types[typ].terminal:
-      let id = lang.types[typ].ntag
-      quote do:
-        # TODO: use the tag of the destination language
-        `output`.nodes.add:
-          TreeNode[uint8](kind: uint8(`id`), val: `input`[pos(`n`)].val)
-        (typeof(result))(index: NodeIndex(`output`.nodes.high))
-    else:
-      # TODO: consider inlining the transformer if it's auto-generated.
-      #       More code to emit, but also a little less work at run-time
-      let name = ident(lang.types[typ].mvar)
-      let callee = ident"->"
-      # dispatch to the processor and convert to the expected type
-      quote do:
-        (typeof(result))(
-          index: `callee`(src.`name`(index: pos(`n`)), dst.`name`).index)
+    let sym = bindSym"transformType"
+    result = quote do:
+      (typeof(result))(
+        index: `sym`(idef(src), idef(dst), typeof(result).N, `typ`,
+                     `input`, `output`, `n`))
+    copyLineInfo(result[1][1][^1], info)
 
   let config = ExpandConfig(
     fillForm: fillForm,
