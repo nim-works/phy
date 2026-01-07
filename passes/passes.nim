@@ -13,7 +13,7 @@ import
     sexp
   ],
   nanopass/nanopass,
-  passes/literals,
+  passes/[literals, compilerdef],
   phy/[reporting, default_reporting]
 
 import passes/trees except Literals
@@ -938,31 +938,7 @@ proc genvm(x: L12): VmModule {.outpass.} =
   module(x, result)
 ]#
 
-import std/macros
-
-macro defineCompiler(name, names: untyped) =
-  ## Generates a compiler procedures, running the provided passes in
-  ## sequence. Interim implementation.
-  var prev = ident"e"
-  let body = newStmtList()
-  for it in names.items:
-    let tmp = genSym()
-    if it.kind == nnkIdent:
-      let name = it.strVal
-      body.add quote do: echo "-- ", `name`
-      body.add newLetStmt(tmp, quote do: `it`(`prev`, NodeIndex(0)))
-    else:
-      let g = it
-      g.insert 1, quote do: NodeIndex(0)
-      g.insert 1, prev
-      let name = it[0].strVal
-      body.add quote do: echo "-- ", `name`
-      body.add newLetStmt(tmp, g)
-    prev = tmp
-  result = quote do:
-    proc `name`(e: Ast[Lsrc, Literals]): auto =
-      `body`
-      result = `prev`
+# proc render(x: L4.m): SexpNode {.renderer.}
 
 # some logic for testing:
 var rep = initDefaultReporter[string]()
