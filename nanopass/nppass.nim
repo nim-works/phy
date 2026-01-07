@@ -204,12 +204,31 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
         unpack(`input`.storage[], v.index, typeof(T))
 
   if hasOut:
+    let inj = ident"[]"
     let embed = bindSym"embed"
     body.add quote do:
       template terminal(x: untyped): untyped {.used.} =
         `embed`(`output`.storage, x)
       template build(n: typedesc[Metavar], body: untyped): untyped {.used.} =
         build(`output`.tree, n, body)
+      template match[N](sel: Metavar[dst, N], branches: varargs[untyped]): untyped {.used.} =
+        match[dst, N](`output`.tree, IndCursor(sel.index), sel, branches)
+      template slice[N](T: typedesc[Metavar[dst, N]]): typedesc {.used.} =
+        ChildSlice[T, IndCursor]
+
+      template `inj`(x: ChildSlice[auto, IndCursor], i: SomeInteger): untyped {.used.} =
+        `output`.tree[x, i]
+
+      template foreach[T](s: ChildSlice[T, IndCursor], it, body: untyped) {.used.} =
+        for it in items(`output`.tree, s):
+          body
+
+      template foreach[T](s: ChildSlice[T, IndCursor], idx, it, body: untyped) {.used.} =
+        var i = -1
+        for it in items(`output`.tree, s):
+          inc i
+          let idx = i
+          body
 
   if hasIn:
     # shadow the input tree with a cursor to prevent a costly copy when
