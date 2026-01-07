@@ -24,7 +24,7 @@ macro transformOutImpl(lang: static LangDef, name, def: untyped) =
   def.body.insert 0, quote do:
     # inject a build overload that implicitly uses the output language
     template build(body: untyped): untyped {.used.} =
-      build(`to`, `ret`, body)
+      build(`to`.tree, `ret`, body)
 
   result = def
 
@@ -32,8 +32,10 @@ macro processorMatchImpl(lang: static LangInfo, src: static string,
                          sel: untyped, rules: varargs[untyped]): untyped =
   ## Implements the transformation/expansion of a language->language
   ## processor's trailing case statement/expression.
+  let input  = newDotExpr(ident"in.ast", ident"tree")
+  let output = newDotExpr(ident"out.ast", ident"tree")
   let id = lang.map[src]
-  var (branches, used) = matchImpl(lang, id, ident"in.ast", sel, rules)
+  var (branches, used) = matchImpl(lang, id, input, sel, rules)
 
   template nt: untyped = lang.types[id]
   let sym = bindSym"transform"
@@ -45,7 +47,7 @@ macro processorMatchImpl(lang: static LangInfo, src: static string,
         newIntLitNode(id),
         (quote do:
           (typeof(result))(
-            index: `sym`(idef(src), idef(dst), typeof(result).N, `it`, `sel`))))
+            index: `sym`(idef(src), idef(dst), typeof(result).N, `it`, `input`, `output`, `sel`))))
 
   # auto-generate the branches for missing production terminals and
   # non-terminals:
@@ -53,15 +55,13 @@ macro processorMatchImpl(lang: static LangInfo, src: static string,
     if lang.types[it].terminal:
       let id = lang.types[it].ntag
       if id notin used:
-        let to = ident"out.ast"
-        let input = ident"in.ast"
         branches.add nnkOfBranch.newTree(
           newIntLitNode(id),
           (quote do:
             # TODO: use the tag of the destination language
-            `to`.nodes.add:
+            `output`.nodes.add:
               TreeNode[uint8](kind: uint8(`id`), val: `input`[`sel`].val)
-            (typeof(result))(index: NodeIndex(`to`.nodes.high))))
+            (typeof(result))(index: NodeIndex(`output`.nodes.high))))
     else:
       # if the first form's tag is used, so is the non-terminal itself
       if lang.forms[lang.types[it].forms[0]].ntag notin used:
@@ -78,7 +78,6 @@ macro processorMatchImpl(lang: static LangInfo, src: static string,
             index: `callee`(src.`name`(index: `sel`), dst.`name`).index)
         branches.add branch
 
-  let input = ident"in.ast"
   result = nnkCaseStmt.newTree(quote do: `input`[`sel`].kind)
   result.add branches
   if branches[^1].kind != nnkElse:
@@ -155,7 +154,7 @@ macro transformInOutImpl(lang: static LangDef, name, def: untyped) =
     # inject a build macro overload that implicitly uses the
     # target non-terminal
     template build(body: untyped): untyped {.used.} =
-      build(`to`, `ret`, body)
+      build(`to`.tree, `ret`, body)
 
   result = def
 
@@ -176,7 +175,6 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
   ## proc definition, `call` the call to the pass' implementation.
   let input = ident"in.ast"
   let output = ident"out.ast"
-  let storage = ident"io.storage"
   let storageTy = ident"Literals" # TODO: don't hardcode
   let hasIn = src != nil
   let hasOut = dst != nil
@@ -213,46 +211,44 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
     let inj = ident"[]"
     body.add quote do:
       template match(sel: Metavar, branches: varargs[untyped]): untyped {.used.} =
-        match(`input`, sel, branches)
+        match(`input`.tree, sel, branches)
 
       template `inj`(x: ChildSlice, i: SomeInteger): untyped {.used.} =
-        `input`[x, i]
+        `input`.tree[x, i]
 
       template val[T](v: nanopass.Value[T]): T {.used.} =
         # TODO: return a `lent T` where ``unpack`` does too (this is tricky...)
         # XXX: consider renaming this template to `get`
-        unpack(`storage`[], v.index, typeof(T))
+        unpack(`input`.storage[], v.index, typeof(T))
 
   if hasOut:
     let embed = bindSym"embed"
     body.add quote do:
       template terminal(x: untyped): untyped {.used.} =
-        `embed`(`storage`, x)
+        `embed`(`output`.storage, x)
       template build(n: typedesc[Metavar], body: untyped): untyped {.used.} =
-        build(`output`, n, body)
-
-  if hasIn:
-    # re-use the data storage object from the input
-    body.add quote do:
-      let `storage` = `input`.storage
-  else:
-    body.add quote do:
-      let `storage` = new(`storageTy`)
+        build(`output`.tree, n, body)
 
   if hasIn:
     # shadow the input tree with a cursor to prevent a costly copy when
     # it's captured by the closure
     body.add quote do:
-      let `input` {.cursor.} = `input`.tree
+      let `input` {.cursor.} = `input`
   if hasOut:
     body.add quote do:
-      var `output`: Ast[dst, `storageTy`].tree
-      let index = `call`.index
+      var `output` = Ast[dst, `storageTy`]()
+    if hasIn:
+      # re-use the storage from the input
+      body.add quote do:
+        `output`.storage = `input`.storage
+    else:
+      body.add quote do:
+        `output`.storage = new(`storageTy`)
+    body.add quote do:
+      let pos = `call`
       # turn the AST with indirections into one without
-      result = Ast[dst, `storageTy`](
-        tree: finish(`output`, index),
-        storage: `storage`,
-      )
+      `output`.tree = finish(`output`.tree, pos.index)
+      result = move `output`
   else:
     body.add quote do:
       result = `call`

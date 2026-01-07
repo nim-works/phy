@@ -26,7 +26,8 @@ proc append(to: var PackedTree[uint8], i: var int, x: Metavar) =
   inc i
 
 macro transform*(src, dst: static LangInfo, nterm: static string,
-                 form: static int, n: untyped): untyped =
+                 form: static int, input, output: PackedTree[uint8],
+                 n: untyped): untyped =
   ## Generates the transformation from the given source language form
   ## to a compatible target language production of the non-terminal with
   ## name `nterm`.
@@ -67,18 +68,16 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
   #       parameter, which would eliminate unnecessary tree seeking when
   #       there's many calls to fully auto-generated non-terminal processors
 
-  let inAst = ident"in.ast"
-  let to = ident"out.ast"
   let id = dst.forms[target].ntag.uint8
   result = newStmtList()
   # add the root node:
   let body = quote do:
-    var tmp {.used.} = `inAst`.child(`n`, 0)
-    let root = `to`.nodes.len.NodeIndex
-    var i = `to`.nodes.len
-    # the node sequence needs to be contiguous, so it's allocated upfront
-    `to`.nodes.setLen(i + `inAst`.len(`n`) + 1)
-    `to`.nodes[i] = TreeNode[uint8](kind: `id`, val: `inAst`[`n`].val)
+    var tmp {.used.} = `input`.child(`n`, 0)
+    let root = `output`.nodes.len.NodeIndex
+    var i = `output`.nodes.len
+    # the node sequence needs output be contiguous, so it's allocated upfront
+    `output`.nodes.setLen(i + `input`.len(`n`) + 1)
+    `output`.nodes[i] = TreeNode[uint8](kind: `id`, val: `input`[`n`].val)
     inc i
 
   # call the transformers and emit the nodes in one go:
@@ -96,13 +95,13 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
         if src.types[a.typ].ntag == dst.types[b.typ].ntag:
           # just copy the node
           quote do:
-            `to`.nodes[i] = `inAst`[tmp]
+            `output`.nodes[i] = `input`[tmp]
             inc i
         else:
           # repack with the new tag
           let tag = dst.types[b.typ].ntag
           quote do:
-            `to`.nodes[i] = TreeNode[uint8](kind: `tag`, val: `inAst`[tmp].val)
+            `output`.nodes[i] = TreeNode[uint8](kind: `tag`, val: `input`[tmp].val)
             inc i
       else:
         let append = bindSym"append"
@@ -110,19 +109,19 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
         let s = newStrLitNode(src.types[a.typ].name)
         let d = newStrLitNode(dst.types[b.typ].name)
         quote do:
-          `append`(`to`, i,
+          `append`(`output`, i,
             `op`(Metavar[src, `s`](index: tmp), Metavar[dst, `d`]))
 
     if a.repeat:
       let bias = src.forms[form].elems.len - 1
       body.add quote do:
-        for _ in 0..<(`inAst`.len(`n`) - `bias`):
+        for _ in 0..<(`input`.len(`n`) - `bias`):
           `call`
-          tmp = `inAst`.next(tmp)
+          tmp = `input`.next(tmp)
     else:
       body.add quote do:
         `call`
-        tmp = `inAst`.next(tmp)
+        tmp = `input`.next(tmp)
 
   result.add body
   # the callsite takes care of fitting the index to the right type
