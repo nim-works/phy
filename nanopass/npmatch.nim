@@ -4,247 +4,822 @@ import std/[macros, intsets, strformat, tables]
 import passes/trees
 import nanopass/[asts, helper, nplang]
 
-proc matchImpl*(lang: LangInfo, src: int, ast, sel, rules: NimNode
-               ): (seq[NimNode], IntSet) =
-  ## Implements the core of the `match` macro:
-  ## 1. makes sure the syntax is correct
-  ## 2. makes sure the used patterns are unique
-  ## 3. generates a sequence of transformed 'of' branches, plus a set storing
-  ##    the used forms' tags
-  var used: IntSet
-    ## covered form productions (identified by ntag)
+type
+  FillProc* = proc(lang: LangInfo, idx: int, n, info: NimNode): NimNode
+    ## Type for form or type fill callback.
+  ExpandConfig* = object
+    fillForm*: FillProc
+      ## called for filling-in the handling of forms. May be nil
+    fillType*: FillProc
+      ## called for filling-in the handling of types. May be nil
 
-  # should nested matching (e.g., ``A(x, B(y))``) be desired, `matchImpl`
-  # should be factored into two macros macros applied sequentially:
-  # 1. the first macro does type checking, producing a type form
-  # 2. the second macro translates the typed form into case/if statements
-  # combining both steps into one is simple enough when there are no nested
-  # patterns, but not otherwise
+proc defaultFillForm(lang: LangInfo, idx: int, n, info: NimNode): NimNode =
+  makeError(fmt"missing rule for '{render(lang, lang.forms[idx])}'", info)
 
-  proc parseVar(n: NimNode): (string, string) =
-    n.expectKind nnkIdent
-    let name = n.strVal
-    var e = name.high
-    # to get the name of the var, trim trailing numbers and a single underscore
-    while e >= 0 and name[e] in {'0'..'9'}:
-      dec e
+proc defaultFillType(lang: LangInfo, idx: int, n, info: NimNode): NimNode =
+  makeError(fmt"missing rule for '{lang.types[idx].name}'", info)
 
-    if e >= 0 and name[e] == '_':
-      dec e
+proc parseVar(n: NimNode): string =
+  n.expectKind nnkIdent
+  let name = n.strVal
+  var e = name.high
+  # to get the name of the var, trim trailing numbers and a single underscore
+  while e >= 0 and name[e] in {'0'..'9'}:
+    dec e
 
-    result[0] = name[0..e]
-    result[1] = name
+  if e >= 0 and name[e] == '_':
+    dec e
 
-  proc processIdentPattern(lang: LangInfo, n: NimNode): (NimNode, NimNode) =
-    n.expectKind nnkIdent
-    let (v, nameStr) = parseVar(n)
-    if v notin lang.map:
-      error(fmt"no meta-variable with name '{v}'", n)
-    let id = lang.map[v]
-    if id notin lang.types[src].sub:
-      error(fmt"'{v}' is not an immediate production of '{lang.types[src].name}'", n)
+  result = name[0..e]
 
-    var check, binds: NimNode
-    let name = ident(nameStr)
-    if lang.types[id].terminal:
-      let typ = ident(lang.types[id].name)
-      let tag = lang.types[id].ntag
-      used.incl(tag)
-      # let the compiler report an error for duplicate case labels
-      check = newIntLitNode(tag)
-      copyLineInfo(check, n)
-      binds = newLetStmt(name, quote do: Value[`typ`](index: `ast`[`sel`].val))
+proc fits(lang: LangInfo, a, b: int): bool =
+  ## Computes whether type with id `a` can appear where a type with id `b`
+  ## is expected.
+  if a == b:
+    result = true
+  elif not lang.types[b].terminal:
+    for it in lang.types[b].sub.items:
+      if fits(lang, a, it):
+        return true
+
+proc countTags(lang: LangInfo, typ: LangType): int =
+  result = typ.forms.len
+  for it in typ.sub.items:
+    if lang.types[it].terminal:
+      result += 1
     else:
-      # the pattern binds a non-terminal
-      let typ = ident(v)
-      check = nnkCurly.newTree()
-      let tags = ntags(lang, lang.types[id])
-      for tag in tags.items:
-        check.add nnkConv.newTree(ident"uint8", newIntLitNode(tag))
-      # mark the first tag as used, to signal that the non-terminal is handled
-      used.incl(tags[0])
+      result += countTags(lang, lang.types[it])
 
-      copyLineInfoForTree(check, n)
-      binds = newLetStmt(name, quote do: src.`typ`(index: `sel`))
+proc containsForm(lang: LangInfo, typ: LangType, fid: int): bool =
+  if fid in typ.forms:
+    true
+  else:
+    for it in typ.sub.items:
+      if not lang.types[it].terminal and containsForm(lang, lang.types[it], fid):
+        return true
+    false
 
-    result = (check, binds)
+proc makeTyped(e, typ, info: NimNode): NimNode =
+  typ.copyLineInfo(info) # the type tree carries the source location
+  nnkExprColonExpr.newTree(e, typ)
 
-  proc processPattern(lang: LangInfo, n: NimNode): (NimNode, NimNode) =
+proc fitTo(lang: LangInfo, typ: int, pat: NimNode): NimNode =
+  ## Fits a non-'...' typed pattern to the given type, returning either the
+  ## fitted pattern or nil.
+
+  proc canMerge(n, into: NimNode): bool =
+    assert n.kind == into.kind and n.kind == nnkCall
+    result = true
+    for i in 1..<n.len:
+      if n[i][1] != into[i][1]: # same type?
+        result = false
+        break
+
+  proc makeConv(e: NimNode, typ: int): NimNode =
+    assert e.kind == nnkExprColonExpr
+    makeTyped(nnkConv.newTree(e), newIntLitNode(typ), e[1])
+
+  case pat[1].kind
+  of nnkEmpty:
+    result = pat # stays as is; don't infer
+  of nnkNilLit:
+    # the type is inferred from the receiver
+    result = makeTyped(pat[0], newIntLitNode(typ), pat[1])
+  of nnkCurly:
+    if lang.types[typ].terminal:
+      return nil # terminals cannot host any form (they're terminal)
+
+    # filter out the forms not part of the target type and try to merge the
+    # remaining ones
+    result = nil
+    for sub in pat[0].items:
+      if containsForm(lang, lang.types[typ], sub[1][0].intVal.int):
+        if result.isNil:
+          result = makeTyped(sub[0], copyNimTree(sub[1]), sub[1])
+        elif canMerge(sub[0], result[0]):
+          result[1].add sub[1][0]
+        else:
+          result = nil # forms cannot be unified
+          break
+
+    if result != nil and countTags(lang, lang.types[typ]) != result[1].len:
+      result = makeConv(result, typ)
+  of nnkIntLit:
+    if pat[1].intVal.int == typ:
+      result = pat
+    elif fits(lang, pat[1].intVal.int, typ):
+      result = makeConv(pat, typ)
+    else:
+      result = nil
+  of nnkPar:
+    if not lang.types[typ].terminal and
+       containsForm(lang, lang.types[typ], pat[1][0].intVal.int):
+      if countTags(lang, lang.types[typ]) == 1:
+        result = pat # the type is only inhabited by the form
+      else:
+        result = makeConv(pat, typ)
+    else:
+      result = nil
+  else:
+    unreachable()
+
+proc parsePattern(lang: LangInfo, n: NimNode): NimNode =
+  ## Parses a pattern expression into its internal representation, assigning
+  ## types in the process.
+  case n.kind
+  of nnkCall:
+    if n[0].kind != nnkIdent:
+      error("the head of a form pattern must be an identifier", n[0])
+
+    # a form pattern may match multiple forms at the same time, with
+    # potentially incompatible types (when wildcard patterns are used). Only
+    # the embedder of the pattern has enough context to decide which ones to
+    # cull, so all candidates are returned
+
+    let matchAny = eqIdent(n[0], "_") or eqIdent(n[0], "any")
+
+    # 1. parse and type all elements
+    var hasListPattern = false
+    var base = nnkCall.newTree(n[0])
+    for i in 1..<n.len:
+      let elem = parsePattern(lang, n[i])
+      if elem[1].kind == nnkBracket:
+        if hasListPattern:
+          error("only a single '...' pattern is allowed per form", n[i])
+        hasListPattern = true
+      base.add elem
+
+    result = nnkCurly.newTree()
+    # 2. gather all forms fitting the pattern:
+    for idx, it in lang.forms.pairs:
+      if not matchAny and not eqIdent(n[0], it.name):
+        continue
+
+      var i = 0
+      var prod = newCall(n[0])
+      for ei in 1..<base.len:
+        if i == it.elems.len:
+          break
+
+        let e = base[ei]
+        let typ = e[1]
+        case typ.kind
+        of nnkEmpty, nnkNilLit, nnkIntLit, nnkPar, nnkCurly:
+          # can receive all single items, but not lists
+          if it.elems[i].repeat:
+            break
+          else:
+            let got = fitTo(lang, it.elems[i].typ, e)
+            if got.isNil:
+              break
+            else:
+              prod.add got
+              inc i
+        of nnkBracket:
+          var j = i
+          let fin = it.elems.len - (base.len - ei) + 1
+          var real = typ[0] ## inferred type
+          case typ[0].kind
+          of nnkEmpty:
+            # special rule: a wildcard '...' pattern can match elements of
+            # differing type
+            j = fin
+          of nnkNilLit:
+            # inferred type. Pattern only matches sequences of elements of
+            # the same type (no subtyping)
+            while j < fin and it.elems[j].typ == it.elems[i].typ:
+              inc j
+            real = newIntLitNode(it.elems[i].typ)
+          of nnkIntLit:
+            while j < fin and it.elems[j].typ == typ[0].intVal:
+              inc j
+          else:
+            unreachable()
+
+          if j == i:
+            break # a repetition must "consume" at least one source element
+          i = j
+
+          if real == typ[0]:
+            prod.add e
+          else:
+            prod.add makeTyped(e[0], nnkBracket.newTree(real), typ)
+        else:
+          unreachable()
+
+      if prod.len == n.len and i == it.elems.len:
+        result.add makeTyped(prod, nnkPar.newTree(newIntLitNode(idx)), n)
+
+    if result.len == 0:
+      error("no form matches the given pattern", n)
+    elif result.len == 1:
+      result = result[0]
+    else:
+      result = makeTyped(result, nnkCurly.newTree(), n)
+  of nnkBracket:
+    if n.len != 1:
+      error("invalid syntax", n)
+
+    case n[0].kind
+    of nnkIdent:
+      let id = ident(parseVar(n[0]))
+      # due to coalescing of match expressions, assigning an internal symbol
+      # to the temporary binding is not yet possible
+      let call = nnkInfix.newTree(ident"->", newEmptyNode(), quote do: dst.`id`)
+      copyLineInfo(call, n)
+      # the matched type needs to be inferred
+      result = makeTyped(
+        nnkTupleConstr.newTree(nnkExprEqExpr.newTree(n[0], call)),
+        newNimNode(nnkNilLit), n)
+    of nnkInfix:
+      if n[0].len != 3 or not eqIdent(n[0][0], "->"):
+        error("expected '->' infix call", n[0])
+      let src = parseVar(n[0][1])
+      if src notin lang.map:
+        error(fmt"no meta-variable with name '{src}' exists", n[0][1])
+
+      let id = ident(parseVar(n[0][2]))
+      let call = nnkInfix.newTree(ident"->", n[0][1], quote do: dst.`id`)
+      copyLineInfo(call, n)
+      # bind the matched value to the first identifier and the result of
+      # the application to the second identifier
+      result = makeTyped(
+        nnkTupleConstr.newTree(
+          n[0][1],
+          nnkExprEqExpr.newTree(n[0][2], call)),
+        newIntLitNode(lang.map[src]), n)
+    else:
+      error("expected identifier or '->' infix call'", n[0])
+  of nnkPrefix:
+    if not n[0].eqIdent("..."):
+      error("only `...` is allowed as a prefix", n[0])
+
+    let tmp = parsePattern(lang, n[1])
+    if tmp[1].kind notin {nnkIntLit, nnkEmpty, nnkNilLit}:
+      error("only '...<meta-var>' and '...any' are allowed", n[1])
+    # the '...' prefix is stripped from the expression
+    result = makeTyped(tmp[0], nnkBracket.newTree(tmp[1]), n)
+  of nnkIdent:
+    if n.eqIdent("_"):
+      # placeholder, type may be inferred
+      result = makeTyped(n, newEmptyNode(), n)
+    elif n.eqIdent("any"):
+      # an alias for '_'
+      result = makeTyped(ident"_", newEmptyNode(), n)
+    else:
+      # must be a meta-variable
+      let typ = parseVar(n)
+      if typ notin lang.map:
+        error("no meta-variable with the give name exists", n)
+
+      result = makeTyped(n, newIntLitNode(lang.map[typ]), n)
+  else:
+    error("syntax error", n)
+
+proc patternToString(n: NimNode; indent = 0): string =
+  case n.kind
+  of nnkCurly:
+    result = "{"
+    result.add repr(n[0])
+    for i in 1..<n.len:
+      result.add "\n"
+      for _ in 0..<indent+1:
+        result.add "  "
+      result.add patternToString(n[i], indent + 1)
+    result.add "\n"
+    for _ in 0..<indent:
+      result.add "  "
+    result.add "}"
+  of nnkCall:
+    result = repr(n[0])
+    result.add "("
+    for i in 1..<n.len-1:
+      if i > 1:
+        result.add ", "
+      result.add repr(n[i])
+    if n.len > 2:
+      result.add ", "
+    result.add patternToString(n[^1], indent)
+    result.add ")"
+  of nnkPar:
+    result = "^"
+    result.add repr(n[0])
+    result.add " "
+    result.add patternToString(n[1], indent)
+  of nnkEmpty:
+    result = "."
+  of nnkStmtList:
+    result = "<cont>"
+  of nnkTupleConstr:
+    result = "("
+    result.add repr(n[0])
+    result.add ", <cont>)"
+  else:
+    result = "<error:" & $n.kind & ">"
+
+proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
+                      config: ExpandConfig): NimNode =
+  ## Generates the NimSkull code for a match expression `expr`. `els` is either
+  ## an `nnkElse` tree used for handling the rest of match, or nil, in which
+  ## case how to handle the rest of a match is dictated by `config`.
+  let cursor = genSym("cursor")
+  var stack: seq[NimNode] ## stack of `len` symbols
+  var top: NimNode
+    ## the topmost non-union match expression enclosing the currently
+    ## processed one
+  var hasUsedElse = false
+
+  proc aux(lang: LangInfo, e, to: NimNode): NimNode =
+    ## Does the actual work.
+    proc tm(lang: LangInfo, e, to: NimNode): NimNode =
+      if e[1].kind != nnkEmpty:
+        # commit the current cursor to a local with the given name
+        if e[0].kind == nnkBracket:
+          let bias = e[2]
+          let len = stack[^1] # can only be non-empty
+          to.add newLetStmt(e[1], quote do: (`cursor`, `len` - `bias`))
+        else:
+          to.add newLetStmt(e[1], cursor)
+
+      # only emit a cursor movement when the moved cursor is actually observed
+      if e[^1].kind in {nnkCall, nnkCurly, nnkPar}:
+        case e[0].kind
+        of nnkPar:
+          let nlen = genSym"len"
+          to.add quote do:
+            let `nlen` = `ast`[`cursor`].val
+          to.add quote do:
+            `cursor` = `ast`.child(`cursor`, 0)
+
+          stack.add nlen
+        of nnkEmpty, nnkIntLit:
+          to.add quote do:
+            `cursor` = `ast`.next(`cursor`)
+        of nnkBracket:
+          let bias = e[2]
+          let len = stack[^1] # can only be non-empty
+          to.add quote do:
+            for _ in 0 ..< (`len` - `bias`):
+              `cursor` = `ast`.next(`cursor`)
+        else:
+          unreachable(e[0].kind)
+
+      result = aux(lang, e[^1], to)
+
+    case e.kind
+    of nnkCall:
+      result = tm(lang, e, to)
+    of nnkPar:
+      # move the current cursor to the end of the subtree and pop it from
+      # the stack
+      discard stack.pop()
+      result = aux(lang, e[1], to)
+    of nnkCurly:
+      # a dispatcher
+      proc genOfBranch(lang: LangInfo, typ: LangType, used: var IntSet,
+                       allowEmpty=true): NimNode =
+        result = nnkOfBranch.newTree()
+        if typ.terminal:
+          if not containsOrIncl(used, typ.ntag) or not allowEmpty:
+            result.add newIntLitNode(typ.ntag)
+        else:
+          let ntags = ntags(lang, typ)
+          for tag in ntags(lang, typ):
+            if not containsOrIncl(used, tag):
+              result.add newIntLitNode(tag)
+
+          if not allowEmpty and result.len == 0:
+            # any node tag part of the non-terminal would do
+            result.add newIntLitNode(ntags[0])
+
+      let stackLen = stack.len
+      let typ = e[0].intVal.int
+      var caseStmt = nnkCaseStmt.newTree(quote do: `ast`[`cursor`].kind)
+      var used = initIntSet()
+      for i in 1..<e.len:
+        let it = e[i]
+        var handler: NimNode
+        case it[0].kind
+        of nnkPar:
+          handler = nnkOfBranch.newTree()
+          for x in it[0].items:
+            handler.add newIntLitNode(lang.forms[x.intVal].ntag)
+            used.incl(lang.forms[x.intVal].ntag)
+        of nnkEmpty:
+          # matches the rest
+          handler = genOfBranch(lang, lang.types[typ], used)
+
+          if handler.len == 0:
+            # turn into an else branch, but also add an extra else branch
+            # before it, so that the compiler emits a helpful warning about
+            # the branch being unreachable
+            caseStmt.add nnkElse.newTree(newCall(bindSym"unreachable"))
+            handler = nnkElse.newTree()
+        of nnkIntLit:
+          # always add a branch, even if the tag already appeared. The
+          # NimSkull compiler will report an error for the duplicate label
+          handler = genOfBranch(lang, lang.types[it[0].intVal], used, false)
+        of nnkBracket:
+          handler = genOfBranch(lang, lang.types[it[0][0].intVal], used, false)
+        else:
+          unreachable()
+
+        if stack.len == 0:
+          top = it
+
+        handler.add newStmtList()
+        discard tm(lang, it, handler[^1])
+        caseStmt.add handler
+        # pop all leftover len entries
+        stack.setLen(stackLen)
+
+      let info = e[0]
+      # handle the uncovered values, if any
+      if els != nil:
+        let b = genOfBranch(lang, lang.types[typ], used)
+        if b.len > 0: # are there any uncovered values?
+          caseStmt.add els
+          hasUsedElse = true
+
+        if stack.len == 0 and not hasUsedElse:
+          # the 'else' rule was never used. Add it to the top-level case
+          # statement such that a warning will be emitted
+          if caseStmt[^1].kind != nnkElse:
+            caseStmt.add nnkElse.newTree(newCall(bindSym"unreachable"))
+          caseStmt.add els
+      elif stack.len > 0 and config.fillForm != nil:
+        # uncovered values in nested positions are handled by processing
+        # the whole production
+        assert top.kind == nnkCall and top[0].kind == nnkPar
+        var allCovered = true
+        for tag in ntags(lang, lang.types[typ]):
+          if tag notin used:
+            allCovered = false
+            break
+
+        if allCovered:
+          discard "nothing to do"
+        elif top[0].len == 1:
+          # simple case. The form ID is known statically
+          caseStmt.add nnkElse.newTree(
+            config.fillForm(lang, top[0][0].intVal.int, sel, info))
+        else:
+          # complex case. The form ID is only known at run-time; dispatch over
+          # the entry-level node's kind for detecting the form
+          let inner = nnkCaseStmt.newTree(
+            quote do: `ast`.nodes[`sel`].kind)
+          for it in top[0].items:
+            inner.add nnkOfBranch.newTree(it,
+              config.fillForm(lang, it.intVal.int, sel, info))
+          inner.add nnkElse.newTree(newCall(bindSym"unreachable"))
+          caseStmt.add nnkElse.newTree(inner)
+      else:
+        var
+          fillForm = config.fillForm
+          fillType = config.fillType
+
+        # always report an error for nested productions when form-filling
+        # is unavailable
+        if fillForm.isNil or stack.len > 0:
+          fillForm = defaultFillForm
+        if fillType.isNil or stack.len > 0:
+          fillType = defaultFillType
+
+        for it in lang.types[typ].forms.items:
+          if lang.forms[it].ntag notin used:
+            caseStmt.add nnkOfBranch.newTree(
+              newIntLitNode(lang.forms[it].ntag),
+              fillForm(lang, it, cursor, info))
+
+        # fill in handling for not fully handled subtypes
+        for it in lang.types[typ].sub.items:
+          let br = genOfBranch(lang, lang.types[it], used)
+          if br.len > 0:
+            br.add fillType(lang, it, cursor, info)
+            caseStmt.add br
+
+      if caseStmt[^1].kind != nnkElse:
+        # all allowed node tags are handled, the rest are known to
+        # be impossible
+        caseStmt.add nnkElse.newTree(newCall(bindSym"unreachable"))
+
+      to.add caseStmt
+      # nothing may follow a dispatcher
+      result = nil
+    of nnkTupleConstr:
+      # in-place transform the identdefs into proper ones
+
+      proc transformSource(lang: LangInfo, pos, typ, orig: NimNode): NimNode =
+        case typ.kind
+        of nnkIntLit:
+          # a single item binding
+          let mvar = ident(lang.types[typ.intVal].mvar)
+          if pos.kind == nnkIdent:
+            pos # the source is a bound identifier already
+          else:
+            if lang.types[typ.intVal].terminal:
+              quote do: `name`.`mvar`(index: `ast`[`pos`].val)
+            else:
+              quote do: `name`.`mvar`(index: `pos`)
+        of nnkBracket:
+          # a list binding
+          let mvar = ident(lang.types[typ[0].intVal].mvar)
+          if pos.kind == nnkIdent:
+            pos # the source is already a slice (bound to an identifier)
+          else:
+            quote do:
+              slice[`name`.`mvar`](`pos`[0], uint32(`pos`[1]))
+        else:
+          unreachable()
+
+      for it in e[0].items:
+        case it[2].kind
+        of nnkSym:
+          it[2] = transformSource(lang, it[2], it[1], it[2])
+        else:
+          it[2][1] = transformSource(lang, it[2][1], it[1], it[2])
+        it[1] = newEmptyNode()
+
+      to.add e[0]
+      to.add e[1]
+      result = nil
+    of nnkStmtList:
+      to.add e
+      result = nil # statement lists are always trailing
+    else:
+      unreachable(e.kind)
+
+  result = nnkStmtList.newTree()
+  result.add newVarStmt(cursor, sel)
+  discard aux(lang, e, result)
+
+proc patternToMatch(n: NimNode): tuple[head, tail: NimNode] =
+  ## Translates a pattern into a match expression. A match expression has the
+  ## following structure:
+  ##
+  ## match ::= (nkCall (nkBracket <typ>) <name> <int> <cont>)
+  ##        |  (nkCall (nkPar <int>+) <name> <cont>)
+  ##        |  (nkCall <typ> <name> <cont>)
+  ## name  ::= <int> | <empty>
+  ## cont  ::= <match>
+  ##        |  (nkPar <cont>)                         # leave sub match
+  ##        |  (nkCurly <int> <match>+)               # union matching
+  ##        |  (nkTupleConstr (nkLetSection ...) ...) # binding
+  ##        |  (nkStmtList ...)                       # custom tail logic
+  var binds: NimNode
+  proc addBinding(got: NimNode) =
+    if binds.isNil:
+      binds = nnkLetSection.newTree()
+    binds.add got
+
+  let empty = newEmptyNode() # save some allocations
+
+  proc aux(n: NimNode, depth: int): tuple[head, tail: NimNode, depth: int] =
+    let e = n[0]
+    let typ = n[1]
+    case typ.kind
+    of nnkPar:
+      result.head = nnkCall.newTree(typ, empty)
+      result.tail = result.head
+      assert e.kind == nnkCall
+      var depth = depth + 1
+      for i in 1..<e.len:
+        let (head, tail, d) = aux(e[i], depth)
+        result.tail.add head
+        result.tail = tail
+        depth = d
+        if e[i][1].kind == nnkBracket:
+          # append the length bias to the list matcher
+          result.tail.add newIntLitNode(e.len - 2)
+      result.tail.add newTree(nnkPar)
+      result.tail = result.tail[^1]
+      result.depth = depth
+    of nnkBracket:
+      result.head = nnkCall.newTree(typ, empty)
+      # the bias is computed and attached by the enclosing processing
+      result.tail = result.head
+      result.depth = depth + 1
+    of nnkEmpty:
+      result.head = nnkCall.newTree(typ, empty)
+      result.tail = result.head
+      result.depth = depth + 1
+    of nnkIntLit:
+      if e.kind == nnkConv:
+        # turn into a union deconstruction
+        result = aux(e[0], depth)
+        result.head = nnkCurly.newTree(typ, result.head)
+      else:
+        result.head = nnkCall.newTree(typ, empty)
+        result.tail = result.head
+        result.depth = depth + 1
+    else:
+      unreachable(typ.kind)
+
+    # extract the bindings:
+    case e.kind
+    of nnkIdent:
+      if not eqIdent(e, "_"):
+        addBinding(newIdentDefs(e, typ, newIntLitNode(depth)))
+    of nnkTupleConstr:
+      for it in e.items:
+        if it.kind == nnkIdent:
+          addBinding(newIdentDefs(it, typ, newIntLitNode(depth)))
+        else:
+          if it[1][1].kind == nnkEmpty:
+            it[1][1] = newIntLitNode(depth)
+          addBinding(newIdentDefs(it[0], typ, it[1]))
+    else:
+      discard "not something with any bindings"
+
+  (result.head, result.tail) = aux(n, 0)
+  if binds != nil:
+    result.tail.add nnkTupleConstr.newTree(binds)
+    result.tail = result.tail[^1]
+
+proc mergeInto(a, b: NimNode): NimNode =
+  ## Merges the match expression `a` into the match expression `b`, using a
+  ## simple top-down zip-like algorithm.
+  proc canMerge(a, b: NimNode): bool =
+    if a[0] == b[0] and a[0].kind != nnkBracket: # same head?
+      true
+    else:
+      false
+
+  case b.kind
+  of nnkCurly:
+    # merge the source matchers into the target matchers
+    if a.kind == nnkCall:
+      # `a` is a matcher tha covers the full set of values for the type; just
+      # append it at the end
+      b.add a
+    else:
+      assert a.kind == nnkCurly
+      for i in 1..<a.len:
+        block search:
+          for j in 1..<b.len:
+            if canMerge(a[i], b[^1]):
+              b[^1] = mergeInto(a[i], b[^1])
+              break search
+          # cannot merge into any existing matcher
+          b.add a[i]
+    b
+  of nnkNilLit:
+    a
+  of nnkCall:
+    # can only mean that the heads are the same
+    b[^1] = mergeInto(a[^1], b[^1])
+    b
+  else:
+    unreachable()
+
+proc assignSymbols(n: NimNode) =
+  ## Turns the relative addressing for bindings into absolute addressing by
+  ## giving a name (i.e., gensym) to every match expression whose result is
+  ## used in a binding.
+  var map: Table[int, NimNode] ## depth -> list of identDefs
+  proc step(n: NimNode, depth: int) =
     case n.kind
     of nnkCall:
-      n[0].expectKind nnkIdent
-      # parse the pattern:
-      var elems = newSeq[tuple[src, dst, name: string]](n.len - 1)
+      step(n[^1], depth + 1)
+      var defs: NimNode
+      if pop(map, depth, defs):
+        let s = genSym"pos"
+        n[1] = s
+        for it in defs.items:
+          if it[^1].kind in nnkCallKinds:
+            it[^1][1] = s
+          else:
+            it[^1] = s
+    of nnkCurly:
       for i in 1..<n.len:
-        case n[i].kind
-        of nnkIdent:
-          let (v, name) = parseVar(n[i])
-          if v notin lang.map or lang.types[lang.map[v]].name == v:
-            error(fmt"no metavar named {v}", n[i])
-          elems[i - 1] = (v, "", name)
-        of nnkBracket:
-          n[i].expectLen 1
-          let (v, name) = parseVar(n[i][0])
-          # cannot check whether the metavar exists. If it doesn't, the
-          # compiler will complain with a not-so-helpful error
-          elems[i - 1] = ("", v, name)
-        else:
-          error("unexpected syntax", n)
-
-      # TODO: enforce during language constructions that there are no two
-      #       productions that use the same ntag
-      var idx = -1
-      block search:
-        # find a production that matches the pattern:
-        for it in lang.types[src].forms.items:
-          block form:
-            if lang.forms[it].elems.len == elems.len and
-               lang.forms[it].name == n[0].strVal:
-              for j in 0..<elems.len:
-                if elems[j].src != "" and
-                   lang.forms[it].elems[j].typ != lang.map[elems[j].src]:
-                  # different types, no match
-                  break form
-                # the `[...]` syntax (i.e., no source type) matches everything
-              # found a matching form
-              idx = it
-              break search
-        error(fmt"no production of '{src}' matches the pattern", n)
-
-      let tag = lang.forms[idx].ntag
-      let check = newIntLitNode(tag)
-      copyLineInfo(check, n)
-
-      # let the compiler report a duplicate case label error
-      used.incl(tag)
-
-      if lang.forms[idx].elems.len == 0:
-        # form with no elements; nothing to bind
-        return (check, newStmtList())
-
-      var binds = newStmtList()
-      var cursor = genSym("c")
-      binds.add newVarStmt(cursor, quote do: `ast`.child(`sel`, 0))
-
-      # create the check and the bindings
-      for i, it in lang.forms[idx].elems.pairs:
-        let p = n[i + 1] ## the pattern expression
-        let origin = newDotExpr(ident"src", ident(lang.types[it.typ].mvar))
-        let target = newDotExpr(ident"dst"):
-          if elems[i].dst.len > 0: ident(elems[i].dst)
-          else:                    ident(lang.types[it.typ].mvar)
-        if it.repeat:
-          let bias = lang.forms[idx].elems.len - 1
-          if p.kind == nnkIdent:
-            # just bind a child slice to the identifier
-            binds.add newLetStmt(p, quote do:
-              slice[`origin`](`cursor`, uint32(`ast`.len(`sel`) - `bias`)))
-            binds.add quote do:
-              for _ in 0..<`ast`.len(`sel`)-`bias`:
-                `cursor` = `ast`.next(`cursor`)
+        step(n[i], depth)
+    of nnkPar:
+      step(n[^1], depth)
+    of nnkTupleConstr:
+      # add the identDefs of all bindings referencing match expression results
+      # to the table
+      for it in n[0].items:
+        let id =
+          if it[^1].kind == nnkIntLit:
+            it[^1].intVal.int
+          elif it[^1][1].kind == nnkIntLit:
+            it[^1][1].intVal.int
           else:
-            # run the selected transformer on all relevant child nodes and
-            # store the result in a seq
-            let tmp = genSym()
-            binds.add newVarStmt(tmp,
-              quote do: newSeq[`target`](`ast`.len(`sel`)-`bias`))
-            let callee = ident"->"
-            binds.add quote do:
-              for i in 0..<`ast`.len(`sel`)-`bias`:
-                `tmp`[i] = `callee`(`origin`(index: `cursor`), `target`)
-                `cursor` = `ast`.next(`cursor`)
-            binds.add newLetStmt(p[0], tmp)
+            continue
+        if id in map:
+          map[id].add it
         else:
-          # simple case: a single node
-          if p.kind == nnkIdent:
-            if lang.types[it.typ].terminal:
-              binds.add newLetStmt(p, quote do: `origin`(index: `ast`[`cursor`].val))
-            else:
-              binds.add newLetStmt(p, quote do: `origin`(index: `cursor`))
-          else:
-            if lang.types[it.typ].terminal:
-              binds.add makeError("cannot invoke auto-procesor for terminal", p)
-            else:
-              binds.add newLetStmt(p[0],
-                newCall(ident"->",
-                  nnkObjConstr.newTree(origin,
-                    nnkExprColonExpr.newTree(ident"index", cursor)),
-                  target))
-          binds.add quote do:
-            `cursor` = `ast`.next(`cursor`)
-      result = (check, binds)
-    of nnkIdent:
-      # must be a terminal/non-terminal meta-var
-      result = processIdentPattern(lang, n)
+          map[id] = nnkBracket.newTree(it)
+    of nnkStmtList:
+      discard "nothing to do"
     else:
-      error("unexpected syntax", n)
+      unreachable(n.kind)
 
-  var branches: seq[NimNode]
+  step(n, 0)
+
+proc optimize(n: NimNode; trailing=true): NimNode =
+  ## Elides all match expressions of which the result and side-effects are
+  ## not used.
+  const Terminators = {nnkStmtList, nnkTupleConstr}
+  case n.kind
+  of nnkCurly:
+    result = n
+    for i in 1..<n.len:
+      result[i] = optimize(n[i], false)
+  of nnkCall:
+    let last = optimize(n[^1])
+    if trailing and n[1].kind == nnkEmpty and last.kind in Terminators:
+      result = last
+    else:
+      result = n
+      result[^1] = last
+  of nnkPar:
+    let last = optimize(n[^1])
+    if trailing and last.kind in Terminators:
+      result = last
+    else:
+      result = n
+      result[^1] = last
+  of Terminators:
+    result = n
+  else:
+    unreachable(n.kind)
+
+proc matchImpl*(lang: LangInfo, src: int, name, ast, sel, rules: NimNode,
+                config: ExpandConfig): NimNode =
+  ## The heart of the `match` macro, combining the various parsing, typing,
+  ## validation, and translation. `src` is the ID of the type of the to-be-
+  ## matched non-terminal, `name` is a type expression referring to the
+  ## language the non-terminal is part of.
+  var total = NimNode(nil)
+  var els   = NimNode(nil)
   for it in rules.items:
     case it.kind
     of nnkOfBranch:
       it.expectLen 2
-      let (check, binds) = processPattern(lang, it[0])
-      branches.add nnkOfBranch.newTree(check, newStmtList(binds, it[1]))
-    of nnkElse:
-      # as a guard against malformed run-time inputs, use an 'of' instead
-      # of an 'else' branch
-      var ofb = nnkOfBranch.newTree()
-      # add all remaining forms:
-      for it in lang.types[src].forms.items:
-        if not containsOrIncl(used, lang.forms[it].ntag):
-          ofb.add newIntLitNode(lang.forms[it].ntag)
-      # also include the tags for sub non-terminals and terminals:
-      for it in lang.types[src].sub.items:
-        if lang.types[it].terminal:
-          if not containsOrIncl(used, lang.types[it].ntag):
-            ofb.add newIntLitNode(lang.types[it].ntag)
-        else:
-          let tags = ntags(lang, lang.types[it])
-          if not containsOrIncl(used, tags[0]):
-            for tag in tags.items:
-              ofb.add newIntLitNode(tag)
+      if els != nil:
+        error("'else' rule must appear last", els)
 
-      if ofb.len == 0:
-        # all forms are handled already. Add an 'else' branch before the
-        # programmer-provided one so that the compiler can report an
-        # "unreachable" warning
-        branches.add nnkElse.newTree(newCall(ident"unreachable"))
-        branches.add it
+      var pat = parsePattern(lang, it[0])
+      if pat.kind == nnkExprColonExpr and pat[1].kind == nnkBracket:
+        error("a repetition pattern is not allowed at the top-level", it[0])
+
+      pat = fitTo(lang, src, pat)
+      if pat.isNil:
+        error("pattern doesn't match any production of non-terminal", it[0])
+
+      let (head, tail) = patternToMatch(pat)
+      # set the body as the continuation for the innermost matcher
+      if it[1].kind == nnkStmtList:
+        tail.add it[1]
       else:
-        copyLineInfo(ofb, it)
-        ofb.add it[0]
-        branches.add ofb
+        tail.add newStmtList(it[1])
+
+      total = mergeInto(head, total)
+    of nnkElse:
+      # 'else' is special, in that it terminates all matchers, not just the top-
+      # level one. Ideally, this would not require duplicating the body of the
+      # 'else' branch, but the other approaches either mess with the body's
+      # semantics (procedure wrapping: might need captures, interferes with
+      # ``return`` and ``break``) or cannot handle both expressions and
+      # statements at the same time (with a blocks-and-break approach)
+      if els.isNil:
+        els = it
+      else:
+        error("only a single 'else' rule is allowed", it)
     else:
       error("expected 'of' or 'else'", it)
 
-  result = (branches, used)
+  if total.isNil:
+    # happens when there are no rules (with is allowed)
+    total = nnkCurly.newTree(newIntLitNode(src))
 
+  assignSymbols(total)
+  result = generateForMatch(lang, name, ast, sel, optimize(total), els, config)
 
 macro matchImpl(lang: static LangInfo, nterm: static string,
-                ast: PackedTree[uint8], sel: NodeIndex, info: untyped,
-                rules: varargs[untyped]): untyped =
+                name: typed, ast: PackedTree[uint8], sel: NodeIndex,
+                info: untyped, rules: varargs[untyped]): untyped =
   ## The internal implementation `match` dispatches to.
-  let (branches, used) = matchImpl(lang, lang.map[nterm], ast, sel, rules)
-  result = nnkCaseStmt.newTree(quote do: `ast`[`sel`].kind)
-  copyLineInfoForTree(result, info)
-  result.add branches
-  # add a default handler when all possible productions are covered
-  var allCovered = true
-  for it in lang.types[lang.map[nterm]].sub.items:
-    if lang.types[it].terminal:
-      if lang.types[it].ntag notin used:
-        allCovered = false
-        break
-    elif lang.forms[lang.types[it].forms[0]].ntag notin used:
-      allCovered = false
-      break
+  # report an error for all missing form and type handling
+  let config = ExpandConfig(
+    fillForm: nil,
+    fillType: nil
+  )
 
-  if allCovered:
-    result.add nnkElse.newTree(newCall(ident"unreachable"))
+  copyLineInfo(sel, info) # for better source locations
+  result = matchImpl(lang, lang.map[nterm], name, ast, sel, rules, config)
 
 template match*(ast: PackedTree[uint8], nt: Metavar,
                 branches: varargs[untyped]): untyped =
+  ## Type-unsafe version of match, meant for internal usage.
+  bind matchImpl
+  let idx = nt.index
+  matchImpl(idef(typeof(nt).L), typeof(nt).N, typeof(nt).L, ast, idx, nt,
+            branches)
+
+template match*[L, N](ast: Ast[L, auto], nt: Metavar[L, N],
+                      branches: varargs[untyped]): untyped =
   ## Provides a convenient way to destructure an AST. Meant to be used as
   ## follows:
   ##
@@ -256,4 +831,4 @@ template match*(ast: PackedTree[uint8], nt: Metavar,
   ##   else:   discard
   bind matchImpl
   let idx = nt.index
-  matchImpl(idef(typeof(nt).L), typeof(nt).N, ast, idx, nt, branches)
+  matchImpl(idef(typeof(L)), N, L, ast.tree, idx, nt, branches)

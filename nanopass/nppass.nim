@@ -34,55 +34,40 @@ macro processorMatchImpl(lang: static LangInfo, src: static string,
   ## processor's trailing case statement/expression.
   let input  = newDotExpr(ident"in.ast", ident"tree")
   let output = newDotExpr(ident"out.ast", ident"tree")
-  let id = lang.map[src]
-  var (branches, used) = matchImpl(lang, id, input, sel, rules)
 
-  template nt: untyped = lang.types[id]
-  let sym = bindSym"transform"
-  # auto-generate the transformers for the forms not manually provided:
-  for it in nt.forms.items:
-    let id = lang.forms[it].ntag
-    if not containsOrIncl(used, id):
-      branches.add nnkOfBranch.newTree(
-        newIntLitNode(id),
-        (quote do:
-          (typeof(result))(
-            index: `sym`(idef(src), idef(dst), typeof(result).N, `it`, `input`, `output`, `sel`))))
+  proc fillForm(lang: LangInfo, form: int, n, info: NimNode): NimNode =
+    ## Generates a form transformer.
+    let sym = bindSym"transform"
+    quote do:
+      (typeof(result))(
+        index: `sym`(idef(src), idef(dst), typeof(result).N, `form`,
+                     `input`, `output`, `n`))
 
-  # auto-generate the branches for missing production terminals and
-  # non-terminals:
-  for it in nt.sub.items:
-    if lang.types[it].terminal:
-      let id = lang.types[it].ntag
-      if id notin used:
-        branches.add nnkOfBranch.newTree(
-          newIntLitNode(id),
-          (quote do:
-            # TODO: use the tag of the destination language
-            `output`.nodes.add:
-              TreeNode[uint8](kind: uint8(`id`), val: `input`[`sel`].val)
-            (typeof(result))(index: NodeIndex(`output`.nodes.high))))
+  proc fillType(lang: LangInfo, typ: int, n, info: NimNode): NimNode =
+    ## Generates a call to the type transformer for `typ`.
+    if lang.types[typ].terminal:
+      let id = lang.types[typ].ntag
+      quote do:
+        # TODO: use the tag of the destination language
+        `output`.nodes.add:
+          TreeNode[uint8](kind: uint8(`id`), val: `input`[`n`].val)
+        (typeof(result))(index: NodeIndex(`output`.nodes.high))
     else:
-      # if the first form's tag is used, so is the non-terminal itself
-      if lang.forms[lang.types[it].forms[0]].ntag notin used:
-        # TODO: consider inlining the transformer if it's auto-generated.
-        #       More code to emit, but also a little less work at run-time
-        let branch = nnkOfBranch.newTree()
-        for tag in ntags(lang, lang.types[it]).items:
-          branch.add newIntLitNode(tag)
-        let name = ident(lang.types[it].mvar)
-        let callee = ident"->"
-        # dispatch to the processor and convert to the expected type
-        branch.add quote do:
-          (typeof(result))(
-            index: `callee`(src.`name`(index: `sel`), dst.`name`).index)
-        branches.add branch
+      # TODO: consider inlining the transformer if it's auto-generated.
+      #       More code to emit, but also a little less work at run-time
+      let name = ident(lang.types[typ].mvar)
+      let callee = ident"->"
+      # dispatch to the processor and convert to the expected type
+      quote do:
+        (typeof(result))(
+          index: `callee`(src.`name`(index: `n`), dst.`name`).index)
 
-  result = nnkCaseStmt.newTree(quote do: `input`[`sel`].kind)
-  result.add branches
-  if branches[^1].kind != nnkElse:
-    # the selector is a uint8 and thus the case cannot be exhaustive
-    result.add nnkElse.newTree(newCall(ident"unreachable"))
+  let config = ExpandConfig(
+    fillForm: fillForm,
+    fillType: fillType,
+  )
+
+  matchImpl(lang, lang.map[src], ident"src", input, sel, rules, config)
 
 macro genProcessor*(index, nterm: untyped): untyped =
   ## Generates the body for a non-terminal processor.
@@ -292,6 +277,14 @@ macro passImpl(src, dst, srcnterm, dstnterm: typedesc, def: untyped) =
     # processors
     proc `name`[U, X](n: U, T: typedesc[Metavar[`dst`, X]]): T =
       genProcessor(n.index, U.N)
+
+    proc `name`[T, C, N](s: ChildSlice[T, C],
+                         U: typedesc[Metavar[`dst`, N]]): seq[U] {.closure.} =
+      # XXX: the explicit .closure annotation works around a closure inference
+      #      compiler bug
+      result = newSeq[U](s.len)
+      for i, it in s.pairs:
+        result[i] = `name`(it, U)
 
   # if the body doesn't end in an expression, add a call to the
   # entry processor
