@@ -42,6 +42,7 @@ import
     pass_stackAlloc,
     pass25,
     pass30,
+    passllvm,
     trees
   ],
   phy/[
@@ -74,6 +75,7 @@ when hostOS != "any":
 type
   Language = enum
     langBytecode = "vm"
+    langLLVM = "llvm"
     lang0 = "L0"
     langPtr = "LPtr"
     lang1 = "L1"
@@ -258,7 +260,7 @@ proc compile(tree: var PackedTree[syntax.NodeKind], source, target: Language) =
   var current = source
   while current != target:
     case current
-    of lang0, langBytecode, langSource:
+    of lang0, langBytecode, langSource, langLLVM:
       assert false, "cannot be handled here: " & $current
     of langPtr:
       measure "pass:ptr-to-int":
@@ -424,6 +426,13 @@ proc main(args: openArray[string]) =
       measure "vm-gen":
         module = pass0.translate(code)
       # the bytecode is verified later
+    elif target == langLLVM:
+      compile(code, newSource, lang3)
+      syntaxCheck(code, lang3)
+      var output: string
+      measure "llvm-gen":
+        output = passllvm.translate(code)
+      writeFile("out.ll", output)
     else:
       compile(code, newSource, target)
       # make sure the output code is correct:
