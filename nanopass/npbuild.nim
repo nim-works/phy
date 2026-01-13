@@ -92,24 +92,24 @@ proc lengthError(len: int) {.noinline.} =
   raise ValueError.newException(
     fmt"no form is able to fit the expanded sequence (length = {len}")
 
-proc append[L, U](to: var PackedTree[uint8], x: Value[U]) =
-  to.nodes.add TreeNode[uint8](
+proc append[L, U](ast: var Ast[L, auto], x: Value[U]) =
+  ast.tree.nodes.add TreeNode[uint8](
     kind: typeof(lookup[U, L.meta.term_map]()).V,
     val: x.index)
 
-proc append[L](to: var PackedTree[uint8], x: Metavar) =
-  to.nodes.add TreeNode[uint8](kind: RefTag, val: uint32(x.index))
+proc append[L](ast: var Ast[L, auto], x: Metavar) =
+  ast.tree.nodes.add TreeNode[uint8](kind: RefTag, val: uint32(x.index))
 
-proc append[L](to: var PackedTree[uint8], x: openArray) =
+proc append[L](ast: var Ast[L, auto], x: openArray) =
   for it in x.items:
-    append[L](to, it)
+    append[L](ast, it)
 
-template coerce[T, U](x: U, _: typedesc[Value[T]]): Value[T] =
-  mixin terminal
+template coerce[S, T, U](s: S, val: U, _: typedesc[Value[T]]): Value[T] =
+  mixin pack
   when T is U:
-    terminal(x) # no coercion is necessary
+    Value[T](index: pack(s, val)) # no coercion is necessary
   else:
-    terminal(T(x)) # try a coercion, an error is fine
+    Value[T](index: pack(s, T(val))) # try a coercion, an error is fine
 
 {.pop.}
 
@@ -126,7 +126,7 @@ proc containsForm(lang: LangInfo, typ: LangType, form: int): bool =
         result = true
         break
 
-macro buildImpl(to: var PackedTree[uint8],
+macro buildImpl(ast: var Ast,
                 lang: static LangInfo, name: static string,
                 target: typedesc[Metavar], e: untyped): untyped =
   ## Emits a tree construction for the AST described by `e`, with the syntax
@@ -154,7 +154,7 @@ macro buildImpl(to: var PackedTree[uint8],
     let append = bindSym"append"
     result = quote do:
       when matches(`src`, `expect`):
-        `append`[`target`.L](`to`, `src`)
+        `append`(`ast`, `src`)
       else:
         `error`
     copyLineInfoForTree(result, src)
@@ -180,7 +180,7 @@ macro buildImpl(to: var PackedTree[uint8],
         # expected a terminal, but the constructor can only be that of a form
         let mvar = ident(typ.mvar)
         result = quote do:
-          {.error: "expected terminal of type " & $`target`.L.`mvar`.}
+          {.error: "expected terminal of type " & $`ast`.L.`mvar`.}
         copyLineInfoForTree(result, n)
         return
 
@@ -302,7 +302,7 @@ macro buildImpl(to: var PackedTree[uint8],
             else:
               let start = ctx.start
               let id = tup[2]
-              quote do: `to`.nodes[`start`].kind = `id`
+              quote do: `ast`.tree.nodes[`start`].kind = `id`
 
           let expanded = c.expanded
           if expanded != nil:
@@ -378,14 +378,14 @@ macro buildImpl(to: var PackedTree[uint8],
         # simple case, the tag is known upfront
         let id = candidates[0].tag.uint8
         c.start = nil # no 'start' variable needed
-        result.add genAst(to, id, lenExpr) do:
-          to.nodes.add TreeNode[uint8](kind: id, val: uint32(lenExpr))
+        result.add genAst(ast, id, lenExpr) do:
+          ast.tree.nodes.add TreeNode[uint8](kind: id, val: uint32(lenExpr))
       else:
         # the tag is only known at the end
         c.start = genSym("start")
-        result.add genAst(to, start=c.start, lenExpr) do:
-          let start = to.nodes.len
-          to.nodes.add TreeNode[uint8](kind: 0, val: uint32(lenExpr))
+        result.add genAst(ast, start=c.start, lenExpr) do:
+          let start = ast.tree.nodes.len
+          ast.tree.nodes.add TreeNode[uint8](kind: 0, val: uint32(lenExpr))
 
       result.addAll emit(lang, c, tree, n, 0)
     of nnkBracket:
@@ -395,23 +395,23 @@ macro buildImpl(to: var PackedTree[uint8],
         result.addAll process(lang, typ, it)
     of nnkPrefix:
       let mvar = ident(typ.mvar)
-      result = makeMatch(n[1], (genAst(target, mvar) do: PArray[target.L.mvar]))
+      result = makeMatch(n[1], (genAst(ast, mvar) do: PArray[ast.L.mvar]))
     else:
       let mvar = ident(typ.mvar)
       if typ.terminal:
-        let expect = quote do: `target`.L.`mvar`
+        let expect = quote do: `ast`.L.`mvar`
         let error = newMismatchError(n, expect, n)
         let append = bindSym"append"
         result = quote do:
           when matches(`n`, `expect`) or `n` is `expect`.T:
             when `n` is `expect`.T:
-              `append`[`target`.L](`to`, terminal(`n`))
+              `append`(`ast`, terminal(`n`))
             else:
-              `append`[`target`.L](`to`, `n`)
+              `append`(`ast`, `n`)
           else:
             `error`
       else:
-        result = makeMatch(n, (quote do: `target`.L.`mvar`))
+        result = makeMatch(n, (quote do: `ast`.L.`mvar`))
 
   proc hoistCoercions(lang: LangInfo, to, e: NimNode): NimNode =
     ## Turns all terminal constructions into `let` statements and adds them
@@ -425,8 +425,8 @@ macro buildImpl(to: var PackedTree[uint8],
 
         let mvar = ident(lang.types[id].mvar)
         result = genSym()
-        to.add genAst(result, mvar, src=e[1]) do:
-          let result = coerce(src, dst.mvar)
+        to.add genAst(result, ast, mvar, src=e[1]) do:
+          let result = coerce(ast.storage[], src, typeof(ast).L.mvar)
       else:
         result = e
         for i in 1..<e.len:
@@ -442,12 +442,12 @@ macro buildImpl(to: var PackedTree[uint8],
   result = newStmtList()
   let e = hoistCoercions(lang, result, e)
   result.add quote do:
-    let `root` = NodeIndex(`to`.nodes.len)
+    let `root` = NodeIndex(`ast`.tree.nodes.len)
   result.add process(lang, lang.types[lang.map[name]], e)
   result.add quote do:
     `target`(index: `root`)
 
-macro buildFirstPass(to, mv, e: untyped): untyped =
+macro buildFirstPass(ast, mv, e: untyped): untyped =
   ## Implements the first half of the ``build`` macro. Hoists all unquotes out
   ## of `e`. For example:
   ##   build ..., If(^x, ^y, Call(^z))
@@ -502,10 +502,11 @@ macro buildFirstPass(to, mv, e: untyped): untyped =
   let e = hoist(e, result)
   let impl = bindSym"buildImpl"
   result.add quote do:
-    `impl`(`to`, idef(`mv`.L), `mv`.N, `mv`, `e`)
+    `impl`(`ast`, idef(`mv`.L), `mv`.N, `mv`, `e`)
 
-template build*(ast: var PackedTree[uint8], mv: typedesc[Metavar],
-                e: untyped): untyped =
-  ## Creates the AST described by `e`, with the syntax from `lang`. Returns a
-  ## `Metavar` pointing to the created AST fragment.
+template build*[L, N](ast: var Ast[L, auto], mv: typedesc[Metavar[L, N]],
+                      e: untyped): untyped =
+  ## Evaluates the AST construction expression `e`, whose result must be a
+  ## production of `mv`, returning a `Metavar` pointing to the created AST
+  ## fragment.
   buildFirstPass(ast, mv, e)

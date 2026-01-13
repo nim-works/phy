@@ -47,7 +47,7 @@ macro transformOutImpl(lang: static LangDef, name, def: untyped) =
   def.body.insert 0, quote do:
     # inject a build overload that implicitly uses the output language
     template build(body: untyped): untyped {.used.} =
-      build(`to`.tree, `ret`, body)
+      build(`to`, `ret`, body)
 
   result = def
 
@@ -263,7 +263,7 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
       template terminal(x: untyped): untyped {.used.} =
         `embed`(`output`.storage, x)
       template build(n: typedesc[Metavar], body: untyped): untyped {.used.} =
-        build(`output`.tree, n, body)
+        build(`output`, n, body)
       template match[N](sel: Metavar[dst, N], branches: varargs[untyped]): untyped {.used.} =
         match[dst, N](`output`.tree, IndCursor(sel.index), sel, branches)
       template slice[N](T: typedesc[Metavar[dst, N]]): typedesc {.used.} =
