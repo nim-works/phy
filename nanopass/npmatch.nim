@@ -1,7 +1,6 @@
 ## Implements the high and low-level `match` macros.
 
 import std/[macros, intsets, strformat, tables]
-import passes/trees
 import nanopass/[asts, helper, nplang]
 
 type
@@ -816,7 +815,7 @@ proc matchImpl*(lang: LangInfo, src: int, name, ast, sel, rules: NimNode,
   result = generateForMatch(lang, name, ast, sel, optimize(total), els, config)
 
 macro matchImpl(lang: static LangInfo, nterm: static string,
-                name: typed, ast: PackedTree[uint8], cursor: untyped,
+                name: typed, ast: Tree, cursor: untyped,
                 info: untyped, rules: varargs[untyped]): untyped =
   ## The internal implementation `match` dispatches to.
   # report an error for all missing form and type handling
@@ -828,7 +827,7 @@ macro matchImpl(lang: static LangInfo, nterm: static string,
   copyLineInfo(cursor, info) # for better source locations
   result = matchImpl(lang, lang.map[nterm], name, ast, cursor, rules, config)
 
-template match*[L; N: static](ast: PackedTree[uint8], cursor, info: untyped,
+template match*[L; N: static](ast: Tree, cursor, info: untyped,
                               branches: varargs[untyped]): untyped =
   ## Type-unsafe version of ``match``, meant for internal usage.
   bind matchImpl

@@ -27,12 +27,12 @@ macro defineLanguage*(name, base, body: untyped) =
   ## context.
   defineLanguageImpl(name, base, body)
 
-proc resolve(ast: PackedTree[uint8], result: var PackedTree[uint8], n: NodeIndex) =
+proc resolve(ast: Tree, result: var Tree, n: NodeIndex) =
   ## Copies the AST fragment starting at `n` to `result`, resolving all
   ## indirections in the process.
   template src: untyped = ast.nodes
   template dst: untyped = result.nodes
-  const size = sizeof(TreeNode[uint8])
+  const size = sizeof(AstNode)
 
   template append(start, fin: uint32) =
     let pos = dst.len
@@ -71,7 +71,7 @@ proc resolve(ast: PackedTree[uint8], result: var PackedTree[uint8], n: NodeIndex
 
 proc resolve*[L, S](ast: sink Ast[L, S], n: NodeIndex): Ast[L, S] =
   ## Returns `ast` with all indirections in the AST resolved.
-  var output: PackedTree[uint8]
+  var output: Tree
   resolve(ast.tree, output, n)
   # also resolve the sub-trees referenced from records:
   for s in fields(ast.records):

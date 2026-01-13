@@ -80,9 +80,9 @@ macro genTerminalParser(lang: static LangInfo) =
         block:
           let val = tryParse(node, `typ`)
           if val.isSome:
-            return TreeNode[uint8](kind: `tag`, val: pack(lit, val.unsafeGet))
+            return AstNode(kind: `tag`, val: pack(lit, val.unsafeGet))
 
-proc parseTerminal[L, S](lit: var S, node: SexpNode, line, col: int): TreeNode[uint8] =
+proc parseTerminal[L, S](lit: var S, node: SexpNode, line, col: int): AstNode =
   ## Implements fallback parsing of terminals.
   mixin idef
   genTerminalParser(idef(L))
@@ -97,7 +97,7 @@ proc extract(c: var Ctx, to: var Metavar, pos: int) =
   let count = c.tree.nodes.len - pos
   c.staging.nodes.setLen(start + count)
   copyMem(addr c.staging.nodes[start], addr c.tree.nodes[pos],
-          sizeof(TreeNode[uint8]) * count)
+          sizeof(AstNode) * count)
   c.tree.nodes.shrink(pos)
   to.index = NodeIndex(start)
 
@@ -152,16 +152,10 @@ macro parseFields(lang: static LangInfo, c: var Ctx, name: string) =
             var tup: typeof(c.records.mvar[0])
             parseFieldsImpl(c, p, tup)
             c.records.mvar[slot] = tup
-            c.tree.nodes.add TreeNode[uint8](
-              kind: uint8(tag),
-              val: uint32(slot)
-            )
+            c.tree.nodes.add AstNode(kind: uint8(tag), val: uint32(slot))
           else:
             c.maps[i].withValue id, val:
-              c.tree.nodes.add TreeNode[uint8](
-                kind: uint8(tag),
-                val: val[]
-              )
+              c.tree.nodes.add AstNode(kind: uint8(tag), val: val[])
             do:
               raiseError(start[0], start[1],
                 "record with ID " & $id & " is missing")
@@ -203,7 +197,7 @@ proc rawParseForm[L, S](c: var Ctx[L, S], p: var SexpParser) =
   ## Parses and appends the elements for a form, without performing any
   ## grammar checks.
   let start = c.tree.nodes.len
-  c.tree.nodes.add TreeNode[uint8]() # sub-tree node
+  c.tree.nodes.add AstNode() # sub-tree node
   var len = 0
   while p.currToken != tkParensRi:
     parse(c, p)

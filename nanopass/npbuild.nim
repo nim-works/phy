@@ -93,17 +93,17 @@ proc lengthError(len: int) {.noinline.} =
     fmt"no form is able to fit the expanded sequence (length = {len}")
 
 proc append[L, U](ast: var Ast[L, auto], x: Value[U]) =
-  ast.tree.nodes.add TreeNode[uint8](
+  ast.tree.nodes.add AstNode(
     kind: typeof(lookup[U, L.meta.term_map]()).V,
     val: x.index)
 
 proc append[L](ast: var Ast[L, auto], x: RecordRef) =
-  ast.tree.nodes.add TreeNode[uint8](
+  ast.tree.nodes.add AstNode(
     kind: typeof(lookup[typeof(x), L.meta.record_map]()).V,
     val: x.id)
 
 proc append[L](ast: var Ast[L, auto], x: Metavar) =
-  ast.tree.nodes.add TreeNode[uint8](kind: RefTag, val: uint32(x.index))
+  ast.tree.nodes.add AstNode(kind: RefTag, val: uint32(x.index))
 
 proc append[L](ast: var Ast[L, auto], x: openArray) =
   for it in x.items:
@@ -453,13 +453,13 @@ proc buildForm(lang: LangInfo, typ: int, ast, e: NimNode): NimNode =
         let id = candidates[0].tag.uint8
         c.start = nil # no 'start' variable needed
         result.add genAst(ast, id, lenExpr) do:
-          ast.tree.nodes.add TreeNode[uint8](kind: id, val: uint32(lenExpr))
+          ast.tree.nodes.add AstNode(kind: id, val: uint32(lenExpr))
       else:
         # the tag is only known at the end
         c.start = genSym("start")
         result.add genAst(ast, start=c.start, lenExpr) do:
           let start = ast.tree.nodes.len
-          ast.tree.nodes.add TreeNode[uint8](kind: 0, val: uint32(lenExpr))
+          ast.tree.nodes.add AstNode(kind: 0, val: uint32(lenExpr))
 
       result.addAll emit(lang, c, tree, n, 0)
     of nnkBracket:

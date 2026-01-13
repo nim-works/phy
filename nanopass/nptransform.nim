@@ -21,13 +21,12 @@ proc canMorph(src, dst: LangInfo, a, b: SForm): Morphability =
   else:
     result = None
 
-proc append(to: var PackedTree[uint8], i: var int,
-            tag: uint8, val: uint32) {.inline.} =
-  to.nodes[i] = TreeNode[uint8](kind: tag, val: val)
+proc append(to: var Tree, i: var int, tag: uint8, val: uint32) {.inline.} =
+  to.nodes[i] = AstNode(kind: tag, val: val)
   inc i
 
 macro transform*(src, dst: static LangInfo, nterm: static string,
-                 form: static int, input, output: PackedTree[uint8],
+                 form: static int, input, output: Tree,
                  cursor: untyped): untyped =
   ## Generates the transformation from the given source language form
   ## to a compatible target language production of the non-terminal with
@@ -80,7 +79,7 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
     var i = `output`.nodes.len
     # the node sequence has to be contiguous, so it's allocated upfront
     `output`.nodes.setLen(i + len + 1)
-    `output`.nodes[i] = TreeNode[uint8](kind: `id`, val: uint32(len))
+    `output`.nodes[i] = AstNode(kind: `id`, val: uint32(len))
     inc i
 
   # call the transformers and emit the nodes in one go:
@@ -131,7 +130,7 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
   result.add ident"root"
 
 macro transformType*(src, dst: static LangInfo, nterm: static string,
-                     typ: static int, input, output: PackedTree[uint8],
+                     typ: static int, input, output: Tree,
                      cursor: untyped): untyped =
   ## Transforms the instance of type `typ` (may be either a terminal or non-
   ## terminal) at `cursor` to an AST fitting the destination non-terminal
@@ -170,7 +169,7 @@ macro transformType*(src, dst: static LangInfo, nterm: static string,
       let tmp = genSym()
       result = quote do:
         let `tmp` = `got` -> dst.`dmvar`
-        `output`.nodes.add TreeNode[uint8](kind: `tag`, val: `tmp`.index)
+        `output`.nodes.add AstNode(kind: `tag`, val: `tmp`.index)
         NodeIndex(`output`.nodes.high)
     of tkRecord:
       # a new node needs to be allocated so that a reference to it can
@@ -179,7 +178,7 @@ macro transformType*(src, dst: static LangInfo, nterm: static string,
       let tmp = genSym()
       result = quote do:
         let `tmp` = `got` -> dst.`dmvar`
-        `output`.nodes.add TreeNode[uint8](kind: `tag`, val: `tmp`.id)
+        `output`.nodes.add AstNode(kind: `tag`, val: `tmp`.id)
         NodeIndex(`output`.nodes.high)
     of tkNonTerminal:
       result = quote do:
