@@ -16,9 +16,6 @@ export nppatterns.matches
 export npbuild.build, npmatch.match, npunparser.unparse, npparser.parseAst
 export nppass.pass, nppass.inpass, nppass.outpass
 
-export nppass.genProcessor
-# TODO: ^^ bind the symbols; don't mix them in
-
 macro defineLanguage*(name, body: untyped) =
   ## Creates a language definition and binds it to a const symbol with the
   ## given name.

@@ -60,7 +60,7 @@ macro processorMatchImpl(lang: static LangInfo, src: static string,
 
   matchImpl(lang, lang.map[src], ident"src", input, sel, rules, config)
 
-macro genProcessor*(index, nterm: untyped): untyped =
+macro genProcessor(index, nterm: untyped): untyped =
   ## Generates the body for a non-terminal processor.
   # simply emit an empty processorMatchImpl invocation. All branches will be
   # auto-generated
@@ -255,6 +255,23 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
 
   result = def
 
+template defineProcessors(dst: untyped) =
+  ## Helper template for the pass macro implementation. Defines the implicit
+  ## `->` routines that will be invoked be default unless overridden.
+  proc `->`[U, X](n: U, T: typedesc[Metavar[dst, X]]): T {.inject.} =
+    # note: the signature is overly broad so that overload resolution
+    # prefers the more specific adapters created for the programmer-provided
+    # processors
+    genProcessor(n.index, U.N)
+
+  proc `->`[T, C, N](s: ChildSlice[T, C],
+                     U: typedesc[Metavar[dst, N]]): seq[U] {.inject, closure.} =
+    # XXX: the explicit .closure annotation works around a closure inference
+    #      compiler bug
+    result = newSeq[U](s.len)
+    for i, it in s.pairs:
+      result[i] = it -> U
+
 macro passImpl(src, dst, srcnterm, dstnterm: typedesc, def: untyped) =
   # create a forward declaration for each transformer:
   var preamble = newStmtList()
@@ -277,21 +294,7 @@ macro passImpl(src, dst, srcnterm, dstnterm: typedesc, def: untyped) =
 
   # add the generic processor procedure, which all processor invocations
   # for processors not supplied by the programmer will end up using
-  let name = ident"->"
-  preamble.add quote do:
-    # note: the signature is overly broad, so that overload resolution
-    # prefers the more specific adapters created for the programmer-provided
-    # processors
-    proc `name`[U, X](n: U, T: typedesc[Metavar[`dst`, X]]): T =
-      genProcessor(n.index, U.N)
-
-    proc `name`[T, C, N](s: ChildSlice[T, C],
-                         U: typedesc[Metavar[`dst`, N]]): seq[U] {.closure.} =
-      # XXX: the explicit .closure annotation works around a closure inference
-      #      compiler bug
-      result = newSeq[U](s.len)
-      for i, it in s.pairs:
-        result[i] = `name`(it, U)
+  preamble.add newCall(bindSym"defineProcessors", dst)
 
   # if the body doesn't end in an expression, add a call to the
   # entry processor
