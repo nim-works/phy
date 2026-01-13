@@ -3,10 +3,28 @@
 import std/[genasts, macros, packedsets, tables]
 import nanopass/[asts, nplang, nplangdef, npmatch, nptransform]
 
+type
+  TypeClass = enum tcNone, tcValue, tcProduction
+
+macro isPartOf(lang: static LangInfo, lname, typ: untyped): bool =
+  ## Returns whether typedesc `typ` is a type referring to an entity
+  ## that's part of `lang`.
+  result = nil
+  for i, it in lang.types.pairs:
+    let call = newCall(ident"is", typ, newDotExpr(lname, ident(it.mvar)))
+    result =
+      if result.isNil: call
+      else:            nnkInfix.newTree(ident"or", result, call)
+
 macro ctError(str: string, info: untyped) =
   ## Like the .error pragma, but with customizable source location information.
   copyLineInfo(str, info)
   nnkPragma.newTree(nnkExprColonExpr.newTree(ident"error", str))
+
+template classify(x: typedesc): TypeClass =
+  when x is Value:     tcValue
+  elif x is Metavar:   tcProduction
+  else:                tcValue
 
 template embed(storage, arg: untyped): untyped =
   ## Implements terminal value construction.
@@ -83,16 +101,51 @@ proc hasPragma(def: NimNode, name: string): bool =
       if it.eqIdent(name):
         return true
 
-macro genAdapter[T1, T2; A, B: static string](
-    src: typedesc[Metavar[T1, A]], dst: typedesc[Metavar[T2, B]],
-    orig: untyped) =
-  # note: the macro signature is very specific because it acts as the type
-  # checking for programmer-provided processor signatures
-  let name = ident("->")
-  copyLineInfo(name, orig)
-  result = quote do:
-    template `name`(n: `src`, _: typedesc[`dst`]): `dst` =
-      {.line.}: `orig`(n)
+template defineAdapter(src: typedesc, dst: typedesc, name: untyped) =
+  ## Introduces a definition for the adapter from `->` to `name`.
+  # the `->` uses a macro instead of a template because:
+  # * it leaves the call expression to inherit the expansion site's
+  #   line information
+  # * it only binds `name` to the actual symbol when the macro expands, meaning
+  #   that the symbol is only marked as used when it really is, allowing
+  #   "unused symbol" detection to still work
+  macro `->`(n: src, _: typedesc[dst]): dst {.used.} =
+    newCall(ident(astToStr(name)), n)
+
+macro transformerImpl(sclass, dclass: static TypeClass,
+                      param, body: untyped): untyped =
+  ## Refines the user-defined body of a processor into a real processor body.
+  proc transformCase(n: NimNode): NimNode =
+    result = genAst(arg=n[0]):
+      processorMatchImpl(idef(src), typeof(arg).N, Cursor(arg.index))
+    copyLineInfo(result, n)
+    for i in 1..<n.len:
+      result.add n[i]
+
+  result = body
+  if result.kind != nnkStmtList:
+    result = newStmtList(result)
+
+  if dclass == tcProduct:
+    let to = ident"out.ast"
+    result.insert 0, quote do:
+      # inject a build macro overload that implicitly uses the
+      # target non-terminal
+      template build(body: untyped): untyped {.used.} =
+        build(`to`, typeof(result), body)
+
+  if sclass == dclass and sclass == tcProduct:
+    if result[^1].kind == nnkCaseStmt:
+      result[^1] = transformCase(result[^1])
+    else:
+      error("trailing expression must be 'case'", result[^1])
+  # else: leave the body as it is
+
+template checkType(lang, typ: untyped) =
+  ## A helper template. Neither ``genAst`` nor ``stamp`` can be used to
+  ## emit the body instead, as both mess with the source location.
+  when not isPartOf(idef(lang), lang, typ):
+    ctError("type must belong to '" & $lang & "'", typ)
 
 macro transformInOutImpl(lang: static LangDef, name, def: untyped) =
   ## Implements the transformation for language->language pass processors.
@@ -103,41 +156,28 @@ macro transformInOutImpl(lang: static LangDef, name, def: untyped) =
   if def.params[0].kind == nnkEmpty:
     error("a return type is required for a transfomer", def.name)
 
-  if def.body.kind == nnkEmpty:
-    # a forward declaration. Append the additional adapter procedure
-    return newStmtList(def,
-      newCall(bindSym"genAdapter",
-        copyNimTree(def.params[1][^2]),
-        copyNimTree(def.params[0]),
-        copyNimNode(def.name)))
-
-  proc transformCase(n: NimNode): NimNode =
-    result = genAst(arg=n[0]):
-      processorMatchImpl(idef(src), typeof(arg).N, Cursor(arg.index))
-    copyLineInfo(result, n)
-    for i in 1..<n.len:
-      result.add n[i]
-
-  var inner = def.body
-  if inner.kind == nnkCaseStmt:
-    inner = transformCase(inner)
-  elif inner.kind == nnkStmtList:
-    if inner[^1].kind == nnkCaseStmt:
-      inner[^1] = transformCase(inner[^1])
-    else:
-      error("trailing statement/expression must be 'case'", inner[^1])
-  else:
-    error("trailing statement/expression must be 'case'", inner)
-
-  let to = ident"out.ast"
+  let param = def.params[1][^2]
+  let input = def.params[1][0]
   let ret = def.params[0]
-  def.body = newStmtList(def.body)
-  def.body.insert 0, quote do:
-    # inject a build macro overload that implicitly uses the
-    # target non-terminal
-    template build(body: untyped): untyped {.used.} =
-      build(`to`.tree, `ret`, body)
 
+  if def.body.kind == nnkEmpty:
+    # a forward declaration
+    result = newStmtList()
+    result.add newCall(bindSym"checkType", ident"src", copyNimTree(param))
+    result.add newCall(bindSym"checkType", ident"dst", copyNimTree(ret))
+    result.add def
+    # append the additional adapter procedure
+    result.add newCall(bindSym"defineAdapter",
+      copyNimTree(def.params[1][^2]),
+      copyNimTree(def.params[0]),
+      copyNimNode(def.name))
+    return
+
+  def.body = newCall(bindSym"transformerImpl",
+    newCall(bindSym"classify", copyNimTree(param)),
+    newCall(bindSym"classify", copyNimTree(ret)),
+    input,
+    def.body)
   result = def
 
 macro transformInImpl(lang: static LangDef, name, def: untyped) =
