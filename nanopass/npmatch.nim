@@ -37,7 +37,7 @@ proc fits(lang: LangInfo, a, b: int): bool =
   ## is expected.
   if a == b:
     result = true
-  elif not lang.types[b].terminal:
+  elif lang.types[b].kind == tkNonTerminal:
     for it in lang.types[b].sub.items:
       if fits(lang, a, it):
         return true
@@ -45,18 +45,23 @@ proc fits(lang: LangInfo, a, b: int): bool =
 proc countTags(lang: LangInfo, typ: LangType): int =
   result = typ.forms.len
   for it in typ.sub.items:
-    if lang.types[it].terminal:
+    case lang.types[it].kind
+    of tkTerminal, tkRecord:
       result += 1
-    else:
+    of tkNonTerminal:
       result += countTags(lang, lang.types[it])
 
 proc containsForm(lang: LangInfo, typ: LangType, fid: int): bool =
-  if fid in typ.forms:
-    true
-  else:
-    for it in typ.sub.items:
-      if not lang.types[it].terminal and containsForm(lang, lang.types[it], fid):
-        return true
+  case typ.kind
+  of tkNonTerminal:
+    if fid in typ.forms:
+      true
+    else:
+      for it in typ.sub.items:
+        if containsForm(lang, lang.types[it], fid):
+          return true
+      false
+  of tkTerminal, tkRecord:
     false
 
 proc makeTyped(e, typ, info: NimNode): NimNode =
@@ -86,7 +91,7 @@ proc fitTo(lang: LangInfo, typ: int, pat: NimNode): NimNode =
     # the type is inferred from the receiver
     result = makeTyped(pat[0], newIntLitNode(typ), pat[1])
   of nnkCurly:
-    if lang.types[typ].terminal:
+    if lang.types[typ].kind in {tkTerminal, tkRecord}:
       return nil # terminals cannot host any form (they're terminal)
 
     # filter out the forms not part of the target type and try to merge the
@@ -112,8 +117,7 @@ proc fitTo(lang: LangInfo, typ: int, pat: NimNode): NimNode =
     else:
       result = nil
   of nnkPar:
-    if not lang.types[typ].terminal and
-       containsForm(lang, lang.types[typ], pat[1][0].intVal.int):
+    if containsForm(lang, lang.types[typ], pat[1][0].intVal.int):
       if countTags(lang, lang.types[typ]) == 1:
         result = pat # the type is only inhabited by the form
       else:
@@ -383,10 +387,14 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
       proc genOfBranch(lang: LangInfo, typ: LangType, used: var IntSet,
                        allowEmpty=true): NimNode =
         result = nnkOfBranch.newTree()
-        if typ.terminal:
+        case typ.kind
+        of tkTerminal:
           if not containsOrIncl(used, typ.ntag) or not allowEmpty:
             result.add newIntLitNode(typ.ntag)
-        else:
+        of tkRecord:
+          if not containsOrIncl(used, typ.rtag) or not allowEmpty:
+            result.add newIntLitNode(typ.rtag)
+        of tkNonTerminal:
           let ntags = ntags(lang, typ)
           for tag in ntags(lang, typ):
             if not containsOrIncl(used, tag):
@@ -523,9 +531,12 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
           if pos.kind == nnkIdent:
             pos # the source is a bound identifier already
           else:
-            if lang.types[typ.intVal].terminal:
+            case lang.types[typ.intVal].kind
+            of tkTerminal:
               quote do: `name`.`mvar`(index: `ast`[`pos`].val)
-            else:
+            of tkRecord:
+              quote do: `name`.`mvar`(id: `ast`[`pos`].val)
+            of tkNonTerminal:
               quote do: `name`.`mvar`(index: `pos`)
         of nnkBracket:
           # a list binding

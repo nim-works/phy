@@ -2,7 +2,6 @@
 ## defining intermediate languages (their syntax and grammar) and passes.
 
 # TODO:
-# * implement symbol integration
 # * implement types integration
 # * implement meta-data support
 # * add a "compiler definition" macro
@@ -15,6 +14,7 @@ export asts
 export nppatterns.matches
 export npbuild.build, npmatch.match, npunparser.unparse, npparser.parseAst
 export nppass.pass, nppass.inpass, nppass.outpass
+export nppass.get
 
 macro defineLanguage*(name, body: untyped) =
   ## Creates a language definition and binds it to a const symbol with the
@@ -27,9 +27,9 @@ macro defineLanguage*(name, base, body: untyped) =
   ## context.
   defineLanguageImpl(name, base, body)
 
-proc finish*(ast: PackedTree[uint8], n: NodeIndex): PackedTree[uint8] =
-  ## Returns `ast` with all indirections resolved.
-  # TODO: don't export the procedure
+proc resolve(ast: PackedTree[uint8], result: var PackedTree[uint8], n: NodeIndex) =
+  ## Copies the AST fragment starting at `n` to `result`, resolving all
+  ## indirections in the process.
   template src: untyped = ast.nodes
   template dst: untyped = result.nodes
   const size = sizeof(TreeNode[uint8])
@@ -68,3 +68,19 @@ proc finish*(ast: PackedTree[uint8], n: NodeIndex): PackedTree[uint8] =
         append(prev, i)
 
       stack.shrink(stack.len - 1)
+
+proc resolve*[L, S](ast: sink Ast[L, S], n: NodeIndex): Ast[L, S] =
+  ## Returns `ast` with all indirections in the AST resolved.
+  var output: PackedTree[uint8]
+  resolve(ast.tree, output, n)
+  # also resolve the sub-trees referenced from records:
+  for s in fields(ast.records):
+    for tup in s.mitems:
+      for it in fields(tup):
+        when it is Metavar:
+          let got = output.nodes.len
+          resolve(ast.tree, output, it.index)
+          it.index = NodeIndex(got)
+
+  ast.tree = output
+  result = ast

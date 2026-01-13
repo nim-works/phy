@@ -13,16 +13,25 @@ type
       ## the node tag identifying the form in an AST
     elems*: seq[tuple[typ: int, repeat: bool]]
 
+  TypeKind* = enum
+    tkTerminal
+    tkRecord
+    tkNonTerminal
+
   LangType* = object
     ## Terminals and non-terminals modeled as types.
     name*: string
     mvar*: string
       ## name of a meta-variable that is used to range over the type
-    case terminal*: bool
-    of true:
+    case kind*: TypeKind
+    of tkTerminal:
       ntag*: int
-        ## the tag with which a node storing the terminal value is identified
-    of false:
+        ## the tag by which a node storing the terminal value is identified
+    of tkRecord:
+      rtag*: int
+        ## the tag by which a node storing the record is identified
+      fields*: seq[tuple[name: string, typ: int]]
+    of tkNonTerminal:
       sub*: seq[int]
         ## the types part of the union
       forms*: seq[int]
@@ -51,7 +60,7 @@ proc buildLangInfo*(def: LangDef): LangInfo =
     result.types.add LangType(
       name: name,
       mvar: it.mvars[0],
-      terminal: true,
+      kind: tkTerminal,
       ntag: it.tag
     )
     # add the name-to-type mappings:
@@ -63,8 +72,20 @@ proc buildLangInfo*(def: LangDef): LangInfo =
     result.types.add LangType(
       name: name,
       mvar: it.mvars[0],
-      terminal: false,
+      kind: tkNonTerminal,
       forms: mapIt(it.forms, it.semantic)
+    )
+    # add the name-to-type mappings:
+    result.map[name] = high(result.types)
+    for x in it.mvars.items:
+      result.map[x] = high(result.types)
+
+  for name, it in def.records.pairs:
+    result.types.add LangType(
+      name: name,
+      mvar: it.mvars[0],
+      kind: tkRecord,
+      rtag: it.tag
     )
     # add the name-to-type mappings:
     result.map[name] = high(result.types)
@@ -85,15 +106,23 @@ proc buildLangInfo*(def: LangDef): LangInfo =
     for v in it.vars.items:
       result.types[id].sub.add result.map[v]
 
+  for name, it in def.records.pairs:
+    let id = result.map[name]
+    for field in it.fields.items:
+      result.types[id].fields.add (field.name, result.map[field.typ])
+
 proc ntags*(lang: LangInfo, typ: LangType): seq[int] =
   ## Returns a list with all possible node tags productions of `typ` can have.
   for it in typ.forms.items:
     result.add lang.forms[it].ntag
 
   for it in typ.sub.items:
-    if lang.types[it].terminal:
+    case lang.types[it].kind
+    of tkTerminal:
       result.add lang.types[it].ntag
-    else:
+    of tkRecord:
+      result.add lang.types[it].rtag
+    of tkNonTerminal:
       result.add ntags(lang, lang.types[it])
 
 proc render*(lang: LangInfo, form: SForm): string =

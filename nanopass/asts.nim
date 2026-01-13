@@ -17,6 +17,8 @@ type
       ## leaked implementation detail, don't use
     storage*: ref Storage
       ## leaked implementation detail, don't use
+    records*: typeof(L.meta.records)
+      ## leaked implementation detail, don't use
 
   Metavar*[L: object, N: static string] = object
     ## Represents a reference to an AST fragment that's a production of non-
@@ -32,7 +34,12 @@ type
     index*: uint32
       ## leaked implementation detail, don't use
 
-  ChildSlice*[T: Metavar or Value, Cursor] = object
+  RecordRef*[L: object, N: static string] = object
+    ## A reference to a record of a language.
+    id*: uint32
+      ## leaked implementation detail, don't use
+
+  ChildSlice*[T: Metavar or RecordRef or Value, Cursor] = object
     ## A lightweight reference to a sequence of sibling nodes. The reference
     ## must not outlive the spawned-from tree.
     tree: ptr PackedTree[uint8]
@@ -61,8 +68,9 @@ proc slice*[T, C](tree: ptr PackedTree[uint8], start: C, len: uint32
 
 template load[T, C](tree: PackedTree[uint8], c: C): T =
   mixin get, pos
-  when T is Metavar: T(index: get(tree, c))
-  else:              T(index: tree[pos(c)].val)
+  when T is Metavar:   T(index: get(tree, c))
+  elif T is RecordRef: T(id: tree[pos(c)].val)
+  else:                T(index: tree[pos(c)].val)
 
 iterator items*[T, C](s: ChildSlice[T, C]): T =
   mixin advance

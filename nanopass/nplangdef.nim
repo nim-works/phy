@@ -41,6 +41,14 @@ type
     forms*: seq[OrigForm]
       ## forms used as productions
 
+  Record* = object
+    mvars*: seq[string]
+      ## the meta-variables for ranging over the record instances
+    tag*: int
+      ## the integer ID through which a tree node is identified as
+      ## storing a reference to an instance of the record
+    fields*: seq[tuple[name, mvar, typ: string]]
+
   LangDef* = object
     ## A checked and pre-processed language definition, carrying enough
     ## source-level information necessary for implementing, e.g., inheritance.
@@ -48,6 +56,8 @@ type
       ## the terminals of the language
     nterminals*: Table[string, NonTerminal]
       ## the non-terminals of the language
+    records*: Table[string, Record]
+      ## the records of the language
     forms*: seq[Form]
       ## all syntax forms present in the language
     entry*: string
@@ -62,6 +72,12 @@ type
 
   NonTerminalDef = object
     ## Pre-processed non-terminal definition.
+    name: NimNode
+    sub: seq[NimNode]
+    add: seq[NimNode]
+
+  RecordDef = object
+    ## Pre-processed record definition.
     name: NimNode
     sub: seq[NimNode]
     add: seq[NimNode]
@@ -105,6 +121,8 @@ proc checkName(target: LangDef, vars: Table[string, string], name: string,
                info: NimNode) =
   if name in target.terminals:
     error(fmt"terminal with name {name} already exists", info)
+  elif name in target.records:
+    error(fmt"record with name '{name}' already exists", info)
   elif name in target.nterminals:
     error(fmt"non-terminal with name {name} already exists", info)
   elif name in vars:
@@ -151,8 +169,14 @@ proc computeNodeTags(def: var LangDef) =
       it.tag = next
       inc next
 
+  for it in def.records.mvalues:
+    if it.tag == -1:
+      it.tag = next
+      inc next
+
 proc buildLanguage(add, sub: seq[NimNode],
                    def: seq[NonTerminalDef],
+                   records: seq[RecordDef],
                    base: LangDef, info: NimNode): LangDef =
   ## The center-piece of language definition construction. Constructs a
   ## language definition by applying the diff for terminals (`add` and `sub`)
@@ -183,8 +207,6 @@ proc buildLanguage(add, sub: seq[NimNode],
   result.terminals = base.terminals
 
   var vars: Table[string, string]
-  for it in result.terminals.keys:
-    vars[it] = it
 
   proc removeProd(def: var LangDef, n: NimNode, to: string) =
     proc find(def: LangDef, nt: NonTerminal, f: ParsedForm): int =
@@ -238,12 +260,48 @@ proc buildLanguage(add, sub: seq[NimNode],
       # remove the old names:
       base.nterminals[name].mvars.shrink(0)
 
+  # apply the record field removals to the base language:
+  for it in records.items:
+    it.name.expectKind nnkCall
+    it.name[0].expectKind nnkIdent
+    let name = it.name[0].strVal
+    if it.sub.len > 0:
+      if name notin base.records:
+        error(fmt"base language has no record named '{name}'", it.name)
+
+      var fields = move base.records[name].fields
+      for field in it.sub.items:
+        let fname = field[0]
+        fname.expectKind nnkIdent
+        block search:
+          for i in 0..<fields.len:
+            if fields[i].name == fname.strVal:
+              fields.delete(i)
+              break search
+
+          error(fmt"record '{name}' has no field named '{fname.strVal}'",
+                fname)
+
+      if fields.len == 0 and it.add.len == 0:
+        # the record has no fields anymore -> remove it
+        base.records.del(name)
+      else:
+        base.records[name].fields = fields
+
+    if name in base.records:
+      # remove the old meta-variables:
+      base.records[name].mvars.shrink(0)
+
   # update the var list with the to-be-inherited meta-vars:
   for name, it in base.terminals.pairs:
     for n in it.mvars.items:
       vars[n] = name
 
   for name, it in base.nterminals.pairs:
+    for n in it.mvars.items:
+      vars[n] = name
+
+  for name, it in base.records.pairs:
     for n in it.mvars.items:
       vars[n] = name
 
@@ -255,6 +313,15 @@ proc buildLanguage(add, sub: seq[NimNode],
         let mname = it.name[i].strVal
         checkName(base, vars, mname, it.name[i])
         base.nterminals[name].mvars.add mname
+        vars[mname] = name
+
+  for it in records.items:
+    let name = it.name[0].strVal
+    if name in base.records:
+      for i in 1..<it.name.len:
+        let mname = it.name[i].strVal
+        checkName(base, vars, mname, it.name[1])
+        base.records[name].mvars.add mname
         vars[mname] = name
 
   proc checkForm(def: LangDef, vars: Table[string, string], form: OrigForm,
@@ -286,6 +353,20 @@ proc buildLanguage(add, sub: seq[NimNode],
               info)
 
     result.nterminals[name] = res
+
+  # inherit the records:
+  for name, it in base.records.pairs:
+    var res = it
+    # check the type references:
+    for field in res.fields.items:
+      if field.mvar notin vars:
+        error(fmt"cannot inherit record '{name}'; '{field.mvar}' was removed",
+              info)
+      elif vars[field.mvar] != field.typ:
+        error(fmt"cannot inherit record '{name}'; '{field.mvar}' changed its meaning",
+              info)
+
+    result.records[name] = res
 
   # ---- phase 2: make all additions
   for it in add.items:
@@ -331,7 +412,7 @@ proc buildLanguage(add, sub: seq[NimNode],
     else:
       error(fmt"unexpected syntax: {n.kind}", n)
 
-  # register the non-terminals first:
+  # register the records and non-terminals first:
   for it in def.items:
     let name = it.name[0].strVal
     if it.add.len > 0 and name notin base.nterminals:
@@ -345,12 +426,52 @@ proc buildLanguage(add, sub: seq[NimNode],
 
       result.nterminals[name] = nt
 
+  for it in records.items:
+    let name = it.name[0].strVal
+    if it.add.len > 0 and name notin base.records:
+      # it's a new record
+      checkName(result, vars, name, it.name)
+      var rec = Record(tag: -1) # the tag is computed later
+      for i in 1..<it.name.len:
+        checkName(result, vars, it.name[i].strVal, it.name[i])
+        rec.mvars.add it.name[i].strVal
+        vars[it.name[i].strVal] = name
+
+      result.records[name] = rec
+
   # add the productions:
   for it in def.items:
     let name = it.name[0].strVal
     if it.add.len > 0:
       for a in it.add.items:
         addProd(result, a, name)
+
+  # add the new record fields:
+  for it in records.items:
+    let name = it.name[0].strVal
+    if it.add.len > 0:
+      var record: Record
+      # temporarily pop the record from the table, so that it can be accessed
+      # more easily
+      discard result.records.pop(name, record)
+
+      for field in it.add.items:
+        let fname = field[0]
+        let typ = field[1]
+        fname.expectKind nnkIdent
+        typ.expectKind nnkIdent
+        if findIt(record.fields, it.name == fname.strVal) != -1:
+          error(fmt"record '{name}' already has field named '{fname.strVal}'",
+                fname)
+
+        # the type name may refer to a meta-variable, but this is resolved
+        # at a later point
+        if typ.strVal in vars:
+          record.fields.add (fname.strVal, typ.strVal, vars[typ.strVal])
+        else:
+          error(fmt"no meta-var with name '{typ.strVal}' exists", typ)
+
+      result.records[name] = record
 
   computeNodeTags(result)
   # TODO: properly set the entry non-terminal
@@ -361,6 +482,7 @@ proc makeLanguage*(body: NimNode): LangDef =
   body.expectMinLen 1
   var add: seq[NimNode]
   var def: seq[NonTerminalDef]
+  var records: seq[RecordDef]
 
   # second pass: process the productions
   proc extract(n: NimNode, list: var seq[NimNode]) =
@@ -381,9 +503,16 @@ proc makeLanguage*(body: NimNode): LangDef =
     case it.kind
     of nnkInfix:
       if it[0].eqIdent("::="):
-        var nt = NonTerminalDef(name: it[1])
-        extract(it[2], nt.add)
-        def.add nt
+        if it[2].kind == nnkTupleConstr:
+          var rec = RecordDef(name: it[1])
+          for elem in it[2].items:
+            elem.expectKind nnkExprColonExpr
+            rec.add.add elem
+          records.add rec
+        else:
+          var nt = NonTerminalDef(name: it[1])
+          extract(it[2], nt.add)
+          def.add nt
         continue
     of nnkCall:
       add.add it
@@ -395,13 +524,14 @@ proc makeLanguage*(body: NimNode): LangDef =
 
   # to keep the implementation simple, a non-extension language is treated
   # internally as an empty language definition being extended
-  buildLanguage(add, @[], def, default(LangDef), body)
+  buildLanguage(add, @[], def, records, default(LangDef), body)
 
 proc makeLanguage*(base: LangDef, body: NimNode): LangDef =
   ## Creates a language definition from the ``defineLanguage`` DSL code
   ## and `base`.
   var add, sub: seq[NimNode]
   var def: seq[NonTerminalDef]
+  var records: seq[RecordDef]
 
   var body = body
   if body.kind != nnkStmtList:
@@ -432,10 +562,27 @@ proc makeLanguage*(base: LangDef, body: NimNode): LangDef =
     of nnkInfix:
       if it[0].eqIdent("::="):
         it.expectLen 3
-        var nt = NonTerminalDef(name: it[1])
-        nt.name.expectKind nnkCall
-        extract(it[2], nt.add, nt.sub)
-        def.add nt
+        if it[2].kind == nnkTupleConstr:
+          var rec = RecordDef(name: it[1])
+          it[2].expectMinLen(1)
+
+          # the + or - prefix is part of the name slot
+          for elem in it[2].items:
+            elem.expectKind nnkExprColonExpr
+            elem[0].expectKind nnkPrefix
+            if elem[0][0].eqIdent("+"):
+              rec.add.add nnkExprColonExpr.newTree(elem[0][1], elem[1])
+            elif elem[0][0].eqIdent("-"):
+              rec.sub.add nnkExprColonExpr.newTree(elem[0][1], elem[1])
+            else:
+              error("expected '+' or '-'", elem[0][0])
+
+          records.add rec
+        else:
+          var nt = NonTerminalDef(name: it[1])
+          extract(it[2], nt.add, nt.sub)
+          def.add nt
+
         handled = true
     of nnkPrefix:
       if it[0].eqIdent("-"):
@@ -454,4 +601,4 @@ proc makeLanguage*(base: LangDef, body: NimNode): LangDef =
     if not handled:
       error("expected `-a`, `+a`, or `a(...) ::= ...`", it[0])
 
-  buildLanguage(add, sub, def, base, body)
+  buildLanguage(add, sub, def, records, base, body)

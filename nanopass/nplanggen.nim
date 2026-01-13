@@ -25,6 +25,12 @@ macro makeLanguageType(def: static LangDef, typName: untyped) =
           mvar,
           ident(typName.strVal),
           newStrLitNode(name)))
+  for name, it in def.records.pairs:
+    for m in it.mvars.items:
+      fields.add newIdentDefs(ident(m),
+        nnkBracketExpr.newTree(bindSym"RecordRef",
+          ident(typName.strVal),
+          newStrLitNode(name)))
 
   let ntType = nnkTupleTy.newTree()
   let (csym, fsym) = (bindSym"PChoice", bindSym"PForm")
@@ -63,6 +69,30 @@ macro makeLanguageType(def: static LangDef, typName: untyped) =
       nnkBracketExpr.newTree(bindSym"Static", newIntLitNode(n)))
 
   metaType.add newIdentDefs(ident"term_map", tup)
+
+  # create the record->tag map:
+  block:
+    let tup = nnkTupleConstr.newTree()
+    for it in def.records.values:
+      tup.add nnkTupleConstr.newTree(
+        newDotExpr(copyNimTree(typName), ident(it.mvars[0])),
+        nnkBracketExpr.newTree(bindSym"Static", newIntLitNode(it.tag)))
+
+    if tup.len > 0:
+      metaType.add newIdentDefs(ident"record_map", tup)
+
+  # create the symbol storage type (a tuple of arrays-of-structs):
+  let st = nnkTupleTy.newTree()
+  for name, rec in def.records.pairs:
+    let tup = nnkTupleTy.newTree()
+    for (name, mvar, _) in rec.fields.items:
+      tup.add newIdentDefs(ident(name), newDotExpr(typName, ident(mvar)))
+
+    # expose under the first meta-var there is for the type
+    st.add newIdentDefs(ident(rec.mvars[0]),
+      nnkBracketExpr.newTree(ident"seq", tup))
+
+  metaType.add newIdentDefs(ident"records", st)
 
   fields.add newIdentDefs(ident"meta", metaType)
 

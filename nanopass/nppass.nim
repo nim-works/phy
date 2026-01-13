@@ -4,7 +4,7 @@ import std/[genasts, macros, packedsets, tables]
 import nanopass/[asts, nplang, nplangdef, npmatch, nptransform]
 
 type
-  TypeClass = enum tcNone, tcValue, tcProduction
+  TypeClass = enum tcNone, tcValue, tcRecord, tcProduction
 
 macro isPartOf(lang: static LangInfo, lname, typ: untyped): bool =
   ## Returns whether typedesc `typ` is a type referring to an entity
@@ -23,6 +23,7 @@ macro ctError(str: string, info: untyped) =
 
 template classify(x: typedesc): TypeClass =
   when x is Value:     tcValue
+  elif x is RecordRef: tcRecord
   elif x is Metavar:   tcProduction
   else:                tcValue
 
@@ -31,6 +32,14 @@ template embed(storage, arg: untyped): untyped =
   mixin pack
   let tmp = arg
   Value[typeof(tmp)](index: pack(storage[], tmp))
+
+macro pick(lang: static LangInfo, name: static string, se: untyped): untyped =
+  ## Returns the actual record identified by `r` in storage `storage`.
+  newDotExpr(se, ident(lang.types[lang.map[name]].mvar))
+
+template get*[L; N](ast: Ast[L, auto], r: RecordRef[L, N]): untyped =
+  ## Retrieves the record for reference `r`.
+  pick(idef(typeof(L)), N, ast.records)[r.id]
 
 macro transformOutImpl(lang: static LangDef, name, def: untyped) =
   ## Implements the transformation for processors in an *->language pass.
@@ -112,6 +121,30 @@ template defineAdapter(src: typedesc, dst: typedesc, name: untyped) =
   macro `->`(n: src, _: typedesc[dst]): dst {.used.} =
     newCall(ident(astToStr(name)), n)
 
+template withCache(to: typedesc, inp, body: untyped): untyped =
+  ## If a mapping for `inp` -> `to` already exists, returns it, otherwise
+  ## evaluates `body` and remembers its result.
+  mixin table
+  let c = getTable[typeof(inp), to]()
+  var res: to
+  withValue c[], inp.id, val:
+    res =
+      when to is Value:     to(index: val[])
+      elif to is RecordRef: to(id: val[])
+      elif to is Metavar:   to(index: NodeIndex(val[]))
+      else:                 {.error.}
+  do:
+    # TODO: `body` should be wrapped in a lambda, so that `return` doesn't
+    #       disables adding to the table
+    let val = if true: body else: default(to)
+    c[][inp.id] =
+      when to is Value:     val.index
+      elif to is RecordRef: val.id
+      elif to is Metavar:   val.index.uint32
+      else:                 {.error.}
+    res = val
+  res
+
 macro transformerImpl(sclass, dclass: static TypeClass,
                       param, body: untyped): untyped =
   ## Refines the user-defined body of a processor into a real processor body.
@@ -126,7 +159,7 @@ macro transformerImpl(sclass, dclass: static TypeClass,
   if result.kind != nnkStmtList:
     result = newStmtList(result)
 
-  if dclass == tcProduct:
+  if dclass in {tcProduction, tcRecord}:
     let to = ident"out.ast"
     result.insert 0, quote do:
       # inject a build macro overload that implicitly uses the
@@ -134,11 +167,14 @@ macro transformerImpl(sclass, dclass: static TypeClass,
       template build(body: untyped): untyped {.used.} =
         build(`to`, typeof(result), body)
 
-  if sclass == dclass and sclass == tcProduct:
+  if sclass == dclass and sclass == tcProduction:
     if result[^1].kind == nnkCaseStmt:
       result[^1] = transformCase(result[^1])
     else:
       error("trailing expression must be 'case'", result[^1])
+  elif sclass == tcRecord:
+    result = newCall(bindSym"withCache",
+      newCall(ident"typeof", ident"result"), param, result)
   # else: leave the body as it is
 
 template checkType(lang, typ: untyped) =
@@ -246,6 +282,8 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
 
       template slice[N](T: typedesc[Metavar[src, N]]): typedesc {.used.} =
         ChildSlice[T, Cursor]
+      template slice[N](T: typedesc[RecordRef[src, N]]): typedesc {.used.} =
+        ChildSlice[T, Cursor]
       template slice(T: typedesc[asts.Value[auto]]): typedesc {.used.} =
         ChildSlice[T, Cursor]
 
@@ -253,6 +291,8 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
         # TODO: return a `lent T` where ``unpack`` does too (this is tricky...)
         # XXX: consider renaming this template to `get`
         unpack(`input`.storage[], v.index, typeof(T))
+      template get[N](r: RecordRef[src, N]): untyped {.used.} =
+        get(`input`, r)
 
       template equal[N](a, b: Metavar[src, N]): bool {.used.} =
         equal(`input`.tree, Cursor(a.index), Cursor(b.index))
@@ -262,12 +302,19 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
     body.add quote do:
       template terminal(x: untyped): untyped {.used.} =
         `embed`(`output`.storage, x)
-      template build(n: typedesc[Metavar], body: untyped): untyped {.used.} =
+      template build[N](n: typedesc[Metavar[dst, N]], body: untyped): untyped {.used.} =
+        build(`output`, n, body)
+      template build[N](n: typedesc[RecordRef[dst, N]], body: untyped): untyped {.used.} =
         build(`output`, n, body)
       template match[N](sel: Metavar[dst, N], branches: varargs[untyped]): untyped {.used.} =
         match[dst, N](`output`.tree, IndCursor(sel.index), sel, branches)
       template slice[N](T: typedesc[Metavar[dst, N]]): typedesc {.used.} =
         ChildSlice[T, IndCursor]
+      template slice[N](T: typedesc[RecordRef[dst, N]]): typedesc {.used.} =
+        ChildSlice[T, IndCursor]
+
+      template get[N](r: RecordRef[dst, N]): untyped {.used.} =
+        get(`output`, r)
 
       template equal[N](a, b: Metavar[dst, N]): bool {.used.} =
         equal(`output`.tree, IndCursor(a.index), IndCursor(b.index))
@@ -290,7 +337,7 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
     body.add quote do:
       let pos = `call`
       # turn the AST with indirections into one without
-      `output`.tree = finish(`output`.tree, pos.index)
+      `output` = resolve(move `output`, pos.index)
       result = (move `output`, typeof(pos)(index: NodeIndex(0)))
   else:
     body.add quote do:
@@ -327,12 +374,60 @@ template defineProcessors(dst: untyped) =
     # processors
     genProcessor(n.index, typeof(n).N)
 
+  proc `->`[X](r: RecordRef, T: typedesc[RecordRef[dst, X]]): T {.inject.} =
+    let tab = getTable[T, typeof(r)]()
+    # XXX: cannot use `withValue` because of symbol binding issues...
+    if r.id in tab[]:
+      T(id: tab[][r.id])
+    else:
+      let s = addr pick(idef(dst), X, `out.ast`.records)
+      # reserve and remember a slot first, so that recursive records work
+      let id = s[].len.uint32
+      s[].setLen(id + 1)
+      tab[][r.id] = id
+
+      let rec {.cursor.} = get(r)
+      let tmp = transformRecord(rec, typeof(get(result)))
+      s[][id] = tmp
+      T(id: id)
+
   proc `->`[T, C, U](s: ChildSlice[T, C], _: typedesc[U]): seq[U] {.inject, closure.} =
     # XXX: the explicit .closure annotation works around a closure inference
     #      compiler bug
     result = newSeq[U](s.len)
     for i, it in s.pairs:
       result[i] = it -> U
+
+template wrapWithTables(lambda: untyped): untyped =
+  # the result of all record->* transformations is remembered, which requires
+  # a table for all used type pairs. This is tricky, as while what
+  # source*destination pairs there are is statically known, it's only known
+  # *after* the whole pass body has been type-checked, but the generated
+  # processors need access to their respective table early
+  var tabCounter {.global, compileTime.} = 0
+  {.push checks: off, stacktrace: off.}
+  proc access(tab: int): ptr Table[uint32, uint32] {.closure.}
+
+  proc getTable[A, B](): ptr Table[uint32, uint32] {.inject.} =
+    # the counter is only incremented (and a table is thus reserved) when
+    # the procedure is instantiated with new unique type parameters
+    const pos = tabCounter
+    static: inc tabCounter
+    access(pos)
+
+  {.pop.}
+
+  let tmp = lambda
+
+  # now that the number of tables is known, statically allocate them and
+  # complete the `access` declaration
+  var tabs: array[tabCounter, Table[uint32, uint32]]
+  {.push checks: off, stacktrace: off.}
+  proc access(tab: int): ptr Table[uint32, uint32] {.closure.} =
+    addr tabs[tab]
+  {.pop.}
+
+  tmp
 
 macro passImpl(src, dst, srcnterm, dstnterm: typedesc, def: untyped) =
   # create a forward declaration for each transformer:
@@ -371,7 +466,7 @@ macro passImpl(src, dst, srcnterm, dstnterm: typedesc, def: untyped) =
   let lambda = newProc(newEmptyNode(), body=def.body, procType=nnkProcDef)
   lambda.params = copyNimTree(def.params)
 
-  let call = newCall(lambda)
+  let call = newCall(newCall(bindSym"wrapWithTables", lambda))
   # forward the original parameters to the lambda:
   for i in 1..<def.params.len:
     for j in 0..<def.params[i].len-2:

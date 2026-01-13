@@ -89,20 +89,29 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
     let s = ident(src.types[a.typ].mvar)
     let d = ident(dst.types[b.typ].mvar)
     let got =
-      if src.types[a.typ].terminal:
+      case src.types[a.typ].kind
+      of tkTerminal:
         quote do:
           src.`s`(index: `input`[pos(`cursor`)].val)
-      else:
+      of tkRecord:
+        quote do:
+          src.`s`(id: `input`[pos(`cursor`)].val)
+      of tkNonTerminal:
         quote do:
           src.`s`(index: get(`input`, `cursor`))
 
     let append = bindSym"append"
     let call =
-      if dst.types[b.typ].terminal:
+      case dst.types[b.typ].kind
+      of tkTerminal:
         let tag = dst.types[b.typ].ntag
         quote do:
           `append`(`output`, i, uint8(`tag`), (`got` -> dst.`d`).index)
-      else:
+      of tkRecord:
+        let tag = dst.types[b.typ].rtag
+        quote do:
+          `append`(`output`, i, uint8(`tag`), (`got` -> dst.`d`).id)
+      of tkNonTerminal:
         quote do:
           `append`(`output`, i, RefTag, (`got` -> dst.`d`).index.uint32)
 
@@ -130,18 +139,21 @@ macro transformType*(src, dst: static LangInfo, nterm: static string,
   proc contains(lang: LangInfo, typ: LangType, search: int): bool =
     for it in typ.sub.items:
       result = it == search
-      if not result and not lang.types[it].terminal:
+      if not result and lang.types[it].kind == tkNonTerminal:
         result = contains(lang, typ, search)
       if result:
         break
 
   let smvar = ident(src.types[typ].mvar)
   let got =
-    case src.types[typ].terminal
-    of true:
+    case src.types[typ].kind
+    of tkTerminal:
       quote do:
         src.`smvar`(index: `input`[get(`input`, `cursor`)].val)
-    of false:
+    of tkRecord:
+      quote do:
+        src.`smvar`(id: `input`[get(`input`, `cursor`)].val)
+    of tkNonTerminal:
       quote do:
         src.`smvar`(index: get(`input`, `cursor`))
 
@@ -150,8 +162,8 @@ macro transformType*(src, dst: static LangInfo, nterm: static string,
   # prefer a direct processor (i.e. 'a -> a') over 'a -> b'
   if dtyp != -1 and contains(dst, dst.types[dst.map[nterm]], dtyp):
     let dmvar = ident(dst.types[dtyp].mvar)
-    case dst.types[dtyp].terminal
-    of true:
+    case dst.types[dtyp].kind
+    of tkTerminal:
       # a new node needs to be allocated so that a reference to it can
       # be returned
       let tag = dst.types[dtyp].ntag.uint8
@@ -160,7 +172,16 @@ macro transformType*(src, dst: static LangInfo, nterm: static string,
         let `tmp` = `got` -> dst.`dmvar`
         `output`.nodes.add TreeNode[uint8](kind: `tag`, val: `tmp`.index)
         NodeIndex(`output`.nodes.high)
-    of false:
+    of tkRecord:
+      # a new node needs to be allocated so that a reference to it can
+      # be returned
+      let tag = dst.types[dtyp].rtag.uint8
+      let tmp = genSym()
+      result = quote do:
+        let `tmp` = `got` -> dst.`dmvar`
+        `output`.nodes.add TreeNode[uint8](kind: `tag`, val: `tmp`.id)
+        NodeIndex(`output`.nodes.high)
+    of tkNonTerminal:
       result = quote do:
         (`got` -> dst.`dmvar`).index
   else:
@@ -168,3 +189,20 @@ macro transformType*(src, dst: static LangInfo, nterm: static string,
     let dmvar = ident(dst.types[dst.map[nterm]].mvar)
     result = quote do:
       (`got` -> dst.`dmvar`).index
+
+template transformRecord*(rec: tuple, to: typedesc[tuple]): untyped =
+  ## Transforms the given record `rec` into a target-language record with
+  ## internal type `to`.
+  var dest: to
+  for dname, dval in fieldPairs(dest):
+    var found {.global, compileTime.} = false
+    for sname, sval in fieldPairs(rec):
+      when dname == sname:
+        dval = sval -> typeof(dval)
+        static: found = true
+
+    # truncating is possible and allowed, but widening is not
+    when not found:
+      {.error: "source record is missing a field called '" & dname & "'".}
+
+  dest

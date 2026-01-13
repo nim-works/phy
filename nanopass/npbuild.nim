@@ -97,6 +97,11 @@ proc append[L, U](ast: var Ast[L, auto], x: Value[U]) =
     kind: typeof(lookup[U, L.meta.term_map]()).V,
     val: x.index)
 
+proc append[L](ast: var Ast[L, auto], x: RecordRef) =
+  ast.tree.nodes.add TreeNode[uint8](
+    kind: typeof(lookup[typeof(x), L.meta.record_map]()).V,
+    val: x.id)
+
 proc append[L](ast: var Ast[L, auto], x: Metavar) =
   ast.tree.nodes.add TreeNode[uint8](kind: RefTag, val: uint32(x.index))
 
@@ -121,14 +126,73 @@ proc containsForm(lang: LangInfo, typ: LangType, form: int): bool =
   else:
     result = false
     for it in typ.sub.items:
-      if not lang.types[it].terminal and
+      if lang.types[it].kind == tkNonTerminal and
          containsForm(lang, lang.types[it], form):
         result = true
         break
 
-macro buildImpl(ast: var Ast,
-                lang: static LangInfo, name: static string,
-                target: typedesc[Metavar], e: untyped): untyped =
+proc buildForm(lang: LangInfo, typ: int, ast, e: NimNode): NimNode
+
+proc buildRecord(lang: LangInfo, ast, e: NimNode): NimNode =
+  ## Translates a record construction form from the `build` language
+  ## to NimSkull.
+  assert e.kind == nnkObjConstr
+  let name = e[0].strVal
+  let typ = lang.map.getOrDefault(name, -1)
+  if typ == -1:
+    return makeError(fmt"no meta-variable or record called '{name}' exists",
+                     e[0])
+  elif lang.types[typ].kind != tkRecord:
+    return makeError(fmt"type '{name}' is not a record", e[0])
+
+  let tmp = genSym("")
+  let mvar = ident(lang.types[typ].mvar)
+  result = newStmtList()
+  result.add newVarStmt(tmp, quote do: default(typeof(`ast`.records.`mvar`[0])))
+  for i in 1..<e.len:
+    let fname = e[i][0].strVal
+    let val = e[i][1]
+    var ftyp = -1
+    for it in lang.types[typ].fields:
+      if it.name == fname:
+        ftyp = it.typ
+        break
+
+    if typ == -1:
+      result.add makeError(fmt"'{name}' has no field called '{fname}'",
+                           e[i][0])
+      continue
+
+    let body =
+      case lang.types[ftyp].kind
+      of tkTerminal:
+        # cannot use genAst because it messes with source locations
+        let s = bindSym"coerce"
+        let field = ident(fname)
+        quote do:
+          when `val` is Value:
+            `val`
+          else:
+            `s`(`ast`.storage[], `val`, typeof(`tmp`.`field`))
+      of tkRecord:
+        if val.kind == nnkSym:
+          val # let the compiler report a type mismatch
+        else:
+          buildRecord(lang, ast, val)
+      of tkNonTerminal:
+        if val.kind == nnkSym:
+          val # let the compiler report a type mismatch
+        else:
+          buildForm(lang, ftyp, ast, val)
+
+    copyLineInfo(body, val)
+    result.add nnkAsgn.newTree(newDotExpr(tmp, ident(fname)), body)
+
+  result.add quote do:
+    `ast`.records.`mvar`.add(`tmp`)
+    `ast`.L.`mvar`(id: `ast`.records.`mvar`.high.uint32)
+
+proc buildForm(lang: LangInfo, typ: int, ast, e: NimNode): NimNode =
   ## Emits a tree construction for the AST described by `e`, with the syntax
   ## from `lang`.
 
@@ -176,13 +240,23 @@ macro buildImpl(ast: var Ast,
       if n[0].kind != nnkIdent:
         error("constructor must be an identifier", n[0])
 
-      if typ.terminal:
+      case typ.kind
+      of tkTerminal:
         # expected a terminal, but the constructor can only be that of a form
         let mvar = ident(typ.mvar)
         result = quote do:
-          {.error: "expected terminal of type " & $`ast`.L.`mvar`.}
+          {.error: "expected '" & $`ast`.L.`mvar` & "', but got form".}
         copyLineInfoForTree(result, n)
         return
+      of tkRecord:
+        # expected a record, but the constructor can only be that of a form
+        let mvar = ident(typ.mvar)
+        result = quote do:
+          {.error: "expected '" & $`ast`.L.`mvar` & "', but got form".}
+        copyLineInfoForTree(result, n)
+        return
+      of tkNonTerminal:
+        discard "all good"
 
       var candidates: seq[Candidate]
 
@@ -398,7 +472,8 @@ macro buildImpl(ast: var Ast,
       result = makeMatch(n[1], (genAst(ast, mvar) do: PArray[ast.L.mvar]))
     else:
       let mvar = ident(typ.mvar)
-      if typ.terminal:
+      case typ.kind
+      of tkTerminal:
         let expect = quote do: `ast`.L.`mvar`
         let error = newMismatchError(n, expect, n)
         let append = bindSym"append"
@@ -410,18 +485,17 @@ macro buildImpl(ast: var Ast,
               `append`(`ast`, `n`)
           else:
             `error`
-      else:
+      of tkRecord, tkNonTerminal:
         result = makeMatch(n, (quote do: `ast`.L.`mvar`))
 
-  proc hoistCoercions(lang: LangInfo, to, e: NimNode): NimNode =
-    ## Turns all terminal constructions into `let` statements and adds them
-    ## to `to`. This makes the main processing a little easier.
+  proc hoist(lang: LangInfo, to, e: NimNode): NimNode =
+    ## Hoists all immediate non-form constructions in `e` to `to`.
     case e.kind
     of nnkCall:
       if e[0].strVal in lang.map:
         let id = lang.map[e[0].strVal]
-        if not lang.types[id].terminal:
-          error("cannot use meta-variable ranging over non-terminal here", e)
+        if lang.types[id].kind != tkTerminal:
+          error("only meta-variable ranging over terminal is allowed here", e)
 
         let mvar = ident(lang.types[id].mvar)
         result = genSym()
@@ -430,22 +504,38 @@ macro buildImpl(ast: var Ast,
       else:
         result = e
         for i in 1..<e.len:
-          e[i] = hoistCoercions(lang, to, e[i])
+          e[i] = hoist(lang, to, e[i])
+    of nnkObjConstr:
+      # record constructions may create their own nodes, hence them
+      # having to be hoisted
+      result = genSym()
+      to.add newLetStmt(result, buildRecord(lang, ast, e))
     of nnkBracket:
       result = e
       for i in 0..<e.len:
-        e[i] = hoistCoercions(lang, to, e[i])
+        e[i] = hoist(lang, to, e[i])
     else:
       result = e # nothing to do
 
+  let mvar = ident(lang.types[typ].mvar)
   let root = genSym("root")
   result = newStmtList()
-  let e = hoistCoercions(lang, result, e)
+  let e = hoist(lang, result, e)
   result.add quote do:
     let `root` = NodeIndex(`ast`.tree.nodes.len)
-  result.add process(lang, lang.types[lang.map[name]], e)
+  result.add process(lang, lang.types[typ], e)
   result.add quote do:
-    `target`(index: `root`)
+    `ast`.L.`mvar`(index: `root`)
+
+macro buildImpl(lang: static LangInfo, name: static string,
+                ast, e: untyped): untyped =
+  ## Emits a tree construction for the AST described by `e`, with the syntax
+  ## from `lang`.
+  let typ = lang.map[name]
+  case lang.types[typ].kind
+  of tkNonTerminal: buildForm(lang, typ, ast, e)
+  of tkRecord:      buildRecord(lang, ast, e)
+  of tkTerminal:    unreachable()
 
 macro buildFirstPass(ast, mv, e: untyped): untyped =
   ## Implements the first half of the ``build`` macro. Hoists all unquotes out
@@ -472,6 +562,15 @@ macro buildFirstPass(ast, mv, e: untyped): untyped =
           result[i] = hoist(n[i], list)
         else:
           error("nested bracket syntax is not allowed", n[i])
+    of nnkObjConstr:
+      n[0].expectKind {nnkIdent, nnkSym}
+      # XXX: only identifiers should reach here, but due to compiler bugs
+      #      (i.e., input AST mutations) symbols also sometimes make their way here
+      result = n
+      for i in 1..<n.len:
+        n[i].expectKind nnkExprColonExpr
+        n[i][0].expectKind nnkIdent
+        result[i][1] = hoist(n[i][1], list)
     of nnkPrefix:
       if n[0].strVal == "^":
         # an unquote
@@ -502,11 +601,17 @@ macro buildFirstPass(ast, mv, e: untyped): untyped =
   let e = hoist(e, result)
   let impl = bindSym"buildImpl"
   result.add quote do:
-    `impl`(`ast`, idef(`mv`.L), `mv`.N, `mv`, `e`)
+    `impl`(idef(`mv`.L), `mv`.N, `ast`, `e`)
 
-template build*[L, N](ast: var Ast[L, auto], mv: typedesc[Metavar[L, N]],
+template build*[L, N](ast: var Ast[L, auto], t: typedesc[Metavar[L, N]],
                       e: untyped): untyped =
   ## Evaluates the AST construction expression `e`, whose result must be a
   ## production of `mv`, returning a `Metavar` pointing to the created AST
   ## fragment.
-  buildFirstPass(ast, mv, e)
+  buildFirstPass(ast, t, e)
+
+template build*[L, N](ast: var Ast[L, auto], t: typedesc[RecordRef[L, N]],
+                      e: untyped): t =
+  ## Evaluates the given record construction `e` in the context of `ast`,
+  ## returning a reference to the new record.
+  buildFirstPass(ast, t, e)
