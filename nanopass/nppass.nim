@@ -156,6 +156,15 @@ macro transformInOutImpl(lang: static LangDef, name, def: untyped) =
   if def.params[0].kind == nnkEmpty:
     error("a return type is required for a transfomer", def.name)
 
+  var isManual = false
+  block:
+    let list = def.pragma
+    for i in 0..<list.len:
+      if eqIdent(list[i], "manual"):
+        isManual = true
+        list.del(i)
+        break
+
   let param = def.params[1][^2]
   let input = def.params[1][0]
   let ret = def.params[0]
@@ -166,11 +175,12 @@ macro transformInOutImpl(lang: static LangDef, name, def: untyped) =
     result.add newCall(bindSym"checkType", ident"src", copyNimTree(param))
     result.add newCall(bindSym"checkType", ident"dst", copyNimTree(ret))
     result.add def
-    # append the additional adapter procedure
-    result.add newCall(bindSym"defineAdapter",
-      copyNimTree(def.params[1][^2]),
-      copyNimTree(def.params[0]),
-      copyNimNode(def.name))
+    if not isManual:
+      # append the additional adapter procedure
+      result.add newCall(bindSym"defineAdapter",
+        copyNimTree(def.params[1][^2]),
+        copyNimTree(def.params[0]),
+        copyNimNode(def.name))
     return
 
   def.body = newCall(bindSym"transformerImpl",
