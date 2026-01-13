@@ -21,8 +21,9 @@ proc canMorph(src, dst: LangInfo, a, b: SForm): Morphability =
   else:
     result = None
 
-proc append(to: var PackedTree[uint8], i: var int, x: Metavar) =
-  to.nodes[i] = TreeNode[uint8](kind: RefTag, val: uint32(x.index))
+proc append(to: var PackedTree[uint8], i: var int,
+            tag: uint8, val: uint32) {.inline.} =
+  to.nodes[i] = TreeNode[uint8](kind: tag, val: val)
   inc i
 
 macro transform*(src, dst: static LangInfo, nterm: static string,
@@ -85,35 +86,25 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
   # call the transformers and emit the nodes in one go:
   for i, a in src.forms[form].elems.pairs:
     let b = dst.forms[target].elems[i]
-    let fromTerminal = src.types[a.typ].terminal
-    let toTerminal   = dst.types[b.typ].terminal
-    if fromTerminal != toTerminal or
-       (toTerminal and src.types[a.typ].name != dst.types[b.typ].name):
-      body.add makeError(
-        fmt"cannot generate transformer for '{src.forms[form]}'", cursor)
-      break
-
-    let call =
-      if fromTerminal:
-        if src.types[a.typ].ntag == dst.types[b.typ].ntag:
-          # just copy the node
-          quote do:
-            `output`.nodes[i] = `input`[pos(`cursor`)]
-            inc i
-        else:
-          # repack with the new tag
-          let tag = dst.types[b.typ].ntag
-          quote do:
-            `output`.nodes[i] = TreeNode[uint8](kind: `tag`, val: `input`[pos(`cursor`)].val)
-            inc i
-      else:
-        let append = bindSym"append"
-        let op = ident"->"
-        let s = newStrLitNode(src.types[a.typ].name)
-        let d = newStrLitNode(dst.types[b.typ].name)
+    let s = ident(src.types[a.typ].mvar)
+    let d = ident(dst.types[b.typ].mvar)
+    let got =
+      if src.types[a.typ].terminal:
         quote do:
-          `append`(`output`, i,
-            `op`(Metavar[src, `s`](index: get(`input`, `cursor`)), Metavar[dst, `d`]))
+          src.`s`(index: `input`[pos(`cursor`)].val)
+      else:
+        quote do:
+          src.`s`(index: get(`input`, `cursor`))
+
+    let append = bindSym"append"
+    let call =
+      if dst.types[b.typ].terminal:
+        let tag = dst.types[b.typ].ntag
+        quote do:
+          `append`(`output`, i, uint8(`tag`), (`got` -> dst.`d`).index)
+      else:
+        quote do:
+          `append`(`output`, i, RefTag, (`got` -> dst.`d`).index.uint32)
 
     if a.repeat:
       let bias = src.forms[form].elems.len - 1
@@ -144,41 +135,36 @@ macro transformType*(src, dst: static LangInfo, nterm: static string,
       if result:
         break
 
-  let dtyp = dst.map.getOrDefault(src.types[typ].name, -1)
-  if src.types[typ].terminal:
-    if dtyp == -1:
-      # target language doesn't have the terminal
-      result = makeError(
-        fmt"cannot transform '{src.types[typ].name}' to '{nterm}'",
-        cursor)
-    elif contains(dst, dst.types[dst.map[nterm]], dtyp):
-      if src.types[typ].ntag == dst.types[dtyp].ntag:
-        # copy the node as it is
-        result = quote do:
-          `output`.nodes.add `input`[pos(`cursor`)]
-          NodeIndex(`output`.nodes.high)
-      else:
-        # re-tag the node
-        let tag = dst.types[dtyp].ntag.uint8
-        result = quote do:
-          `output`.nodes.add TreeNode[uint8](
-            kind: `tag`,
-            val: `input`[get(`input`, `cursor`)].val
-          )
-          NodeIndex(`output`.nodes.high)
-    else:
-      # target non-terminal doesn't include the terminal
-      result = makeError(
-        fmt"cannot transform terminal '{src.types[typ].name}' to '{nterm}'",
-        cursor)
-  else:
-    let smvar = ident(src.types[typ].mvar)
-    # prefer a direct processor (i.e. 'a -> a') over 'a -> b'
-    let dmvar =
-      if dtyp != -1 and contains(dst, dst.types[dst.map[nterm]], dtyp):
-        ident(dst.types[dtyp].mvar)
-      else:
-        ident(dst.types[dst.map[nterm]].mvar)
+  let smvar = ident(src.types[typ].mvar)
+  let got =
+    case src.types[typ].terminal
+    of true:
+      quote do:
+        src.`smvar`(index: `input`[get(`input`, `cursor`)].val)
+    of false:
+      quote do:
+        src.`smvar`(index: get(`input`, `cursor`))
 
+  let dtyp = dst.map.getOrDefault(src.types[typ].name, -1)
+
+  # prefer a direct processor (i.e. 'a -> a') over 'a -> b'
+  if dtyp != -1 and contains(dst, dst.types[dst.map[nterm]], dtyp):
+    let dmvar = ident(dst.types[dtyp].mvar)
+    case dst.types[dtyp].terminal
+    of true:
+      # a new node needs to be allocated so that a reference to it can
+      # be returned
+      let tag = dst.types[dtyp].ntag.uint8
+      let tmp = genSym()
+      result = quote do:
+        let `tmp` = `got` -> dst.`dmvar`
+        `output`.nodes.add TreeNode[uint8](kind: `tag`, val: `tmp`.index)
+        NodeIndex(`output`.nodes.high)
+    of false:
+      result = quote do:
+        (`got` -> dst.`dmvar`).index
+  else:
+    # no direct processor is possible; use an indirect processor
+    let dmvar = ident(dst.types[dst.map[nterm]].mvar)
     result = quote do:
-      (src.`smvar`(index: get(`input`, `cursor`)) -> dst.`dmvar`).index
+      (`got` -> dst.`dmvar`).index
