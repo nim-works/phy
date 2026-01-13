@@ -405,7 +405,7 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
 
       let stackLen = stack.len
       let typ = e[0].intVal.int
-      var caseStmt = nnkCaseStmt.newTree(quote do: `ast`[pos(`cursor`)].kind)
+      var caseStmt = nnkCaseStmt.newTree(quote do: `ast`[pos(`cursor`)].tag)
       var used = initIntSet()
       for i in 1..<e.len:
         let it = e[i]

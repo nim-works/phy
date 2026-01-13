@@ -59,9 +59,28 @@ const
   RefTag* = 128'u8
     ## the node used internally for indirections
 
+template tag*(n: AstNode): uint8 =
+  ## The node's tag.
+  n.kind
+
 template isAtom*(x: Tag): bool =
   ## The predicate required for using an uint8 as a ``PackedTree`` tag.
   x >= RefTag
+
+{.push stacktrace: off, profiler: off.}
+
+proc `tag=`*(n: var AstNode, tag: uint8) {.inline.} =
+  ## Sets the tag of `n` to `tag`. A low-level operation.
+  n.kind = tag
+
+proc `==`(a, b: AstNode): bool {.inline.} =
+  ## Compares the nodes for equality, ignoring source location info.
+  a.tag == b.tag and a.val == b.val
+
+{.pop.}
+
+template node*(tag: uint8, v: uint32): AstNode =
+  AstNode(kind: tag, val: v)
 
 # ----- slice implementation -----
 
@@ -149,7 +168,7 @@ proc advance*(tree: Tree, cr: var IndCursor) =
   NodeIndex(cr) = next(tree, NodeIndex(cr))
 
 proc get*(tree: Tree, cr: IndCursor): NodeIndex =
-  if tree[NodeIndex(cr)].kind == 128:
+  if tree[NodeIndex(cr)].tag == 128:
     NodeIndex tree[NodeIndex(cr)].val
   else:
     NodeIndex cr
@@ -160,7 +179,7 @@ template pos*(cr: IndCursor): NodeIndex =
 type Savepoint = tuple[origin: IndCursor, stepped: bool]
 
 proc enter*(tree: Tree, cr: var IndCursor): Savepoint =
-  result = (cr, tree[NodeIndex(cr)].kind == 128)
+  result = (cr, tree[NodeIndex(cr)].tag == 128)
   if result.stepped:
     cr = IndCursor tree[NodeIndex(cr)].val
   else:
@@ -209,18 +228,18 @@ proc equal*(tree: Tree, a, b: IndCursor): bool =
     let na = tree[pos(a)]
     let nb = tree[pos(b)]
     if na != nb:
-      if na.kind == RefTag:
+      if na.tag == RefTag:
         stack.add (a, b, i)
         i = 1
         a = IndCursor(na.val)
         continue
-      elif nb.kind == RefTag:
+      elif nb.tag == RefTag:
         stack.add (a, b, i)
         i = 1
         b = IndCursor(nb.val)
         continue
       return false
-    elif na.kind == RefTag:
+    elif na.tag == RefTag:
       stack.add (a, b, i)
       i = 1
       a = IndCursor(na.val)

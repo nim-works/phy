@@ -66,7 +66,7 @@ macro unparse(def: static LangInfo, nterm: static string, ast, c: untyped) =
   ## Unparses the non-terminal with name `nterm` from the given language at
   ## the current cursor position `pos`.
   let id = def.map[nterm]
-  var caseStmt = nnkCaseStmt.newTree(quote do: `ast`.tree.nodes[`c`.pos].kind)
+  var caseStmt = nnkCaseStmt.newTree(quote do: `ast`.tree.nodes[`c`.pos].tag)
 
   proc genForType(def: LangInfo, typ: LangType): NimNode =
     case typ.kind
@@ -129,7 +129,7 @@ macro unparse(def: static LangInfo, nterm: static string, ast, c: untyped) =
   # nodes as errors
   caseStmt.add nnkElse.newTree(quote do:
     result = newSList(
-      [newSSymbol(":error"), newSInt(int `ast`.tree.nodes[`c`.pos].kind)])
+      [newSSymbol(":error"), newSInt(int `ast`.tree.nodes[`c`.pos].tag)])
     `c`.pos = `ast`.tree.next(NodeIndex `c`.pos).int)
   result = caseStmt
 

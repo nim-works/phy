@@ -22,7 +22,7 @@ proc canMorph(src, dst: LangInfo, a, b: SForm): Morphability =
     result = None
 
 proc append(to: var Tree, i: var int, tag: uint8, val: uint32) {.inline.} =
-  to.nodes[i] = AstNode(kind: tag, val: val)
+  to.nodes[i] = node(tag, val)
   inc i
 
 macro transform*(src, dst: static LangInfo, nterm: static string,
@@ -79,7 +79,7 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
     var i = `output`.nodes.len
     # the node sequence has to be contiguous, so it's allocated upfront
     `output`.nodes.setLen(i + len + 1)
-    `output`.nodes[i] = AstNode(kind: `id`, val: uint32(len))
+    `output`.nodes[i] = node(`id`, uint32(len))
     inc i
 
   # call the transformers and emit the nodes in one go:
@@ -169,7 +169,7 @@ macro transformType*(src, dst: static LangInfo, nterm: static string,
       let tmp = genSym()
       result = quote do:
         let `tmp` = `got` -> dst.`dmvar`
-        `output`.nodes.add AstNode(kind: `tag`, val: `tmp`.index)
+        `output`.nodes.add node(`tag`, `tmp`.index)
         NodeIndex(`output`.nodes.high)
     of tkRecord:
       # a new node needs to be allocated so that a reference to it can
@@ -178,7 +178,7 @@ macro transformType*(src, dst: static LangInfo, nterm: static string,
       let tmp = genSym()
       result = quote do:
         let `tmp` = `got` -> dst.`dmvar`
-        `output`.nodes.add AstNode(kind: `tag`, val: `tmp`.id)
+        `output`.nodes.add node(`tag`, `tmp`.id)
         NodeIndex(`output`.nodes.high)
     of tkNonTerminal:
       result = quote do:

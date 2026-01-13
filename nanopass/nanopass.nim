@@ -49,9 +49,9 @@ proc resolve(ast: Tree, result: var Tree, n: NodeIndex) =
       var (i, last) = stack[^1]
       let prev = i
       while i <= last:
-        if src[i].kind < RefTag:
+        if src[i].tag < RefTag:
           last += src[i].val
-        elif src[i].kind == RefTag:
+        elif src[i].tag == RefTag:
           if i > prev:
             # copy everything we got so far
             append(prev, i)

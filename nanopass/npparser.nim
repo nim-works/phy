@@ -61,7 +61,7 @@ template check[L](c: Ctx[L, auto], pos: NodeIndex, line, col: int,
                   t: typedesc) =
   ## Makes sure the production at `pos` is one of the non-terminal identified
   ## by `nterm`, raising an error if not.
-  if c.tree[pos].kind notin tags(idef(typeof(L)), mapType[L, t]()):
+  if c.tree[pos].tag notin tags(idef(typeof(L)), mapType[L, t]()):
     when t is Metavar:
       raiseError(line, col,
         "expected production of '" & t.N & "'")
@@ -80,7 +80,7 @@ macro genTerminalParser(lang: static LangInfo) =
         block:
           let val = tryParse(node, `typ`)
           if val.isSome:
-            return AstNode(kind: `tag`, val: pack(lit, val.unsafeGet))
+            return node(`tag`, pack(lit, val.unsafeGet))
 
 proc parseTerminal[L, S](lit: var S, node: SexpNode, line, col: int): AstNode =
   ## Implements fallback parsing of terminals.
@@ -152,10 +152,10 @@ macro parseFields(lang: static LangInfo, c: var Ctx, name: string) =
             var tup: typeof(c.records.mvar[0])
             parseFieldsImpl(c, p, tup)
             c.records.mvar[slot] = tup
-            c.tree.nodes.add AstNode(kind: uint8(tag), val: uint32(slot))
+            c.tree.nodes.add node(uint8(tag), uint32(slot))
           else:
             c.maps[i].withValue id, val:
-              c.tree.nodes.add AstNode(kind: uint8(tag), val: val[])
+              c.tree.nodes.add node(uint8(tag), val[])
             do:
               raiseError(start[0], start[1],
                 "record with ID " & $id & " is missing")
@@ -251,7 +251,7 @@ macro parseFormImpl(lang: static LangInfo) =
     case m.kind
     of nnkIntLit:
       result = quote do:
-        c.tree.nodes[start].kind = `m`
+        c.tree.nodes[start].tag = `m`
     of nnkCurly:
       result = nnkIfStmt.newTree()
       for it in m.items:
@@ -286,7 +286,7 @@ macro parseFormImpl(lang: static LangInfo) =
         if m[1].intVal == 1: # single item?
           result = quote do:
             if cursor.int < c.tree.nodes.len and
-               c.tree[cursor].kind in `tags`:
+               c.tree[cursor].tag in `tags`:
               cursor = c.tree.next(cursor)
               `next`
             else:
@@ -296,7 +296,7 @@ macro parseFormImpl(lang: static LangInfo) =
           let bias = -m[1].intVal
           result = quote do:
             for i in uint32(`bias`)..<c.tree.nodes[start].val:
-              if c.tree[cursor].kind in `tags`:
+              if c.tree[cursor].tag in `tags`:
                 cursor = c.tree.next(cursor)
               else:
                 `raiseErr`(line, col, "expected " & `name`)
