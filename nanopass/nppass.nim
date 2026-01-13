@@ -3,6 +3,11 @@
 import std/[genasts, macros, packedsets, tables]
 import nanopass/[asts, nplang, nplangdef, npmatch, nptransform]
 
+macro ctError(str: string, info: untyped) =
+  ## Like the .error pragma, but with customizable source location information.
+  copyLineInfo(str, info)
+  nnkPragma.newTree(nnkExprColonExpr.newTree(ident"error", str))
+
 template embed(storage, arg: untyped): untyped =
   ## Implements terminal value construction.
   mixin pack
@@ -258,14 +263,21 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
 template defineProcessors(dst: untyped) =
   ## Helper template for the pass macro implementation. Defines the implicit
   ## `->` routines that will be invoked be default unless overridden.
-  proc `->`[U, X](n: U, T: typedesc[Metavar[dst, X]]): T {.inject.} =
+  template `->`[T, U](x: T, _: typedesc[U]): U {.inject.} =
+    # the fallback processor called when nothing else matches
+    ctError("cannot generate transformer from '" & $typeof(T) &
+            " to '" & $typeof(U) & "'", x)
+
+  template `->`[T](v: Value[T], _: typedesc[Value[T]]): Value[T] {.inject.} =
+    v # nothing to do
+
+  proc `->`[X](n: Metavar, T: typedesc[Metavar[dst, X]]): T {.inject.} =
     # note: the signature is overly broad so that overload resolution
     # prefers the more specific adapters created for the programmer-provided
     # processors
-    genProcessor(n.index, U.N)
+    genProcessor(n.index, typeof(n).N)
 
-  proc `->`[T, C, N](s: ChildSlice[T, C],
-                     U: typedesc[Metavar[dst, N]]): seq[U] {.inject, closure.} =
+  proc `->`[T, C, U](s: ChildSlice[T, C], _: typedesc[U]): seq[U] {.inject, closure.} =
     # XXX: the explicit .closure annotation works around a closure inference
     #      compiler bug
     result = newSeq[U](s.len)
