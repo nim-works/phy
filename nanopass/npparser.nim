@@ -1,10 +1,10 @@
-## Implements the `parser <#parser.>`_ macro, for generating an AST parser for
-## a language.
+## Implements the routines for parsing an S-expression-based AST
+## representation into an AST.
 
 import
   std/[genasts, macros, tables],
   experimental/[sexp_parse],
-  nanopass/[asts, nplang, helper]
+  nanopass/[asts, nplang]
 
 import experimental/sexp {.all.} # we need access to the internal parser
 
@@ -249,29 +249,14 @@ macro check(lang: static LangInfo, nterm: static string,
       raiseError(line, col,
         "expected production of non-terminal '" & nterm & "'")
 
-macro parser*(def: untyped) =
-  ## Procedure macro that generates a parser for a language's AST. The return
-  ## type is changed to be a tuple of an AST plus the original return type,
-  ## which must be a reference to one of the target language's non-terminals.
-  if def.kind != nnkProcDef:
-    error("'parser' must be applied to a procdef", def)
-  if def.body.kind != nnkEmpty:
-    error("'parser' must be applied to a prototype", def.name)
-  if def.params.len != 2 or def.params[1].len != 3:
-    error("prototype must have a single parameter", def.name)
+proc parseAst*[S, L, N](p: var SexpParser, T: typedesc[Metavar[L, N]]): (Ast[L, S], T) =
+  ## Parses the S-expression-based AST representation from `p` into an `Ast`,
+  ## returning the result, or - in case of an error - raising an exception.
+  var ast: Ast[L, S]
+  ast.storage = new S
 
-  result = def
-  let typ = def.params[0]
-  let param = def.params[1][0]
-  let err = makeError("parameter must be of type `var SexpParser`", param)
+  let (line, col) = (p.getLine(), p.getColumn())
+  parse(p, ast)
+  check(idef(L), N, ast, 0, line, col)
 
-  result.params[0] = quote do:
-    (Ast[`typ`.L, Literals], `typ`)
-  result.body = genAst(res=ident"result", param, err, typ):
-    when param isnot SexpParser:
-      err
-    res[0].storage = new(typeof(res[0].storage))
-
-    let (line, col) = (param.getLine(), param.getColumn())
-    parse(param, res[0])
-    check(idef(typ.L), typ.N, res[0], 0, line, col)
+  result = (ast, T(index: NodeIndex(0)))

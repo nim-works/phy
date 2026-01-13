@@ -1,4 +1,4 @@
-## Implements the macros for unparsing an ASTs back into an S-expressions.
+## Implements the routines for unparsing an ASTs back into S-expressions.
 
 # TODO: instead of assembling a S-expression directly, the unparser should
 #       emit a stream of S-expression tokens (ideally as an iterator, but's
@@ -8,7 +8,7 @@
 
 import std/[macros, tables]
 import experimental/[sexp]
-import nanopass/[asts, nplang, helper]
+import nanopass/[asts, nplang]
 
 proc unparse[N: static string, S](ast: Ast[auto, S], pos: var int): SexpNode
 
@@ -79,49 +79,8 @@ proc unparse[N: static string, S](ast: Ast[auto, S], pos: var int): SexpNode =
   mixin idef
   unparse(idef(typeof(ast).L), N, ast, pos)
 
-macro unparserImpl(typ: untyped, def: untyped) =
-  ## The actual implementation of the ``unparser`` macro.
-  let unparse = bindSym"unparse"
-  let ast = genSym("ast")
-  let param = def.params[1][0]
-  def.params[1][^2] = typ
-  def.params.insert(1,
-    newIdentDefs(ast, quote do: Ast[`typ`.L, Literals]))
-  def.body = quote do:
-    var pos = `param`.index.int
-    `unparse`[`typ`.N](`ast`, pos)
-
-  result = def
-
-macro unparser*(def: untyped): untyped =
-  ## A procedure macro that generates a body for unparsing a non-terminal at
-  ## a given position to an S-expression representation. The prototype must
-  ## have the following form:
-  ##
-  ## .. code-block:: nim
-  ##
-  ##   proc name(x: Metavar[L, ...]): SexpNode
-  ##
-  ## and is expanded into:
-  ##
-  ## .. code-block:: nim
-  ##
-  ##   proc name(_: Ast[L, Literals], x: Metavar[L, ...]): SexpNode = ...
-  ##
-  ## Terminals are rendered via ``toSexpr`` (with signature
-  ## ``proc(x: T): SexpNode``) provided by the callsite.
-  if def.kind != nnkProcDef or def.body.kind != nnkEmpty:
-    error(".unparser must be applied to a procedure declaration")
-  elif def.params.len == 2 and def.params[1].len == 1:
-    error("prototype must have exactly one parameter")
-
-  let
-    typ = def.params[1][^2]
-    impl = bindSym"unparserImpl"
-    error = makeError("parameter type must be a `Metavar`", typ)
-
-  result = quote do:
-    when `typ` is Metavar:
-      `impl`(`typ`, `def`)
-    else:
-      `error`
+proc unparse*[L, S, N](ast: Ast[L, S], at: Metavar[L, N]): SexpNode =
+  ## Unparses the production at the given position `at`, returning it as a
+  ## self-contained S-expression.
+  var pos = at.index.int
+  unparse[N](ast, pos)

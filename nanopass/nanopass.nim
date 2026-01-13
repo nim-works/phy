@@ -13,7 +13,7 @@ import
 
 export asts
 export nppatterns.matches
-export npbuild.build, npmatch.match, npunparser.unparser, npparser.parser
+export npbuild.build, npmatch.match, npunparser.unparse, npparser.parseAst
 export nppass.pass, nppass.inpass, nppass.outpass
 
 export nppass.genProcessor
