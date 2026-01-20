@@ -1,12 +1,15 @@
 ## Implements the storage for literal data embedded in ASTs.
 
-# TODO: use bi-tables for the number and string values
+import nanopass/asts
+
+# TODO: use bi-tables for the number, string, and source location values
 
 type
   Literals* = object
     ## Storage container for literal data, to be used with nanopass ASTs.
     numbers*: seq[uint64] ## a list of bit patterns
     strings*: seq[string]
+    locs*: seq[SourceLoc]
 
 const
   OverflowShift = 31
@@ -58,10 +61,12 @@ proc unpack*(s: Literals, id: uint32, _: typedesc[string]): lent string {.inline
   ## Returns the string stored under `id`.
   s.strings[id]
 
-# TODO: remove the temporary overloads for objects again
+proc pack*(s: var Literals, val: SourceLoc): uint32 {.inline.} =
+  ## Adds `val` to the database and returns the ID to later look up `val` with.
+  result = uint32(s.locs.len)
+  s.locs.add val
 
-proc pack*[T: object](s: Literals, val: T): uint32 =
-  result = 0
-
-proc unpack*[T: object](s: Literals, id: uint32, _: typedesc[T]): T =
-  discard
+proc unpack*(s: Literals, id: uint32, _: typedesc[SourceLoc]
+            ): SourceLoc {.inline.} =
+  ## Returns the source location earlier stored under `id`.
+  s.locs[id]
