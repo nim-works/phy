@@ -188,12 +188,12 @@ proc basicBlocks(ir: Lskully): L6 {.pass.} =
 
   proc target(x: src.tgt, map: Table[int64, int]): dst.tgt =
     match x:
-    of Goto(i): build dst.tgt, Goto(i(^map[i.val]))
-    of Unwind(): build dst.tgt, Unwind()
+    of Goto(i): build dst.tgt, x.info, Goto(i(^map[i.val]))
+    of Unwind(): build dst.tgt, x.info, Unwind()
 
   proc goto(x: src.go, map: Table[int64, int]): dst.go =
     match x:
-    of Goto(i): build dst.go, Goto(i(^map[i.val]))
+    of Goto(i): build dst.go, x.info, Goto(i(^map[i.val]))
 
   type BBlock = object
     isExcept: bool
@@ -203,69 +203,69 @@ proc basicBlocks(ir: Lskully): L6 {.pass.} =
   proc blocks(x: src.st, bbs: var seq[dst.bb], bb: var BBlock, map: Table[int64, int]) =
     proc commitBlock(bbs: var seq[dst.bb], bb: var BBlock, ex: dst.ex) =
       if bb.isExcept:
-        bbs.add build(dst.bb, Except(^bb.params, ...bb.stmts, ex))
+        bbs.add build(dst.bb, NoSLoc, Except(^bb.params, ...bb.stmts, ex))
       else:
-        bbs.add build(dst.bb, Block(^bb.params, ...bb.stmts, ex))
+        bbs.add build(dst.bb, NoSLoc, Block(^bb.params, ...bb.stmts, ex))
       bb.stmts.shrink(0)
 
     proc startBlock(bb: var BBlock) =
       bb.isExcept = false
-      bb.params = build(dst.p, Params([]))
+      bb.params = build(dst.p, NoSLoc, Params([]))
 
     match x:
     of Stmts(...st):
       for it in st.items:
         blocks(it, bbs, bb, map)
     of Goto(i):
-      commitBlock bbs, bb, build(dst.ex, Goto(i(^map[i.val])))
+      commitBlock bbs, bb, build(dst.ex, x.info, Goto(i(^map[i.val])))
     of Join(i):
       # don't merge an empty entry block with the following block; the latter
       # might be a loop start
       if map[i.val] > bbs.len:
-        commitBlock bbs, bb, build(dst.ex, Goto(i(^map[i.val])))
+        commitBlock bbs, bb, build(dst.ex, x.info, Goto(i(^map[i.val])))
       startBlock(bb)
     of Except(_, lo):
       assert bb.stmts.len == 0, "control flow falls through into exception handler"
       bb.isExcept = true
-      bb.params = build(dst.p, Params([lo]))
+      bb.params = build(dst.p, x.info, Params([lo]))
     of Asgn([lv], [e]):
-      bb.stmts.add build(dst.st, Asgn(lv, e))
+      bb.stmts.add build(dst.st, x.info, Asgn(lv, e))
     of Store([t], [e0], [e1]):
-      bb.stmts.add build(dst.st, Store(t, e0, e1))
+      bb.stmts.add build(dst.st, x.info, Store(t, e0, e1))
     of Blit([e0], [e1], [e2]):
-      bb.stmts.add build(dst.st, Blit(e0, e1, e2))
+      bb.stmts.add build(dst.st, x.info, Blit(e0, e1, e2))
     of Clear([e0], [e1]):
-      bb.stmts.add build(dst.st, Clear(e0, e1))
+      bb.stmts.add build(dst.st, x.info, Clear(e0, e1))
     of Call(pr, ...[e]):
-      bb.stmts.add build(dst.st, Call(pr, ...e))
+      bb.stmts.add build(dst.st, x.info, Call(pr, ...e))
     of Call([t], [e0], ...[e1]):
-      bb.stmts.add build(dst.st, Call(t, e0, ...e1))
+      bb.stmts.add build(dst.st, x.info, Call(t, e0, ...e1))
     of Drop([e]):
-      bb.stmts.add build(dst.st, Drop(e))
+      bb.stmts.add build(dst.st, x.info, Drop(e))
     of CheckedCall([t], [e0], ...[e1], tgt):
-      commitBlock bbs, bb, build(dst.ex, CheckedCall(t, e0, ...e1, Goto(i(^(bbs.len+1))), ^target(tgt, map)))
+      commitBlock bbs, bb, build(dst.ex, x.info, CheckedCall(t, e0, ...e1, Goto(i(^(bbs.len+1))), ^target(tgt, map)))
       startBlock(bb)
     of CheckedCall(pr, ...[e], tgt):
-      commitBlock bbs, bb, build(dst.ex, CheckedCall(pr, ...e, Goto(i(^(bbs.len+1))), ^target(tgt, map)))
+      commitBlock bbs, bb, build(dst.ex, x.info, CheckedCall(pr, ...e, Goto(i(^(bbs.len+1))), ^target(tgt, map)))
       startBlock(bb)
     of CheckedCallAsgn(lo, [t], [e0], ...[e1], tgt):
-      commitBlock bbs, bb, build(dst.ex, CheckedCallAsgn(lo, t, e0, ...e1, Goto(i(^(bbs.len+1))), ^target(tgt, map)))
+      commitBlock bbs, bb, build(dst.ex, x.info, CheckedCallAsgn(lo, t, e0, ...e1, Goto(i(^(bbs.len+1))), ^target(tgt, map)))
       startBlock(bb)
     of CheckedCallAsgn(lo, pr, ...[e], tgt):
-      commitBlock bbs, bb, build(dst.ex, CheckedCallAsgn(lo, pr, ...e, Goto(i(^(bbs.len+1))), ^target(tgt, map)))
+      commitBlock bbs, bb, build(dst.ex, x.info, CheckedCallAsgn(lo, pr, ...e, Goto(i(^(bbs.len+1))), ^target(tgt, map)))
       startBlock(bb)
     of Return():
-      commitBlock bbs, bb, build(dst.ex, Return())
+      commitBlock bbs, bb, build(dst.ex, x.info, Return())
     of Return([e]):
-      commitBlock bbs, bb, build(dst.ex, Return(e))
+      commitBlock bbs, bb, build(dst.ex, x.info, Return(e))
     of Raise([e], tgt):
-      commitBlock bbs, bb, build(dst.ex, Raise(e, ^target(tgt, map)))
+      commitBlock bbs, bb, build(dst.ex, x.info, Raise(e, ^target(tgt, map)))
     of Branch([e], go0, go1):
-      commitBlock bbs, bb, build(dst.ex, Branch(e, ^goto(go0, map), ^goto(go1, map)))
+      commitBlock bbs, bb, build(dst.ex, x.info, Branch(e, ^goto(go0, map), ^goto(go1, map)))
     of Unreachable():
-      commitBlock bbs, bb, build(dst.ex, Unreachable())
+      commitBlock bbs, bb, build(dst.ex, x.info, Unreachable())
     of Loop(i):
-      commitBlock bbs, bb, build(dst.ex, Loop(i(^map[i.val])))
+      commitBlock bbs, bb, build(dst.ex, x.info, Loop(i(^map[i.val])))
 
   proc scanStmt(ir: src.st, map: var Table[int64, int], wasJoin: var bool,
                 next: var int) =
@@ -397,17 +397,17 @@ proc flattenPaths(ir: L5): L4 {.pass.} =
   proc filter(x: src.lv, args: var seq[dst.e]): (dst.ro, src.t) =
     match x:
     of Deref(t, [e]):
-      (build(dst.ro, Deref(^(t -> dst.t), e)), t)
+      (build(dst.ro, x.info, Deref(^(t -> dst.t), e)), t)
     of Field(lv, i):
       let (root, t) = filter(lv, args)
-      args.add build(dst.e, i)
+      args.add build(dst.e, x.info, i)
       (root, elemAt(t, i.val))
     of At(lv, [e]):
       let (root, t) = filter(lv, args)
       args.add e
       (root, arrayElem(t))
     of lo:
-      (build(dst.ro, lo), locals[ord lo.val])
+      (build(dst.ro, x.info, lo), locals[ord lo.val])
 
   proc typ(x: src.t): dst.t {.generated.}
   proc bblock(x: src.bb): dst.bb {.generated.}
@@ -498,18 +498,18 @@ proc aggregateParams(ir: L4): L3s2 {.pass.} =
 
   proc getType(x: src.e): dst.t =
     match x:
-    of Le(_, _, _): build dst.t, UInt(i(1))
-    of Lt(_, _, _): build dst.t, UInt(i(1))
-    of Eq(_, _, _): build dst.t, UInt(i(1))
-    of Not(_):      build dst.t, UInt(i(1))
-    of Addr(_):     build dst.t, Ptr()
-    of Nil():       build dst.t, Ptr()
-    of Copy(g):     discard g; build dst.t, Ptr()
+    of Le(_, _, _): build dst.t, NoSLoc, UInt(i(1))
+    of Lt(_, _, _): build dst.t, NoSLoc, UInt(i(1))
+    of Eq(_, _, _): build dst.t, NoSLoc, UInt(i(1))
+    of Not(_):      build dst.t, NoSLoc, UInt(i(1))
+    of Addr(_):     build dst.t, NoSLoc, Ptr()
+    of Nil():       build dst.t, NoSLoc, Ptr()
+    of Copy(g):     discard g; build dst.t, NoSLoc, Ptr()
     of Copy(Path([t], ...any)): t
     of Copy(lo): locals[ord lo.val]
     of Call(pr, ...any): typ(retType(signatures[ord pr.val]))
     of Call(t, ...any):  typ(retType(t))
-    of ProcVal(_):       build dst.t, Ptr()
+    of ProcVal(_):       build dst.t, NoSLoc, Ptr()
     of i: discard i; unreachable()
     of fl: discard fl; unreachable()
     of e:
@@ -520,16 +520,16 @@ proc aggregateParams(ir: L4): L3s2 {.pass.} =
   proc operand(x: src.e): dst.e =
     if needsSave:
       match x:
-      of Addr([lv]): build dst.e, Addr(lv)
-      of Nil():      build dst.e, Nil()
-      of i: build dst.e, i
-      of fl: build dst.e, fl
+      of Addr([lv]): build dst.e, x.info, Addr(lv)
+      of Nil():      build dst.e, x.info, Nil()
+      of i: build dst.e, x.info, i
+      of fl: build dst.e, x.info, fl
       else:
         let tmp = newTemp(getType(x))
         needsSave = false
-        stmts.add build(dst.st, Asgn(tmp, ^expr(x)))
+        stmts.add build(dst.st, x.info, Asgn(tmp, ^expr(x)))
         needsSave = true
-        build dst.e, Copy(tmp)
+        build dst.e, x.info, Copy(tmp)
     else:
       expr(x)
 
@@ -569,21 +569,21 @@ proc aggregateParams(ir: L4): L3s2 {.pass.} =
         # ^^ the hoisted expression isn't affected by side effects
         match it:
         of Call(t, ...e1):
-          stmts.add build(dst.st, Asgn(tmp, Call(^typ(t), ...args(t, e1))))
+          stmts.add build(dst.st, it.info, Asgn(tmp, Call(^typ(t), ...args(t, e1))))
         of Call(pr, ...e1):
-          stmts.add build(dst.st, Asgn(tmp, Call(pr, ...args(signatures[ord pr.val], e1))))
+          stmts.add build(dst.st, it.info, Asgn(tmp, Call(pr, ...args(signatures[ord pr.val], e1))))
         else:
-          stmts.add build(dst.st, Asgn(tmp, ^expr(it)))
+          stmts.add build(dst.st, it.info, Asgn(tmp, ^expr(it)))
         needsSave = true
-        result[i] = build(dst.e, Addr(tmp))
+        result[i] = build(dst.e, it.info, Addr(tmp))
       elif needsSave:
         let pt = typ(pt)
         let tmp = newTemp(pt)
         needsSave = false
         # ^^ the hoisted expression isn't affected by side effects
-        stmts.add build(dst.st, Asgn(tmp, ^expr(it)))
+        stmts.add build(dst.st, it.info, Asgn(tmp, ^expr(it)))
         needsSave = true
-        result[i] = build(dst.e, Copy(tmp))
+        result[i] = build(dst.e, it.info, Copy(tmp))
       else:
         result[i] = expr(it)
 
@@ -602,7 +602,7 @@ proc aggregateParams(ir: L4): L3s2 {.pass.} =
       if isAggregate(rt):
         let rt = typ(rt)
         let tmp = newTemp(rt)
-        stmts.add build(dst.st, Call(pr, [...s, Addr(tmp)]))
+        stmts.add build(dst.st, x.info, Call(pr, [...s, Addr(tmp)]))
         needsSave = true
         build Copy(tmp)
       else:
@@ -614,7 +614,7 @@ proc aggregateParams(ir: L4): L3s2 {.pass.} =
       if isAggregate(t):
         let rt = typ(rt)
         let tmp = newTemp(rt)
-        stmts.add build(dst.st, Call(^typ(t), ^operand(e0), [...s, Addr(tmp)]))
+        stmts.add build(dst.st, x.info, Call(^typ(t), ^operand(e0), [...s, Addr(tmp)]))
         needsSave = true
         build Copy(tmp)
       else:
@@ -651,7 +651,7 @@ proc aggregateParams(ir: L4): L3s2 {.pass.} =
       if isAggregate(retType(t)):
         let tmp = newTemp(typ retType(t))
         # the temporary needs to be copied to the actual target upon landing
-        delayed[i.val] = build(dst.st, Asgn(lo, Copy(tmp)))
+        delayed[i.val] = build(dst.st, x.info, Asgn(lo, Copy(tmp)))
         build CheckedCall(^typ(t), callee, [...args, Addr(tmp)], Goto(i), tgt)
       else:
         build CheckedCallAsgn(lo, ^typ(t), callee, ...args, Goto(i), tgt)
@@ -660,7 +660,7 @@ proc aggregateParams(ir: L4): L3s2 {.pass.} =
       if isAggregate(retType(sig)):
         let tmp = newTemp(typ retType(sig))
         # the temporary needs to be copied to the actual target upon landing
-        delayed[i.val] = build(dst.st, Asgn(lo, Copy(tmp)))
+        delayed[i.val] = build(dst.st, x.info, Asgn(lo, Copy(tmp)))
         build CheckedCall(pr, [...args(sig, e), Addr(tmp)], Goto(i), tgt)
       else:
         build CheckedCallAsgn(lo, pr, ...args(sig, e), Goto(i), tgt)
@@ -703,8 +703,8 @@ proc aggregateParams(ir: L4): L3s2 {.pass.} =
         if outParam.isSome:
           match ex:
           of Return([e0 -> e]):
-            stmts.insert build(dst.st, Store(^getType(e0), Copy(^outParam.unsafeGet), e)), start
-            build(dst.ex, Return())
+            stmts.insert build(dst.st, e0.info, Store(^getType(e0), Copy(^outParam.unsafeGet), e)), start
+            build(dst.ex, ex.info, Return())
           else:           exit(ex)
         else:             exit(ex)
       reverse(stmts.toOpenArray(start, stmts.high))
@@ -741,7 +741,7 @@ proc aggregateParams(ir: L4): L3s2 {.pass.} =
       origLocals = t1
       locals = map(t1, typ)
       if isAggregate(retType(t0)):
-        outParam = some newTemp(build(dst.t, Ptr()))
+        outParam = some newTemp(build(dst.t, NoSLoc, Ptr()))
       else:
         outParam = none dst.lo
       var blocks = newSeq[dst.bb](bb.len)
@@ -749,7 +749,7 @@ proc aggregateParams(ir: L4): L3s2 {.pass.} =
         blocks[i] = bblock(it, i)
       # turn all aggregate parameter locals into pointers
       for it in params.items:
-        locals[ord it] = build(dst.t, Ptr())
+        locals[ord it] = build(dst.t, NoSLoc, Ptr())
       build ProcDef(^typ(t0), Locals(...locals), List(...blocks))
 
 proc aggregatesToBlob(ir: L3s2, ptrsize: uint): L3s1 {.pass.} =
@@ -811,7 +811,7 @@ proc aggregatesToBlob(ir: L3s2, ptrsize: uint): L3s1 {.pass.} =
     (typ, result) = (;
       match root:
       of Deref(t, [e]): (t, e)
-      of lo:      (locals[ord lo.val], build(dst.e, Addr(lo))))
+      of lo:      (locals[ord lo.val], build(dst.e, root.info, Addr(lo))))
 
     var offset = 0'i64
     for it in elems.items:
@@ -824,15 +824,15 @@ proc aggregatesToBlob(ir: L3s2, ptrsize: uint): L3s1 {.pass.} =
         # an array access with a dynamic index
         if offset > 0:
           # add the static offset computed so far:
-          result = build(dst.e, Offset(result, i(offset), i(1)))
+          result = build(dst.e, it.info, Offset(result, i(offset), i(1)))
           offset = 0
 
         typ = typeOfElem(typ, 0)
         # apply the dynamic array element offset:
-        result = build(dst.e, Offset(result, ^expr(it), i(^size(typ))))
+        result = build(dst.e, it.info, Offset(result, ^expr(it), i(^size(typ))))
 
     if offset > 0:
-      result = build(dst.e, Offset(result, i(offset), i(1)))
+      result = build(dst.e, result.info, Offset(result, i(offset), i(1)))
 
   proc lvalue(x: src.lv): dst.lv {.transform.} =
     case x
@@ -996,7 +996,7 @@ proc localsToBlob(ir: L3s1, ptrSize: uint): L3 {.pass.} =
       if x.val in marker:
         let typ = locals[ord x.val]
         let tmp = newTemp(typ)
-        stmts.add build(dst.st, Store(typ, Addr(x), Copy(tmp)))
+        stmts.add build(dst.st, NoSLoc, Store(typ, Addr(x), Copy(tmp)))
         tmp
       else:
         x
@@ -1031,7 +1031,7 @@ proc localsToBlob(ir: L3s1, ptrSize: uint): L3 {.pass.} =
       for i, it in t1.pairs:
         if Local(i) in marker and not isBlob(it):
           let (size, align) = sizeAndAlignment(it)
-          locals[i] = build(dst.t, Blob(size, align))
+          locals[i] = build(dst.t, NoSLoc, Blob(size, align))
 
       build ProcDef(^typ(t0), Locals(...locals), List(...bbs))
 
@@ -1061,7 +1061,7 @@ proc legalizeBlobOps(ir: L3): L2 {.pass.} =
 
   proc operand(x: src.e): dst.e =
     match x:
-    of Copy([lv0 -> lv]):   build(dst.e, Addr(lv))
+    of Copy([lv0 -> lv]):   build(dst.e, x.info, Addr(lv))
     of Load(_, [e]):        e
     else:                   unreachable()
 
@@ -1185,13 +1185,13 @@ proc stackAlloc(ir: L2): L1 {.pass.} =
         # the body stays as is, only the header needs to be modified
         build ProcDef(^typ(t), i(0), Locals(...map(t1, typ)), List(...map(bb, bblock)))
       else:
-        framePointer = build(dst.e, Copy(lo(^Local(nextId))))
+        framePointer = build(dst.e, x.info, Copy(lo(^Local(nextId))))
         var filtered = newSeq[dst.t](nextId + 1)
         for i, it in locals.pairs:
           if not it.onStack:
             filtered[it.offset] = typ(t1[i])
 
-        filtered[^1] = build(dst.t, Ptr())
+        filtered[^1] = build(dst.t, NoSLoc, Ptr())
 
         var blocks = newSeq[dst.bb](bb.len)
         for i, it in bb.pairs:
@@ -1199,7 +1199,7 @@ proc stackAlloc(ir: L2): L1 {.pass.} =
             # pass the frame pointer as an extra argument
             match it:
             of Block(Params(...lo), ...[st], [ex]):
-              blocks[i] = build(dst.bb, Block(Params([...map(lo, mapLocal), lo(nextid)]), ...st, ex))
+              blocks[i] = build(dst.bb, it.info, Block(Params([...map(lo, mapLocal), lo(nextid)]), ...st, ex))
             else:
               unreachable()
           else:
@@ -1231,7 +1231,7 @@ proc inlineTypes(ir: L1): LPtr {.pass.} =
         match it:
         of ProcTy(...any):
           if pos != i:
-            types[i] = build(dst.t, tid(pos)) # needs a fixup
+            types[i] = build(dst.t, NoSLoc, tid(pos)) # needs a fixup
           inc pos
         else:
           types[i] = typ(it)
