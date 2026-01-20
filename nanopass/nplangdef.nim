@@ -1,6 +1,6 @@
 ## Implements the language definition parsing and processing.
 
-import std/[macros, intsets, sets, strformat, tables]
+import std/[macros, intsets, sets, strformat, strutils, tables]
 
 type
   # Core types capturing a defined language
@@ -359,8 +359,7 @@ proc buildLanguage(add, sub: seq[NimNode],
     case n.kind
     of nnkCall:
       let got = def.addForm(parseForm(n))
-      if def.nterminals[to].forms.findIt(it.semantic == got.semantic) != -1:
-        error(fmt"production is already part of '{to}'", n)
+      # duplicate productions are checked for later
       def.nterminals[to].forms.add got
     of nnkIdent:
       let name = n.strVal
@@ -430,6 +429,47 @@ proc buildLanguage(add, sub: seq[NimNode],
           error(fmt"no meta-var with name '{typ.strVal}' exists", typ)
 
       result.records[name] = record
+
+  # make sure all non-terminals are well-formed, which is possible only once
+  # all production additions were made
+  for name, nt in result.nterminals.pairs:
+    proc gather(def: LangDef, top, name: string, used: var IntSet,
+                included: var seq[string]) =
+      if name == top:
+        error(fmt"non-terminal '{top}' includes itself", info)
+      else:
+        if name notin included:
+          included.add name
+
+        if name in def.nterminals:
+          for it in def.nterminals[name].vars.items:
+            gather(def, top, vars[it], used, included)
+          for it in def.nterminals[name].forms.items:
+            used.incl(it.semantic)
+
+    var used = initIntSet()
+    var included = newSeq[string]()
+
+    for v in nt.vars.items:
+      var gotUsed: IntSet
+      var gotIncluded: seq[string]
+      gather(result, name, vars[v], gotUsed, gotIncluded)
+      # add the gathered sets to the total sets:
+      for it in gotUsed.items:
+        if containsOrIncl(used, it):
+          error("duplicate production '$1' in non-terminal '$2'" %
+                [$result.forms[it], name], info)
+
+      for it in gotIncluded.items:
+        if it in included:
+          error("duplicate production '$1' in non-terminal '$2'" %
+                [it, name], info)
+        included.add it
+
+    for it in nt.forms.items:
+      if containsOrIncl(used, it.semantic):
+        error("duplicate production '$1' in non-terminal '$2'" %
+              [$result.forms[it.semantic], name], info)
 
   # TODO: properly set the entry non-terminal
   result.entry = "module"
