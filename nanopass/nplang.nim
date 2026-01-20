@@ -128,7 +128,7 @@ proc buildLangInfo*(def: LangDef): LangInfo =
   for name, it in def.nterminals.pairs:
     let id = result.map[name]
     for v in it.vars.items:
-      result.types[id].sub.add result.map[v]
+      result.types[id].sub.add result.map[v.mvar]
 
   for name, it in def.records.pairs:
     let id = result.map[name]

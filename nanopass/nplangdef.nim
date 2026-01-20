@@ -29,7 +29,7 @@ type
   NonTerminal* = object
     mvars*: seq[string]
       ## the meta-variables for ranging over the productions
-    vars*: seq[string]
+    vars*: seq[tuple[mvar, typ: string]]
       ## meta-variables used as productions
     forms*: seq[OrigForm]
       ## forms used as productions
@@ -192,7 +192,7 @@ proc buildLanguage(add, sub: seq[NimNode],
         error(fmt"given form is not a production of '{to}'", n)
       def.nterminals[to].forms.delete(idx)
     of nnkIdent:
-      let idx = def.nterminals[to].vars.find(n.strVal)
+      let idx = def.nterminals[to].vars.findIt(it.mvar == n.strVal)
       if idx == -1:
         error(fmt"given form is not a production of '{to}'", n)
       def.nterminals[to].vars.delete(idx)
@@ -310,8 +310,10 @@ proc buildLanguage(add, sub: seq[NimNode],
 
     # check the meta-vars:
     for v in res.vars.items:
-      if v notin vars:
-        error(fmt"cannot inherit '{name}'; '{v}' (used as a production of '{name}') was removed",
+      if v.mvar notin vars:
+        error(fmt"cannot inherit '{name}'; '{v.mvar}' was removed", info)
+      elif vars[v.mvar] != v.typ:
+        error(fmt"cannot inherit '{name}'; '{v.mvar}' changed its meaning",
               info)
 
     result.nterminals[name] = res
@@ -372,7 +374,7 @@ proc buildLanguage(add, sub: seq[NimNode],
       let name = n.strVal
       if name notin vars:
         error(fmt"no meta-variable with name '{name}'", n)
-      def.nterminals[to].vars.add name
+      def.nterminals[to].vars.add (name, vars[name])
     else:
       error(fmt"unexpected syntax: {n.kind}", n)
 
@@ -449,7 +451,7 @@ proc buildLanguage(add, sub: seq[NimNode],
 
         if name in def.nterminals:
           for it in def.nterminals[name].vars.items:
-            gather(def, top, vars[it], used, included)
+            gather(def, top, it.typ, used, included)
           for it in def.nterminals[name].forms.items:
             used.incl(it.semantic)
 
@@ -459,7 +461,7 @@ proc buildLanguage(add, sub: seq[NimNode],
     for v in nt.vars.items:
       var gotUsed: IntSet
       var gotIncluded: HashSet[string]
-      gather(result, name, vars[v], gotUsed, gotIncluded)
+      gather(result, name, v.typ, gotUsed, gotIncluded)
       # add the gathered sets to the total sets:
       for it in gotUsed.items:
         if containsOrIncl(used, it):
