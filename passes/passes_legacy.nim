@@ -1328,24 +1328,12 @@ proc toSexp(x: float): SexpNode =
 proc toSexp(x: string): SexpNode =
   newSString(x)
 
-proc parseInput(p: var SexpParser): Lskully.m {.parser.}
-proc parseInner(p: var SexpParser): L0.m {.parser.}
-proc render(p: L6.m): SexpNode {.unparser.}
-proc render(p: L5.m): SexpNode {.unparser.}
-proc render(p: L4.m): SexpNode {.unparser.}
-proc render(p: L3s2.m): SexpNode {.unparser.}
-proc render(p: L3.m): SexpNode {.unparser.}
-proc render(p: L2.m): SexpNode {.unparser.}
-proc render(p: L1.m): SexpNode {.unparser.}
-proc render(p: LPtr.m): SexpNode {.unparser.}
-proc render(p: L0.m): SexpNode {.unparser.}
-
 let f = openFileStream(getExecArgs()[0], fmRead)
 var p: SexpParser
 p.open(f)
 discard p.getTok()
 
-let (ast, m) = parseInput(p)
+let (ast, m) = parseAst[Literals](p, LSkully.m)
 f.close()
 echo "parsed"
 
