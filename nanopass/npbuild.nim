@@ -92,20 +92,25 @@ proc lengthError(len: int) {.noinline.} =
   raise ValueError.newException(
     fmt"no form is able to fit the expanded sequence (length = {len}")
 
-proc append[L, U](ast: var Ast[L, auto], x: Value[U]) =
-  ast.tree.nodes.add node(typeof(lookup[U, L.meta.term_map]()).V, x.index)
+proc append[L, U](ast: var Ast[L, auto], info: SLocRef, x: Value[U]) =
+  ast.tree.nodes.add node(
+    typeof(lookup[U, L.meta.term_map]()).V,
+    info,
+    x.index)
 
-proc append[L](ast: var Ast[L, auto], x: RecordRef) =
+proc append[L](ast: var Ast[L, auto], info: SLocRef, x: RecordRef) =
   ast.tree.nodes.add node(
     typeof(lookup[typeof(x), L.meta.record_map]()).V,
+    info,
     x.id)
 
-proc append[L](ast: var Ast[L, auto], x: Metavar) =
+proc append[L](ast: var Ast[L, auto], info: SLocRef, x: Metavar) =
+  # the ref itself doesn't need source location info
   ast.tree.nodes.add node(RefTag, uint32(x.index))
 
-proc append[L](ast: var Ast[L, auto], x: openArray) =
+proc append[L](ast: var Ast[L, auto], info: SLocRef, x: openArray) =
   for it in x.items:
-    append[L](ast, it)
+    append[L](ast, info, it)
 
 template coerce[S, T, U](s: S, val: U, _: typedesc[Value[T]]): Value[T] =
   mixin pack
@@ -129,9 +134,9 @@ proc containsForm(lang: LangInfo, typ: LangType, form: int): bool =
         result = true
         break
 
-proc buildForm(lang: LangInfo, typ: int, ast, e: NimNode): NimNode
+proc buildForm(lang: LangInfo, typ: int, ast, info, e: NimNode): NimNode
 
-proc buildRecord(lang: LangInfo, ast, e: NimNode): NimNode =
+proc buildRecord(lang: LangInfo, ast, info, e: NimNode): NimNode =
   ## Translates a record construction form from the `build` language
   ## to NimSkull.
   assert e.kind == nnkObjConstr
@@ -176,12 +181,12 @@ proc buildRecord(lang: LangInfo, ast, e: NimNode): NimNode =
         if val.kind == nnkSym:
           val # let the compiler report a type mismatch
         else:
-          buildRecord(lang, ast, val)
+          buildRecord(lang, ast, info, val)
       of tkNonTerminal:
         if val.kind == nnkSym:
           val # let the compiler report a type mismatch
         else:
-          buildForm(lang, ftyp, ast, val)
+          buildForm(lang, ftyp, ast, info, val)
 
     copyLineInfo(body, val)
     result.add nnkAsgn.newTree(newDotExpr(tmp, ident(fname)), body)
@@ -190,7 +195,7 @@ proc buildRecord(lang: LangInfo, ast, e: NimNode): NimNode =
     `ast`.records.`mvar`.add(`tmp`)
     `ast`.L.`mvar`(id: `ast`.records.`mvar`.high.uint32)
 
-proc buildForm(lang: LangInfo, typ: int, ast, e: NimNode): NimNode =
+proc buildForm(lang: LangInfo, typ: int, ast, info, e: NimNode): NimNode =
   ## Emits a tree construction for the AST described by `e`, with the syntax
   ## from `lang`.
 
@@ -216,7 +221,7 @@ proc buildForm(lang: LangInfo, typ: int, ast, e: NimNode): NimNode =
     let append = bindSym"append"
     result = quote do:
       when matches(`src`, `expect`):
-        `append`(`ast`, `src`)
+        `append`(`ast`, `info`, `src`)
       else:
         `error`
     copyLineInfoForTree(result, src)
@@ -450,14 +455,14 @@ proc buildForm(lang: LangInfo, typ: int, ast, e: NimNode): NimNode =
         # simple case, the tag is known upfront
         let id = candidates[0].tag.uint8
         c.start = nil # no 'start' variable needed
-        result.add genAst(ast, id, lenExpr) do:
-          ast.tree.nodes.add node(id, uint32(lenExpr))
+        result.add genAst(ast, id, info, lenExpr) do:
+          ast.tree.nodes.add node(id, info, uint32(lenExpr))
       else:
         # the tag is only known at the end
         c.start = genSym("start")
-        result.add genAst(ast, start=c.start, lenExpr) do:
+        result.add genAst(ast, start=c.start, info, lenExpr) do:
           let start = ast.tree.nodes.len
-          ast.tree.nodes.add node(0, uint32(lenExpr))
+          ast.tree.nodes.add node(0, info, uint32(lenExpr))
 
       result.addAll emit(lang, c, tree, n, 0)
     of nnkBracket:
@@ -478,9 +483,9 @@ proc buildForm(lang: LangInfo, typ: int, ast, e: NimNode): NimNode =
         result = quote do:
           when matches(`n`, `expect`) or `n` is `expect`.T:
             when `n` is `expect`.T:
-              `append`(`ast`, terminal(`n`))
+              `append`(`ast`, `info`, terminal(`n`))
             else:
-              `append`(`ast`, `n`)
+              `append`(`ast`, `info`, `n`)
           else:
             `error`
       of tkRecord, tkNonTerminal:
@@ -507,7 +512,7 @@ proc buildForm(lang: LangInfo, typ: int, ast, e: NimNode): NimNode =
       # record constructions may create their own nodes, hence them
       # having to be hoisted
       result = genSym()
-      to.add newLetStmt(result, buildRecord(lang, ast, e))
+      to.add newLetStmt(result, buildRecord(lang, ast, info, e))
     of nnkBracket:
       result = e
       for i in 0..<e.len:
@@ -526,16 +531,16 @@ proc buildForm(lang: LangInfo, typ: int, ast, e: NimNode): NimNode =
     `ast`.L.`mvar`(index: `root`)
 
 macro buildImpl(lang: static LangInfo, name: static string,
-                ast, e: untyped): untyped =
+                ast, info, e: untyped): untyped =
   ## Emits a tree construction for the AST described by `e`, with the syntax
   ## from `lang`.
   let typ = lang.map[name]
   case lang.types[typ].kind
-  of tkNonTerminal: buildForm(lang, typ, ast, e)
-  of tkRecord:      buildRecord(lang, ast, e)
+  of tkNonTerminal: buildForm(lang, typ, ast, info, e)
+  of tkRecord:      buildRecord(lang, ast, info, e)
   of tkTerminal:    unreachable()
 
-macro buildFirstPass(ast, mv, e: untyped): untyped =
+macro buildFirstPass(ast, mv, info, e: untyped): untyped =
   ## Implements the first half of the ``build`` macro. Hoists all unquotes out
   ## of `e`. For example:
   ##   build ..., If(^x, ^y, Call(^z))
@@ -596,20 +601,25 @@ macro buildFirstPass(ast, mv, e: untyped): untyped =
     else:
       error("unexpected syntax", n)
 
+  # hoist the `info` expression:
+  let tmp = genSym()
+  copyLineInfo(tmp, info)
+  result.add newLetStmt(tmp, info)
+
   let e = hoist(e, result)
   let impl = bindSym"buildImpl"
   result.add quote do:
-    `impl`(idef(`mv`.L), `mv`.N, `ast`, `e`)
+    `impl`(idef(`mv`.L), `mv`.N, `ast`, `tmp`, `e`)
 
 template build*[L, N](ast: var Ast[L, auto], t: typedesc[Metavar[L, N]],
-                      e: untyped): untyped =
+                      info: SLocRef, e: untyped): untyped =
   ## Evaluates the AST construction expression `e`, whose result must be a
   ## production of `mv`, returning a `Metavar` pointing to the created AST
   ## fragment.
-  buildFirstPass(ast, t, e)
+  buildFirstPass(ast, t, info, e)
 
 template build*[L, N](ast: var Ast[L, auto], t: typedesc[RecordRef[L, N]],
-                      e: untyped): t =
+                      info: SLocRef, e: untyped): t =
   ## Evaluates the given record construction `e` in the context of `ast`,
   ## returning a reference to the new record.
-  buildFirstPass(ast, t, e)
+  buildFirstPass(ast, t, info, e)

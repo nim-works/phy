@@ -20,6 +20,10 @@ type
     maps: array[tupleLen(L.meta.records), Table[int, uint32]]
       ## for each record type, keeps track of the declared ID -> real ID
       ## mappings
+    locs: seq[SLocRef]
+      ## stack of source locations
+    curSLoc: SLocRef
+      ## source location to use for parsed nodes
 
 # the core parser logic for a language is implemented in generic routines,
 # which themselves call internal macros; the external macro then only expands
@@ -54,6 +58,20 @@ macro tags(lang: static LangInfo, typ: static int): set[uint8] =
       se.add newLit(uint8 it)
     se
 
+proc eatString(p: var SexpParser): string =
+  if p.isTok(tkString):
+    result = captureCurrString(p)
+    discard getTok(p)
+  else:
+    raiseParseErr(p, "expected string")
+
+proc eatInt(p: var SexpParser): int =
+  if p.isTok(tkInt):
+    result = parseInt(currString(p))
+    discard getTok(p)
+  else:
+    raiseParseErr(p, "expected integer")
+
 proc raiseError(line, col: int, msg: string) {.noreturn.} =
   raise ValueError.newException("(" & $line & ", " & $col & ") " & msg)
 
@@ -80,9 +98,10 @@ macro genTerminalParser(lang: static LangInfo) =
         block:
           let val = tryParse(node, `typ`)
           if val.isSome:
-            return node(`tag`, pack(lit, val.unsafeGet))
+            return node(`tag`, c.curSLoc, pack(c.storage[], val.unsafeGet))
 
-proc parseTerminal[L, S](lit: var S, node: SexpNode, line, col: int): AstNode =
+proc parseTerminal[L, S](c: var Ctx[L, S], node: SexpNode,
+                         line, col: int): AstNode =
   ## Implements fallback parsing of terminals.
   mixin idef
   genTerminalParser(idef(L))
@@ -167,16 +186,8 @@ macro parseFields(lang: static LangInfo, c: var Ctx, name: string) =
       "there's no symbol type called '" & name & "'")
   )
 
-proc parseRecord[L, S](c: var Ctx[L, S], p: var SexpParser) =
-  ## Parses a record definition or reference from `p`.
-  assert p.currToken == tkKeyword
-  let isDef {.used.} =
-    case currString(p)
-    of ":record-def": true
-    of ":record":     false
-    else:             raiseParseErr(p, "expected ':record' or ':record-def'")
-
-  discard getTok(p)
+proc parseRecord[L, S](c: var Ctx[L, S], p: var SexpParser, isDef: bool) =
+  ## Parses a record definition (if `isDef` is true) or reference from `p`.
   space(p)
   let start {.used.} = (p.getLine(), p.getColumn())
   if p.currToken != tkSymbol:
@@ -184,12 +195,58 @@ proc parseRecord[L, S](c: var Ctx[L, S], p: var SexpParser) =
   let name = captureCurrString(p)
   discard getTok(p)
   space(p)
-  if p.currToken != tkInt:
-    raiseParseErr(p, "expected integer")
-  let id {.used.} = parseInt(p.currString)
-  discard getTok(p)
+  let id {.used.} = eatInt(p)
 
   parseFields(idef(L), c, name)
+
+proc parseMeta[L, S](c: var Ctx[L, S], p: var SexpParser) =
+  ## Parses a meta-expression.
+  assert p.currToken == tkKeyword
+  case currString(p)
+  of ":record-def":
+    discard getTok(p)
+    parseRecord(c, p, true)
+  of ":record":
+    discard getTok(p)
+    parseRecord(c, p, false)
+  of ":info":
+    # use the given source location for a tree
+    discard getTok(p)
+    c.locs.add c.curSLoc
+    space(p)
+    eat(p, tkParensLe)
+    let file = eatString(p)
+    space(p)
+    let startLine = eatInt(p)
+    space(p)
+    let startCol = eatInt(p)
+    space(p)
+    if p.currToken == tkParensRi:
+      # only a line-column pair
+      c.curSLoc = newSourceLoc(c.storage[], file, startLine, startCol)
+    else:
+      let endLine = eatInt(p)
+      space(p)
+      let endCol = eatInt(p)
+      space(p)
+      c.curSLoc =
+        newSourceLoc(c.storage[], file, startLine, startCol, endLine, endCol)
+
+    eat(p, tkParensRi)
+    space(p)
+    parse(c, p)
+    c.curSLoc = c.locs.pop()
+  of ":no-info":
+    # use no source location for a tree
+    discard getTok(p)
+    space(p)
+    c.locs.add c.curSLoc
+    c.curSLoc = NoSLoc
+    parse(c, p)
+    c.curSLoc = c.locs.pop()
+  else:
+    raiseParseErr(p, "expected meta-expression")
+
   space(p)
   eat(p, tkParensRi)
 
@@ -197,7 +254,7 @@ proc rawParseForm[L, S](c: var Ctx[L, S], p: var SexpParser) =
   ## Parses and appends the elements for a form, without performing any
   ## grammar checks.
   let start = c.tree.nodes.len
-  c.tree.nodes.add AstNode() # sub-tree node
+  c.tree.nodes.add node(0, c.curSLoc, 0) # sub-tree node
   var len = 0
   while p.currToken != tkParensRi:
     parse(c, p)
@@ -358,13 +415,13 @@ macro parseFormImpl(lang: static LangInfo) =
 
   # emit the terminal parsing fallback
   result.add nnkElse.newTree(
-    genAst(c=ident"c", p=ident"p", lang=ident"L", name=ident"name") do:
+    genAst(c=ident"c", p=ident"p", name=ident"name") do:
       var node = newSList(newSSymbol(name))
       while p.currToken != tkParensRi:
         node.add parseSexp(p)
         space(p)
       discard getTok(p)
-      c.tree.nodes.add parseTerminal[lang](c.storage[], node, line, col)
+      c.tree.nodes.add parseTerminal(c, node, line, col)
   )
 
 proc parseForm[L, S](c: var Ctx[L, S], p: var SexpParser,
@@ -387,13 +444,13 @@ proc parse[L, S](c: var Ctx[L, S], p: var SexpParser) =
       space(p)
       parseForm(c, p, name, line, col)
     of tkKeyword:
-      parseRecord(c, p)
+      parseMeta(c, p)
     else:
       raiseParseErr(p, "expected a symbol")
   else:
     # parse an S-expression and have the user-provided parser figure it out
     let (line, col) = (p.getLine(), p.getColumn())
-    c.tree.nodes.add parseTerminal[L](c.storage[], parseSexp(p), line, col)
+    c.tree.nodes.add parseTerminal(c, parseSexp(p), line, col)
 
 proc parseAst*[S, L, N](p: var SexpParser, T: typedesc[Metavar[L, N]]): (Ast[L, S], T) =
   ## Parses the S-expression-based AST representation from `p` into an `Ast`,

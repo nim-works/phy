@@ -10,9 +10,19 @@ export trees.`[]`, trees.next, trees.child, trees.len
 export trees.TreeNode
 
 type
-  Tag* = uint8
+  SLocRef* = distinct range[0'u32 .. uint32((1 shl 24) - 1)]
+    ## Local reference to a `SourceLoc <#SourceLoc>`_.
+
+  Tag* = distinct uint32
+    ## 8-bit tag, 24-bit source location reference
   AstNode* = TreeNode[Tag]
   Tree* = PackedTree[Tag]
+
+  SourceLoc* = object
+    ## Describes a source location, which may span multiple lines and columns.
+    file*: uint32 ## ID of the packed file name
+    sline*, eline*: uint32
+    scol*, ecol*: uint16
 
   # note: the fields are exported so that the nanopass machinery can access
   # them. User code should, in most cases, not access the fields directly
@@ -55,23 +65,37 @@ type
   IndCursor* = distinct NodeIndex
     ## A cursor into a tree with indirections.
 
+  LineCol* = tuple
+    line: uint32
+    column: uint16
+
 const
   RefTag* = 128'u8
     ## the node used internally for indirections
+  NoSLoc* = SLocRef(0)
+    ## represents the absence of a source location
+
+proc `==`*(a, b: SLocRef): bool {.borrow.}
 
 template tag*(n: AstNode): uint8 =
   ## The node's tag.
-  n.kind
+  # simply cut off the higher bits
+  cast[uint8](n.kind)
+
+template info*(n: AstNode): SLocRef =
+  ## The node's source location information reference.
+  cast[SLocRef](uint32(n.kind) shr 8)
 
 template isAtom*(x: Tag): bool =
   ## The predicate required for using an uint8 as a ``PackedTree`` tag.
-  x >= RefTag
+  cast[uint8](x) >= RefTag
 
 {.push stacktrace: off, profiler: off.}
 
 proc `tag=`*(n: var AstNode, tag: uint8) {.inline.} =
   ## Sets the tag of `n` to `tag`. A low-level operation.
-  n.kind = tag
+  # overwrite only the lower 8-bit
+  n.kind = Tag((uint32(n.kind) and 0xFFFFFF00'u32) or uint32(tag))
 
 proc `==`(a, b: AstNode): bool {.inline.} =
   ## Compares the nodes for equality, ignoring source location info.
@@ -80,7 +104,64 @@ proc `==`(a, b: AstNode): bool {.inline.} =
 {.pop.}
 
 template node*(tag: uint8, v: uint32): AstNode =
-  AstNode(kind: tag, val: v)
+  ## Construct a node with the given tag and value and no source location.
+  AstNode(kind: cast[Tag](tag), val: v)
+
+template node*(tag: uint8, loc: SLocRef, v: uint32): AstNode =
+  ## Construct a node with the given tag, source location, and value.
+  AstNode(kind: cast[Tag](uint32(tag) or (uint32(loc) shl 8)), val: v)
+
+# ----- source location management -----
+
+template convert[T](v: Positive): T =
+  if v > high(typeof(T)).int: high(typeof(T))
+  else:                       T(v)
+
+proc newSourceLoc*[S](s: var S, file: string, line, col: Positive): SLocRef =
+  ## Creates a new source location and returns a reference to it.
+  let rline = convert[uint32](line)
+  let rcol  = convert[uint16](col)
+  let loc = SourceLoc(
+    file: pack(s, file),
+    sline: rline, eline: rline,
+    scol:  rcol,  ecol:  rcol
+  )
+  SLocRef(1 + pack(s, loc))
+
+proc newSourceLoc*[S](s: var S, file: string,
+                      sline, scol, eline, ecol: Positive): SLocRef =
+  ## Creates a new source location and returns a reference to it.
+  let loc = SourceLoc(
+    file:  pack(s, file),
+    sline: convert[uint32](sline),
+    eline: convert[uint32](eline),
+    scol:  convert[uint16](scol),
+    ecol:  convert[uint16](ecol)
+  )
+  SLocRef(1 + pack(s, loc))
+
+proc newSourceLoc*(ast: var Ast, file: string, line, col: Positive): SLocRef =
+  ## Creates a new source location and returns a reference to it.
+  newSourceLoc(ast.storage[], file, line, col)
+
+proc newSourceLoc*(ast: var Ast, file: string,
+                   sline, scol, eline, ecol: Positive): SLocRef =
+  ## Creates a new source location and returns a reference to it.
+  newSourceLoc(ast.storage[], file, sline, scol, eline, ecol)
+
+proc file*(ast: Ast, info: SLocRef): lent string {.inline.} =
+  ## The file for the given, valid `info`.
+  mixin unpack
+  assert info != NoSLoc
+  unpack(ast.storage[],
+    unpack(ast.storage[], uint32(info) - 1, SourceLoc).file, string)
+
+proc span*(ast: Ast, info: SLocRef): tuple[s, e: LineCol] =
+  ## The source span of the given, valid `info`. Both the start and end
+  ## are inclusive.
+  mixin unpack
+  let s = unpack(ast.storage[], uint32(info) - 1, SourceLoc)
+  ((s.sline, s.scol), (s.eline, s.ecol))
 
 # ----- slice implementation -----
 

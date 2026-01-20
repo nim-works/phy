@@ -21,8 +21,9 @@ proc canMorph(src, dst: LangInfo, a, b: SForm): Morphability =
   else:
     result = None
 
-proc append(to: var Tree, i: var int, tag: uint8, val: uint32) {.inline.} =
-  to.nodes[i] = node(tag, val)
+proc append(to: var Tree, i: var int, tag: uint8, info: SLocRef,
+            val: uint32) {.inline.} =
+  to.nodes[i] = node(tag, info, val)
   inc i
 
 macro transform*(src, dst: static LangInfo, nterm: static string,
@@ -74,30 +75,33 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
   # add the root node:
   let body = quote do:
     let len = `input`.len(pos(`cursor`))
-    discard enter(`input`, `cursor`)
     let root = `output`.nodes.len.NodeIndex
     var i = `output`.nodes.len
     # the node sequence has to be contiguous, so it's allocated upfront
     `output`.nodes.setLen(i + len + 1)
-    `output`.nodes[i] = node(`id`, uint32(len))
+    `output`.nodes[i] = node(`id`, `input`[pos(`cursor`)].info, uint32(len))
     inc i
+    discard enter(`input`, `cursor`)
 
   # call the transformers and emit the nodes in one go:
   for i, a in src.forms[form].elems.pairs:
     let b = dst.forms[target].elems[i]
     let s = ident(src.types[a.typ].mvar)
     let d = ident(dst.types[b.typ].mvar)
+    let pos =
+      case src.types[a.typ].kind
+      of tkTerminal, tkRecord:
+        quote do: pos(`cursor`)
+      of tkNonTerminal:
+        quote do: get(`input`, `cursor`)
     let got =
       case src.types[a.typ].kind
       of tkTerminal:
-        quote do:
-          src.`s`(index: `input`[pos(`cursor`)].val)
+        quote do: src.`s`(index: `input`[`pos`].val)
       of tkRecord:
-        quote do:
-          src.`s`(id: `input`[pos(`cursor`)].val)
+        quote do: src.`s`(id: `input`[`pos`].val)
       of tkNonTerminal:
-        quote do:
-          src.`s`(index: get(`input`, `cursor`))
+        quote do: src.`s`(index: `pos`)
 
     let append = bindSym"append"
     let call =
@@ -105,14 +109,17 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
       of tkTerminal:
         let tag = dst.types[b.typ].ntag
         quote do:
-          `append`(`output`, i, uint8(`tag`), (`got` -> dst.`d`).index)
+          `append`(`output`, i, uint8(`tag`), `input`[`pos`].info,
+                   (`got` -> dst.`d`).index)
       of tkRecord:
         let tag = dst.types[b.typ].rtag
         quote do:
-          `append`(`output`, i, uint8(`tag`), (`got` -> dst.`d`).id)
+          `append`(`output`, i, uint8(`tag`), `input`[`pos`].info,
+                   (`got` -> dst.`d`).id)
       of tkNonTerminal:
         quote do:
-          `append`(`output`, i, RefTag, (`got` -> dst.`d`).index.uint32)
+          `append`(`output`, i, RefTag, NoSLoc,
+                   (`got` -> dst.`d`).index.uint32)
 
     if a.repeat:
       let bias = src.forms[form].elems.len - 1
@@ -148,10 +155,10 @@ macro transformType*(src, dst: static LangInfo, nterm: static string,
     case src.types[typ].kind
     of tkTerminal:
       quote do:
-        src.`smvar`(index: `input`[get(`input`, `cursor`)].val)
+        src.`smvar`(index: `input`[pos(`cursor`)].val)
     of tkRecord:
       quote do:
-        src.`smvar`(id: `input`[get(`input`, `cursor`)].val)
+        src.`smvar`(id: `input`[pos(`cursor`)].val)
     of tkNonTerminal:
       quote do:
         src.`smvar`(index: get(`input`, `cursor`))
@@ -168,8 +175,9 @@ macro transformType*(src, dst: static LangInfo, nterm: static string,
       let tag = dst.types[dtyp].ntag.uint8
       let tmp = genSym()
       result = quote do:
+        let info = `input`[pos(`cursor`)].info
         let `tmp` = `got` -> dst.`dmvar`
-        `output`.nodes.add node(`tag`, `tmp`.index)
+        `output`.nodes.add node(`tag`, info, `tmp`.index)
         NodeIndex(`output`.nodes.high)
     of tkRecord:
       # a new node needs to be allocated so that a reference to it can
@@ -177,8 +185,9 @@ macro transformType*(src, dst: static LangInfo, nterm: static string,
       let tag = dst.types[dtyp].rtag.uint8
       let tmp = genSym()
       result = quote do:
+        let info = `input`[pos(`cursor`)].info
         let `tmp` = `got` -> dst.`dmvar`
-        `output`.nodes.add node(`tag`, `tmp`.id)
+        `output`.nodes.add node(`tag`, info, `tmp`.id)
         NodeIndex(`output`.nodes.high)
     of tkNonTerminal:
       result = quote do:

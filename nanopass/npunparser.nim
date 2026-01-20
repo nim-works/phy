@@ -18,6 +18,8 @@ type
     pos: int ## current node position
     records: seq[IntSet]
       ## for each record type, keeps track of the already-defined records
+    curSLoc: SLocRef
+      ## currently active source location
 
 proc nameToIndex[L; Name: static string](): int {.compileTime.} =
   ## Turns a record type name to the index of the corresponding set in
@@ -31,6 +33,32 @@ proc nameToIndex[L; Name: static string](): int {.compileTime.} =
         if true:
           return i
       inc i
+
+proc wrap(c: var Ctx, ast: Ast, info: SLocRef, n: sink SexpNode): SexpNode =
+  ## Wraps `n` in an ``:info`` or ``:no-info`` decorator expression where
+  ## necessary for `n` to use `info` as its source location.
+  if info == c.curSLoc:
+    n
+  elif info != NoSLoc:
+    let (start, fin) = span(ast, info)
+    if start == fin:
+      newSList([newSSymbol(":info"),
+        newSList([
+          newSString(file(ast, info)),
+          newSInt(BiggestInt start.line),
+          newSInt(BiggestInt start.column)]),
+        n])
+    else:
+      newSList([newSSymbol(":info"),
+        newSList([
+          newSString(file(ast, info)),
+          newSInt(BiggestInt start.line),
+          newSInt(BiggestInt start.column),
+          newSInt(BiggestInt fin.line),
+          newSInt(BiggestInt fin.column)]),
+        n])
+  else:
+    newSList([newSSymbol(":no-info"), n])
 
 proc unparse[N: static string, S](ast: Ast[auto, S], c: var Ctx): SexpNode
 
@@ -66,6 +94,12 @@ macro unparse(def: static LangInfo, nterm: static string, ast, c: untyped) =
   ## Unparses the non-terminal with name `nterm` from the given language at
   ## the current cursor position `pos`.
   let id = def.map[nterm]
+  result = newStmtList()
+  result.add quote do:
+    let prev = `c`.curSLoc
+    let info = `ast`.tree.nodes[`c`.pos].info
+    `c`.curSLoc = info
+
   var caseStmt = nnkCaseStmt.newTree(quote do: `ast`.tree.nodes[`c`.pos].tag)
 
   proc genForType(def: LangInfo, typ: LangType): NimNode =
@@ -131,7 +165,11 @@ macro unparse(def: static LangInfo, nterm: static string, ast, c: untyped) =
     result = newSList(
       [newSSymbol(":error"), newSInt(int `ast`.tree.nodes[`c`.pos].tag)])
     `c`.pos = `ast`.tree.next(NodeIndex `c`.pos).int)
-  result = caseStmt
+  result.add caseStmt
+  let wrap = bindSym"wrap"
+  result.add quote do:
+    `c`.curSLoc = prev
+    result = `wrap`(`c`, `ast`, info, result)
 
 proc unparse[N: static string, S](ast: Ast[auto, S], c: var Ctx): SexpNode =
   ## Unparses the non-terminal at `pos`, returning the corresponding

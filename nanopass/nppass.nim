@@ -54,9 +54,12 @@ macro transformOutImpl(lang: static LangDef, name, def: untyped) =
   let ret = def.params[0]
   def.body = newStmtList(def.body)
   def.body.insert 0, quote do:
-    # inject a build overload that implicitly uses the output language
+    # for convenience, inject a `build` macro overload that uses the
+    # result type
     template build(body: untyped): untyped {.used.} =
-      build(`to`, `ret`, body)
+      build(`to`, `ret`, NoSLoc, body)
+    template build(info: SLocRef, body: untyped): untyped {.used.} =
+      build(`to`, `ret`, info, body)
 
   result = def
 
@@ -160,12 +163,21 @@ macro transformerImpl(sclass, dclass: static TypeClass,
     result = newStmtList(result)
 
   if dclass in {tcProduction, tcRecord}:
+    # for convenience, inject a `build` macro overload that uses the
+    # result type
     let to = ident"out.ast"
-    result.insert 0, quote do:
-      # inject a build macro overload that implicitly uses the
-      # target non-terminal
-      template build(body: untyped): untyped {.used.} =
-        build(`to`, typeof(result), body)
+    if sclass == tcProduction:
+      # a source location is available
+      let info = genSym"info"
+      result.insert 0, quote do:
+        let `info` = info(`param`)
+        template build(body: untyped): untyped {.used.} =
+          build(`to`, typeof(result), `info`, body)
+    else:
+      # the user has to provide a source location
+      result.insert 0, quote do:
+        template build(info: SLocRef, body: untyped): untyped {.used.} =
+          build(`to`, typeof(result), info, body)
 
   if sclass == dclass and sclass == tcProduction:
     if result[^1].kind == nnkCaseStmt:
@@ -293,6 +305,8 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
         unpack(`input`.storage[], v.index, typeof(T))
       template get[N](r: RecordRef[src, N]): untyped {.used.} =
         get(`input`, r)
+      template info[N](n: Metavar[src, N]): untyped {.used.} =
+        `input`.tree[n.index].info
 
       template equal[N](a, b: Metavar[src, N]): bool {.used.} =
         equal(`input`.tree, Cursor(a.index), Cursor(b.index))
@@ -302,10 +316,10 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
     body.add quote do:
       template terminal(x: untyped): untyped {.used.} =
         `embed`(`output`.storage, x)
-      template build[N](n: typedesc[Metavar[dst, N]], body: untyped): untyped {.used.} =
-        build(`output`, n, body)
-      template build[N](n: typedesc[RecordRef[dst, N]], body: untyped): untyped {.used.} =
-        build(`output`, n, body)
+      template build[N](n: typedesc[Metavar[dst, N]], info: SLocRef, body: untyped): untyped {.used.} =
+        build(`output`, n, info, body)
+      template build[N](n: typedesc[RecordRef[dst, N]], info: SLocRef, body: untyped): untyped {.used.} =
+        build(`output`, n, info, body)
       template match[N](sel: Metavar[dst, N], branches: varargs[untyped]): untyped {.used.} =
         match[dst, N](`output`.tree, IndCursor(sel.index), sel, branches)
       template slice[N](T: typedesc[Metavar[dst, N]]): typedesc {.used.} =
@@ -315,9 +329,21 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
 
       template get[N](r: RecordRef[dst, N]): untyped {.used.} =
         get(`output`, r)
+      template info[N](n: Metavar[dst, N]): untyped {.used.} =
+        `output`.tree[n.index].info
 
       template equal[N](a, b: Metavar[dst, N]): bool {.used.} =
         equal(`output`.tree, IndCursor(a.index), IndCursor(b.index))
+
+  # the source location accessors are always available
+  if hasIn:
+    body.add quote do:
+      template file(at: SLocRef): lent string {.used.} = file(`input`, at)
+      template span(at: SLocRef): untyped     {.used.} = span(`input`, at)
+  else:
+    body.add quote do:
+      template file(at: SLocRef): lent string {.used.} = file(`output`, at)
+      template span(at: SLocRef): untyped     {.used.} = span(`output`, at)
 
   if hasIn:
     # shadow the input tree with a cursor to prevent a costly copy when
