@@ -32,6 +32,12 @@ macro makeLanguageType(def: static LangDef, typName: untyped) =
           ident(typName.strVal),
           newStrLitNode(name)))
 
+  # add the entry non-terminal:
+  fields.add newIdentDefs(ident"entry",
+    nnkBracketExpr.newTree(prod,
+      ident(typName.strVal),
+      newStrLitNode(def.entry)))
+
   let ntType = nnkTupleTy.newTree()
   let (csym, fsym) = (bindSym"PChoice", bindSym"PForm")
   # add the descriptions for the non-terminals
@@ -53,12 +59,7 @@ macro makeLanguageType(def: static LangDef, typName: untyped) =
   # everything meant for internal use is stored in an anonymous record in
   # the `meta` field, preventing name clashes and the fields showing up
   # in auto-complete suggestions
-  let metaType = nnkTupleTy.newTree(
-    newIdentDefs(ident"entry",
-      nnkBracketExpr.newTree(prod,
-        ident(typName.strVal),
-        newStrLitNode(def.entry))),
-    newIdentDefs(ident"nt", ntType))
+  let metaType = nnkTupleTy.newTree()
 
   # create the terminal->tag map:
   let tup = nnkTupleConstr.newTree()

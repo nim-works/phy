@@ -531,7 +531,7 @@ macro outpassImpl(name, nterm: typedesc, def: untyped) =
   result = assemblePass(name, nil, def, call)
 
 template nterm(x: typedesc[Production]): typedesc = x
-template nterm(x: typedesc): typedesc             = x.meta.entry
+template nterm(x: typedesc): typedesc             = x.entry
 
 template lang(x: typedesc[Production]): typedesc = x.L
 template lang(x: typedesc): typedesc             = x
