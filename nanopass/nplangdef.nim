@@ -72,6 +72,11 @@ type
     sub: seq[NimNode]
     add: seq[NimNode]
 
+type
+  # Extra types unrelated to the ones above
+  Relation = enum
+    Disjoint, Overlap, ProblematicPrefix, Same
+
 template findIt[T](s: seq[T], predicate: untyped): untyped =
   ## Version of ``find`` that allows providing an inline predicate,
   ## evaluated for every checked item.
@@ -102,6 +107,88 @@ proc `==`(x, y: Elem): bool =
 proc `==`(x, y: Form): bool =
   ## Compares `x` and `y`, which must belong to the same language, for equality.
   x.name == y.name and x.elems == y.elems
+
+proc compare(def: LangDef, a, b: Form): Relation =
+  ## Computes the relation between `a` and `b`. Commutative.
+  if a.name != b.name:
+    return Disjoint
+
+  proc contains(def: LangDef, nt: NonTerminal, typ: string): bool =
+    result = false
+    for it in nt.vars.items:
+      if it.typ == typ or
+        (it.typ in def.nterminals and
+          contains(def, def.nterminals[it.typ], typ)):
+        result = true
+        break
+
+  proc gather(def: LangDef, nt: NonTerminal): (IntSet, HashSet[string]) =
+    ## Gathers the form and type productions of `nt`, including
+    ## transitive ones.
+    proc aux(def: LangDef, nt: NonTerminal, forms: var IntSet,
+             types: var HashSet[string]) =
+      for it in nt.vars.items:
+        if it.typ in def.nterminals:
+          aux(def, def.nterminals[it.typ], forms, types)
+
+      for it in nt.forms.items:
+        forms.incl(it.semantic)
+
+    aux(def, nt, result[0], result[1])
+
+  proc overlaps(def: LangDef, a, b: string): bool =
+    ## Whether the types `a` and `b` overlap (i.e., share inhabitants).
+    if a in def.nterminals:
+      if b in def.nterminals:
+        let (formsA, typesA) = gather(def, def.nterminals[a])
+        let (formsB, typesB) = gather(def, def.nterminals[b])
+        not(disjoint(formsA, formsB)) or not(disjoint(typesA, typesB))
+      else:
+        contains(def, def.nterminals[a], b)
+    elif b in def.nterminals:
+      contains(def, def.nterminals[b], a)
+    else:
+      a == b
+
+  result = Same
+  var ai = 0
+  var bi = 0
+  while ai < a.elems.len and bi < b.elems.len:
+    let got =
+      if a.elems[ai].typ == b.elems[bi].typ:
+        result # Overlap cannot go back to Same
+      elif overlaps(def, a.elems[ai].typ, b.elems[bi].typ):
+        Overlap
+      else:
+        Disjoint
+
+    if a.elems[ai].repeat == b.elems[bi].repeat:
+      result = got
+      if result == Disjoint:
+        break
+      inc ai
+      inc bi
+    elif a.elems[ai].repeat:
+      if got == Disjoint:
+        result = Overlap
+        inc ai
+      else:
+        result = ProblematicPrefix
+        break
+    elif b.elems[bi].repeat:
+      if got == Disjoint:
+        result = Overlap
+        inc bi
+      else:
+        result = ProblematicPrefix
+        break
+    else:
+      result = got
+      inc ai
+      inc bi
+
+  if result == Overlap and (ai < a.elems.len or bi < b.elems.len):
+    result = Disjoint
 
 proc checkName(target: LangDef, vars: Table[string, string], name: string,
                info: NimNode) =
@@ -439,8 +526,8 @@ proc buildLanguage(add, sub: seq[NimNode],
 
       result.records[name] = record
 
-  # make sure all non-terminals are well-formed, which is possible only once
-  # all production additions were made
+  # make sure all non-terminals are well-formed and exhibit some additional
+  # properties, which is possible only once all production additions were made
   for name, nt in result.nterminals.pairs:
     proc gather(def: LangDef, top, name: string, used: var IntSet,
                 included: var HashSet[string]) =
@@ -455,6 +542,26 @@ proc buildLanguage(add, sub: seq[NimNode],
           for it in def.nterminals[name].forms.items:
             used.incl(it.semantic)
 
+    proc checkRelation(def: LangDef, form: Form, against: IntSet) =
+      # languages where there are non-terminals with forms that:
+      # * share the same name and overlap up until and including a list
+      # * share inhabitants
+      # are significantly harder to work with, so the aforementioned cases are
+      # simply disallowed. Allowing two forms in the language that share
+      # inhabitants means that assigning a type to a form instance requires
+      # context (i.e., a non-terminal), but that's an okay concession
+      for f in against.items:
+        let got = compare(def, form, def.forms[f])
+        case got
+        of Disjoint, Same:
+          discard "all good"
+        of Overlap:
+          error("the forms '$1' and '$2' overlap without being the same" %
+                [$form, $def.forms[f]], info)
+        of ProblematicPrefix:
+          error("the forms '$1' and '$2' are not disjoint at where a list is" %
+                [$form, $def.forms[f]], info)
+
     var used = initIntSet()
     var included: HashSet[string]
 
@@ -467,6 +574,8 @@ proc buildLanguage(add, sub: seq[NimNode],
         if containsOrIncl(used, it):
           error("duplicate production '$1' in non-terminal '$2'" %
                 [$result.forms[it], name], info)
+        else:
+          checkRelation(result, result.forms[it], used)
 
       for it in gotIncluded.items:
         if containsOrIncl(included, it):
@@ -477,6 +586,8 @@ proc buildLanguage(add, sub: seq[NimNode],
       if containsOrIncl(used, it.semantic):
         error("duplicate production '$1' in non-terminal '$2'" %
               [$result.forms[it.semantic], name], info)
+      else:
+        checkRelation(result, result.forms[it.semantic], used)
 
   # process the extra configuration declarations:
   for it in config.items:
