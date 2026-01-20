@@ -104,7 +104,7 @@ proc append[L](ast: var Ast[L, auto], info: SLocRef, x: RecordRef) =
     info,
     x.id)
 
-proc append[L](ast: var Ast[L, auto], info: SLocRef, x: Metavar) =
+proc append[L](ast: var Ast[L, auto], info: SLocRef, x: Production) =
   # the ref itself doesn't need source location info
   ast.tree.nodes.add node(RefTag, uint32(x.index))
 
@@ -611,10 +611,10 @@ macro buildFirstPass(ast, mv, info, e: untyped): untyped =
   result.add quote do:
     `impl`(idef(`mv`.L), `mv`.N, `ast`, `tmp`, `e`)
 
-template build*[L, N](ast: var Ast[L, auto], t: typedesc[Metavar[L, N]],
+template build*[L, N](ast: var Ast[L, auto], t: typedesc[Production[L, N]],
                       info: SLocRef, e: untyped): untyped =
   ## Evaluates the AST construction expression `e`, whose result must be a
-  ## production of `mv`, returning a `Metavar` pointing to the created AST
+  ## production of `mv`, returning a `Production` pointing to the created AST
   ## fragment.
   buildFirstPass(ast, t, info, e)
 

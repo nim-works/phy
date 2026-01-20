@@ -77,7 +77,7 @@ proc resolve*[L, S](ast: sink Ast[L, S], n: NodeIndex): Ast[L, S] =
   for s in fields(ast.records):
     for tup in s.mitems:
       for it in fields(tup):
-        when it is Metavar:
+        when it is Production:
           let got = output.nodes.len
           resolve(ast.tree, output, it.index)
           it.index = NodeIndex(got)

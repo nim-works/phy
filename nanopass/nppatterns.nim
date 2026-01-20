@@ -31,7 +31,7 @@ template matches*[T, U](x: T, _: typedesc[U]): bool =
       true
     else:
       matches(x, typeof(U.B))
-  elif U is Metavar:
+  elif U is Production:
     when x is U:
       true
     else:

@@ -79,7 +79,7 @@ proc unparse[N: static string, L](ast: Ast[L, auto], c: var Ctx, id: int,
           toSexp(unpack(ast.storage[], val.index, typeof(val).T))
         elif val is RecordRef:
           unparse[typeof(val).N](ast, c, val.id.int, get(ast, val))
-        elif val is Metavar:
+        elif val is Production:
           let prev = c.pos
           c.pos = val.index.int
           let r = unparse[typeof(val).N](ast, c)
@@ -178,7 +178,7 @@ proc unparse[N: static string, S](ast: Ast[auto, S], c: var Ctx): SexpNode =
   mixin idef
   unparse(idef(typeof(ast).L), N, ast, c)
 
-proc unparse*[L, S, N](ast: Ast[L, S], at: Metavar[L, N]): SexpNode =
+proc unparse*[L, S, N](ast: Ast[L, S], at: Production[L, N]): SexpNode =
   ## Unparses the production at the given position `at`, returning it as a
   ## self-contained S-expression.
   var c = Ctx(pos: at.index.int)

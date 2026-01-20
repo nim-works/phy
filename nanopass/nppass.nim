@@ -22,10 +22,10 @@ macro ctError(str: string, info: untyped) =
   nnkPragma.newTree(nnkExprColonExpr.newTree(ident"error", str))
 
 template classify(x: typedesc): TypeClass =
-  when x is Value:     tcValue
-  elif x is RecordRef: tcRecord
-  elif x is Metavar:   tcProduction
-  else:                tcValue
+  when x is Value:      tcValue
+  elif x is RecordRef:  tcRecord
+  elif x is Production: tcProduction
+  else:                 tcNone
 
 template embed(storage, arg: untyped): untyped =
   ## Implements terminal value construction.
@@ -132,19 +132,19 @@ template withCache(to: typedesc, inp, body: untyped): untyped =
   var res: to
   withValue c[], inp.id, val:
     res =
-      when to is Value:     to(index: val[])
-      elif to is RecordRef: to(id: val[])
-      elif to is Metavar:   to(index: NodeIndex(val[]))
-      else:                 {.error.}
+      when to is Value:      to(index: val[])
+      elif to is RecordRef:  to(id: val[])
+      elif to is Production: to(index: NodeIndex(val[]))
+      else:                  {.error.}
   do:
     # TODO: `body` should be wrapped in a lambda, so that `return` doesn't
     #       disables adding to the table
     let val = if true: body else: default(to)
     c[][inp.id] =
-      when to is Value:     val.index
-      elif to is RecordRef: val.id
-      elif to is Metavar:   val.index.uint32
-      else:                 {.error.}
+      when to is Value:      val.index
+      elif to is RecordRef:  val.id
+      elif to is Production: val.index.uint32
+      else:                  {.error.}
     res = val
   res
 
@@ -289,10 +289,10 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
 
   if hasIn:
     body.add quote do:
-      template match[N](sel: Metavar[src, N], branches: varargs[untyped]): untyped {.used.} =
+      template match[N](sel: Production[src, N], branches: varargs[untyped]): untyped {.used.} =
         match[src, N](`input`.tree, Cursor(sel.index), sel, branches)
 
-      template slice[N](T: typedesc[Metavar[src, N]]): typedesc {.used.} =
+      template slice[N](T: typedesc[Production[src, N]]): typedesc {.used.} =
         ChildSlice[T, Cursor]
       template slice[N](T: typedesc[RecordRef[src, N]]): typedesc {.used.} =
         ChildSlice[T, Cursor]
@@ -305,10 +305,10 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
         unpack(`input`.storage[], v.index, typeof(T))
       template get[N](r: RecordRef[src, N]): untyped {.used.} =
         get(`input`, r)
-      template info[N](n: Metavar[src, N]): untyped {.used.} =
+      template info[N](n: Production[src, N]): untyped {.used.} =
         `input`.tree[n.index].info
 
-      template equal[N](a, b: Metavar[src, N]): bool {.used.} =
+      template equal[N](a, b: Production[src, N]): bool {.used.} =
         equal(`input`.tree, Cursor(a.index), Cursor(b.index))
 
   if hasOut:
@@ -316,23 +316,23 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
     body.add quote do:
       template terminal(x: untyped): untyped {.used.} =
         `embed`(`output`.storage, x)
-      template build[N](n: typedesc[Metavar[dst, N]], info: SLocRef, body: untyped): untyped {.used.} =
+      template build[N](n: typedesc[Production[dst, N]], info: SLocRef, body: untyped): untyped {.used.} =
         build(`output`, n, info, body)
       template build[N](n: typedesc[RecordRef[dst, N]], info: SLocRef, body: untyped): untyped {.used.} =
         build(`output`, n, info, body)
-      template match[N](sel: Metavar[dst, N], branches: varargs[untyped]): untyped {.used.} =
+      template match[N](sel: Production[dst, N], branches: varargs[untyped]): untyped {.used.} =
         match[dst, N](`output`.tree, IndCursor(sel.index), sel, branches)
-      template slice[N](T: typedesc[Metavar[dst, N]]): typedesc {.used.} =
+      template slice[N](T: typedesc[Production[dst, N]]): typedesc {.used.} =
         ChildSlice[T, IndCursor]
       template slice[N](T: typedesc[RecordRef[dst, N]]): typedesc {.used.} =
         ChildSlice[T, IndCursor]
 
       template get[N](r: RecordRef[dst, N]): untyped {.used.} =
         get(`output`, r)
-      template info[N](n: Metavar[dst, N]): untyped {.used.} =
+      template info[N](n: Production[dst, N]): untyped {.used.} =
         `output`.tree[n.index].info
 
-      template equal[N](a, b: Metavar[dst, N]): bool {.used.} =
+      template equal[N](a, b: Production[dst, N]): bool {.used.} =
         equal(`output`.tree, IndCursor(a.index), IndCursor(b.index))
 
   # the source location accessors are always available
@@ -394,7 +394,7 @@ template defineProcessors(dst: untyped) =
   template `->`[T](v: Value[T], _: typedesc[Value[T]]): Value[T] {.inject.} =
     v # nothing to do
 
-  proc `->`[X](n: Metavar, T: typedesc[Metavar[dst, X]]): T {.inject.} =
+  proc `->`[X](n: Production, T: typedesc[Production[dst, X]]): T {.inject.} =
     # note: the signature is overly broad so that overload resolution
     # prefers the more specific adapters created for the programmer-provided
     # processors
@@ -528,11 +528,11 @@ macro outpassImpl(name, nterm: typedesc, def: untyped) =
 
   result = assemblePass(name, nil, def, call)
 
-template nterm(x: typedesc[Metavar]): typedesc = x
-template nterm(x: typedesc): typedesc          = x.meta.entry
+template nterm(x: typedesc[Production]): typedesc = x
+template nterm(x: typedesc): typedesc             = x.meta.entry
 
-template lang(x: typedesc[Metavar]): typedesc = x.L
-template lang(x: typedesc): typedesc          = x
+template lang(x: typedesc[Production]): typedesc = x.L
+template lang(x: typedesc): typedesc             = x
 
 macro inpass*(p: untyped) =
   ## Turns a procedure definition into a pass that takes arbitrary data as

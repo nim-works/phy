@@ -80,7 +80,7 @@ template check[L](c: Ctx[L, auto], pos: NodeIndex, line, col: int,
   ## Makes sure the production at `pos` is one of the non-terminal identified
   ## by `nterm`, raising an error if not.
   if c.tree[pos].tag notin tags(idef(typeof(L)), mapType[L, t]()):
-    when t is Metavar:
+    when t is Production:
       raiseError(line, col,
         "expected production of '" & t.N & "'")
     else:
@@ -110,7 +110,7 @@ proc parseTerminal[L, S](c: var Ctx[L, S], node: SexpNode,
 
 proc parse[L, S](c: var Ctx[L, S], p: var SexpParser)
 
-proc extract(c: var Ctx, to: var Metavar, pos: int) =
+proc extract(c: var Ctx, to: var Production, pos: int) =
   # move the sub-tree over to the out-of-band storage
   let start = c.staging.nodes.len
   let count = c.tree.nodes.len - pos
@@ -452,7 +452,8 @@ proc parse[L, S](c: var Ctx[L, S], p: var SexpParser) =
     let (line, col) = (p.getLine(), p.getColumn())
     c.tree.nodes.add parseTerminal(c, parseSexp(p), line, col)
 
-proc parseAst*[S, L, N](p: var SexpParser, T: typedesc[Metavar[L, N]]): (Ast[L, S], T) =
+proc parseAst*[S, L, N](p: var SexpParser, T: typedesc[Production[L, N]]
+                       ): (Ast[L, S], T) =
   ## Parses the S-expression-based AST representation from `p` into an `Ast`,
   ## returning the result, or - in case of an error - raising an exception.
   var c: Ctx[L, S]
@@ -470,7 +471,7 @@ proc parseAst*[S, L, N](p: var SexpParser, T: typedesc[Metavar[L, N]]): (Ast[L, 
   for recs in fields(c.records):
     for it in recs.mitems:
       for f in fields(it):
-        when f is Metavar:
+        when f is Production:
           f.index = NodeIndex(pos + ord(f.index))
 
   result = (

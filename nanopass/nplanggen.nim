@@ -13,7 +13,7 @@ macro makeLanguageType(def: static LangDef, typName: untyped) =
   let fields = nnkRecList.newTree()
   # the metavars are at top level of the type, for easy access by
   # the programmer
-  let mvar = bindSym"Metavar"
+  let prod = bindSym"Production"
   for name, it in def.terminals.pairs:
     for m in it.mvars.items:
       fields.add newIdentDefs(ident(m),
@@ -22,7 +22,7 @@ macro makeLanguageType(def: static LangDef, typName: untyped) =
     for m in it.mvars.items:
       fields.add newIdentDefs(ident(m),
         nnkBracketExpr.newTree(
-          mvar,
+          prod,
           ident(typName.strVal),
           newStrLitNode(name)))
   for name, it in def.records.pairs:
@@ -55,7 +55,7 @@ macro makeLanguageType(def: static LangDef, typName: untyped) =
   # in auto-complete suggestions
   let metaType = nnkTupleTy.newTree(
     newIdentDefs(ident"entry",
-      nnkBracketExpr.newTree(mvar,
+      nnkBracketExpr.newTree(prod,
         ident(typName.strVal),
         newStrLitNode(def.entry))),
     newIdentDefs(ident"nt", ntType))

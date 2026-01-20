@@ -877,7 +877,7 @@ template match*[L; N: static](ast: Tree, cursor, info: untyped,
   bind matchImpl
   matchImpl(idef(typeof(L)), N, typeof(L), ast, cursor, info, branches)
 
-template match*[L, N](ast: Ast[L, auto], nt: Metavar[L, N],
+template match*[L, N](ast: Ast[L, auto], p: Production[L, N],
                       branches: varargs[untyped]): untyped =
   ## Provides a convenient way to destructure an AST. Meant to be used as
   ## follows:
@@ -889,4 +889,4 @@ template match*[L, N](ast: Ast[L, auto], nt: Metavar[L, N],
   ##   of ...: discard
   ##   else:   discard
   bind matchImpl
-  matchImpl(idef(typeof(L)), N, L, ast.tree, Cursor(nt.index), nt, branches)
+  matchImpl(idef(typeof(L)), N, L, ast.tree, Cursor(p.index), p, branches)

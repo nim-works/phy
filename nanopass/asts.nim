@@ -34,11 +34,9 @@ type
     records*: typeof(L.meta.records)
       ## leaked implementation detail, don't use
 
-  Metavar*[L: object, N: static string] = object
+  Production*[L: object, N: static string] = object
     ## Represents a reference to an AST fragment that's a production of non-
     ## terminal `N` of language `L`.
-    # TODO: rename to NonTerminal (currently clashes with the type of the same
-    #       name in `nanopass.nim`)
     index*: NodeIndex
       ## leaked implementation detail, don't use
 
@@ -53,7 +51,7 @@ type
     id*: uint32
       ## leaked implementation detail, don't use
 
-  ChildSlice*[T: Metavar or RecordRef or Value, Cursor] = object
+  ChildSlice*[T: Production or RecordRef or Value, Cursor] = object
     ## A lightweight reference to a sequence of sibling nodes. The reference
     ## must not outlive the spawned-from tree.
     tree: ptr Tree
@@ -171,9 +169,9 @@ proc slice*[T, C](tree: ptr Tree, start: C, len: uint32): ChildSlice[T, C] =
 
 template load[T, C](tree: Tree, c: C): T =
   mixin get, pos
-  when T is Metavar:   T(index: get(tree, c))
-  elif T is RecordRef: T(id: tree[pos(c)].val)
-  else:                T(index: tree[pos(c)].val)
+  when T is Production: T(index: get(tree, c))
+  elif T is RecordRef:  T(id: tree[pos(c)].val)
+  else:                 T(index: tree[pos(c)].val)
 
 iterator items*[T, C](s: ChildSlice[T, C]): T =
   mixin advance
