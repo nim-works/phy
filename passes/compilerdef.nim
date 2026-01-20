@@ -25,6 +25,6 @@ macro defineCompiler*(name, start, names: untyped) =
     prevAst = quote do: `tmp`[0]
     prevPos = quote do: `tmp`[1]
   result = quote do:
-    proc `name`(ast: Ast[`start`, Literals], it: `start`.meta.entry): auto =
+    proc `name`(ast: Ast[`start`, Literals], it: `start`.entry): auto =
       `body`
       result = (`prevAst`, `prevPos`)
