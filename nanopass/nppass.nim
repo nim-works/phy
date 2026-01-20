@@ -1,7 +1,7 @@
 ## Implements the various pass macros.
 
 import std/[genasts, macros, packedsets, tables]
-import nanopass/[asts, nplang, nplangdef, npmatch, nptransform]
+import nanopass/[asts, nplang, nplangdef, npmatch, npresolve, nptransform]
 
 type
   TypeClass = enum tcNone, tcValue, tcRecord, tcProduction
@@ -360,11 +360,13 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
     else:
       body.add quote do:
         `output`.storage = new(`storageTy`)
+
+    let resolve = bindSym"resolve"
     body.add quote do:
       let pos = `call`
-      # turn the AST with indirections into one without
-      `output` = resolve(move `output`, pos.index)
-      result = (move `output`, typeof(pos)(index: NodeIndex(0)))
+      # turn the AST with indirections into one without and return it
+      result = (`resolve`(move `output`, pos.index),
+                typeof(pos)(index: NodeIndex(0)))
   else:
     body.add quote do:
       result = `call`
