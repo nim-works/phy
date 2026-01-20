@@ -1,11 +1,12 @@
-## Implements the high and low-level `match` macros.
+## Implements the high and low-level `match` macros, which provide the pattern-
+## matching-over-ASTs functionality.
 
 import std/[macros, intsets, strformat, tables]
 import nanopass/[asts, helper, nplang]
 
 type
   FillProc* = proc(lang: LangInfo, idx: int, n, info: NimNode): NimNode
-    ## Type for form or type fill callback.
+    ## Type for a form or type fill callback.
   ExpandConfig* = object
     fillForm*: FillProc
       ## called for filling-in the handling of forms. May be nil
@@ -32,7 +33,7 @@ proc parseVar(n: NimNode): string =
   result = name[0..e]
 
 proc fits(lang: LangInfo, a, b: int): bool =
-  ## Computes whether type with id `a` can appear where a type with id `b`
+  ## Computes whether a type with id `a` can appear where a type with id `b`
   ## is expected.
   if a == b:
     result = true
@@ -51,6 +52,7 @@ proc countTags(lang: LangInfo, typ: LangType): int =
       result += countTags(lang, lang.types[it])
 
 proc containsForm(lang: LangInfo, typ: LangType, fid: int): bool =
+  ## Whether type `typ` contains the form with id `fid`.
   case typ.kind
   of tkNonTerminal:
     if fid in typ.forms:
@@ -226,8 +228,8 @@ proc parsePattern(lang: LangInfo, n: NimNode): NimNode =
     case n[0].kind
     of nnkIdent:
       let id = ident(parseVar(n[0]))
-      # due to coalescing of match expressions, assigning an internal symbol
-      # to the temporary binding is not yet possible
+      # due to the later coalescing of match expressions, assigning an
+      # internal symbol to the temporary binding is not yet possible
       let call = nnkInfix.newTree(ident"->", newEmptyNode(), quote do: dst.`id`)
       copyLineInfo(call, n)
       # the matched type needs to be inferred
@@ -259,7 +261,7 @@ proc parsePattern(lang: LangInfo, n: NimNode): NimNode =
 
     let tmp = parsePattern(lang, n[1])
     if tmp[1].kind notin {nnkIntLit, nnkEmpty, nnkNilLit}:
-      error("only '...<meta-var>' and '...any' are allowed", n[1])
+      error("only '...<meta-var>' and '...any' are allowed", n)
     # the '...' prefix is stripped from the expression
     result = makeTyped(tmp[0], nnkBracket.newTree(tmp[1]), n)
   of nnkIdent:
@@ -273,7 +275,7 @@ proc parsePattern(lang: LangInfo, n: NimNode): NimNode =
       # must be a meta-variable
       let typ = parseVar(n)
       if typ notin lang.map:
-        error("no meta-variable with the give name exists", n)
+        error(fmt"no meta-variable called {typ} exists", n)
 
       result = makeTyped(n, newIntLitNode(lang.map[typ]), n)
   else:
@@ -294,7 +296,12 @@ proc patternToString(n: NimNode; indent = 0): string =
       result.add "  "
     result.add "}"
   of nnkCall:
-    result = repr(n[0])
+    result = ""
+    case n[0].kind
+    of nnkIntLit, nnkPar, nnkBracket:
+      result = repr(n[0])
+    else:
+      result = "<what: " & $n[0].kind & ">"
     result.add "("
     for i in 1..<n.len-1:
       if i > 1:
@@ -306,9 +313,7 @@ proc patternToString(n: NimNode; indent = 0): string =
     result.add ")"
   of nnkPar:
     result = "^"
-    result.add repr(n[0])
-    result.add " "
-    result.add patternToString(n[1], indent)
+    result.add patternToString(n[0], indent)
   of nnkEmpty:
     result = "."
   of nnkStmtList:
@@ -320,11 +325,13 @@ proc patternToString(n: NimNode; indent = 0): string =
   else:
     result = "<error:" & $n.kind & ">"
 
-proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
-                      config: ExpandConfig): NimNode =
-  ## Generates the NimSkull code for a match expression `expr`. `els` is either
+proc matchToNimskull(lang: LangInfo, name, ast, sel, e, els: NimNode,
+                     config: ExpandConfig): NimNode =
+  ## Translates the match expression `e` to NimSkull AST. `els` is either
   ## an `nnkElse` tree used for handling the rest of match, or nil, in which
-  ## case how to handle the rest of a match is dictated by `config`.
+  ## case how to handle the rest of a match is dictated by `config`. `name` is
+  ## the language type expression, `ast` the AST lvalue, and `sel` is the
+  ## initial cursor.
   let cursor = genSym("cursor")
   let backup = genSym("backup")
 
@@ -336,7 +343,8 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
 
   proc aux(lang: LangInfo, e, to: NimNode): NimNode =
     ## Does the actual work.
-    proc tm(lang: LangInfo, e, to: NimNode): NimNode =
+    proc translateMatch(lang: LangInfo, e, to: NimNode) =
+      ## Emits the cursor movement and binding creation for a match expression.
       if e[1].kind != nnkEmpty:
         # commit the current cursor to a local with the given name
         if e[0].kind == nnkBracket:
@@ -369,11 +377,10 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
         else:
           unreachable(e[0].kind)
 
-      result = aux(lang, e[^1], to)
-
     case e.kind
     of nnkCall:
-      result = tm(lang, e, to)
+      translateMatch(lang, e, to)
+      result = aux(lang, e[^1], to)
     of nnkPar:
       # move the current cursor to the end of the subtree and pop it from
       # the stack
@@ -439,9 +446,10 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
           top = it
 
         handler.add newStmtList()
-        discard tm(lang, it, handler[^1])
+        translateMatch(lang, it, handler[^1])
+        discard aux(lang, it[^1], handler[^1])
         caseStmt.add handler
-        # pop all leftover len entries
+        # pop all leftover stack entries
         stack.setLen(stackLen)
 
       let info = e[0]
@@ -454,7 +462,7 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
 
         if stack.len == 0 and not hasUsedElse:
           # the 'else' rule was never used. Add it to the top-level case
-          # statement such that a warning will be emitted
+          # statement, so that a warning will be emitted
           if caseStmt[^1].kind != nnkElse:
             caseStmt.add nnkElse.newTree(newCall(bindSym"unreachable"))
           caseStmt.add els
@@ -504,7 +512,8 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
               newIntLitNode(lang.forms[it].ntag),
               fillForm(lang, it, cursor, info))
 
-        # fill in handling for not fully handled subtypes
+        # fill in handling for embedded types whose productions aren't
+        # all covered
         for it in lang.types[typ].sub.items:
           let br = genOfBranch(lang, lang.types[it], used)
           if br.len > 0:
@@ -572,15 +581,16 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
 
 proc patternToMatch(n: NimNode): tuple[head, tail: NimNode] =
   ## Translates a pattern into a match expression. A match expression has the
-  ## following structure:
+  ## following grammar:
   ##
   ## match ::= (nkCall (nkBracket <typ>) <name> <int> <cont>)
   ##        |  (nkCall (nkPar <int>+) <name> <cont>)
+  ##        |  (nkCall (nkEmpty) <name> <cont>)
   ##        |  (nkCall <typ> <name> <cont>)
   ## name  ::= <int> | <empty>
   ## cont  ::= <match>
   ##        |  (nkPar <cont>)                         # leave sub match
-  ##        |  (nkCurly <int> <match>+)               # union matching
+  ##        |  (nkCurly <typ> <match>+)               # union matching
   ##        |  (nkTupleConstr (nkLetSection ...) ...) # binding
   ##        |  (nkStmtList ...)                       # custom tail logic
   var binds: NimNode
@@ -856,7 +866,7 @@ proc matchImpl*(lang: LangInfo, src: int, name, ast, sel, rules: NimNode,
     total = nnkCurly.newTree(newIntLitNode(src))
 
   assignSymbols(total)
-  result = generateForMatch(lang, name, ast, sel, optimize(total), els, config)
+  result = matchToNimskull(lang, name, ast, sel, optimize(total), els, config)
 
 macro matchImpl(lang: static LangInfo, nterm: static string,
                 name: typed, ast: Tree, cursor: untyped,

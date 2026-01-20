@@ -28,8 +28,8 @@ template classify(x: typedesc): TypeClass =
   elif x is Production: tcProduction
   else:                 tcNone
 
-template embed(storage, arg: untyped): untyped =
-  ## Implements terminal value construction.
+template newTerminal(storage, arg: untyped): untyped =
+  ## Creates a ``Value`` storing `arg`.
   mixin pack
   let tmp = arg
   Value[typeof(tmp)](id: pack(storage[], tmp))
@@ -43,7 +43,7 @@ template get*[L; N](ast: Ast[L, auto], r: RecordRef[L, N]): untyped =
   pick(idef(typeof(L)), N, ast.records)[r.id]
 
 macro transformOutImpl(lang: static LangDef, name, def: untyped) =
-  ## Implements the transformation for processors in an *->language pass.
+  ## Turns a processor in an *->language pass into a real procedure.
   if def.kind notin {nnkProcDef, nnkFuncDef}:
     error(".transform must be applied to procedure definition", def)
 
@@ -96,8 +96,9 @@ macro processorMatchImpl(lang: static LangInfo, src: static string,
 
   matchImpl(lang, lang.map[src], ident"src", input, sel, rules, config)
 
-macro genProcessor(index, nterm: untyped): untyped =
-  ## Generates the body for a non-terminal processor.
+macro transform(index, nterm: untyped): untyped =
+  ## Transforms the input language non-terminal with name `nterm` to a non-
+  ## terminal identified through the current result type.
   # simply emit an empty processorMatchImpl invocation. All branches will be
   # auto-generated
   # TODO: if none of the productions require a (direct or indirect) call to a
@@ -197,7 +198,7 @@ template checkType(lang, typ: untyped) =
     ctError("type must belong to '" & $lang & "'", typ)
 
 macro transformInOutImpl(lang: static LangDef, name, def: untyped) =
-  ## Implements the transformation for language->language pass processors.
+  ## Turns the processor of a language->language pass into a real procedure.
   let name = name
   if def.kind notin {nnkProcDef, nnkFuncDef}:
     error(".transform must be applied to procedure definition", def)
@@ -240,7 +241,8 @@ macro transformInOutImpl(lang: static LangDef, name, def: untyped) =
   result = def
 
 macro transformInImpl(lang: static LangDef, name, def: untyped) =
-  ## Implements the processing for transformers part of an input pass.
+  ## Turns the processor of a language->* pass into a real procedure.
+  # nothing to do
   result = def
 
 macro generatedImpl(def: untyped) =
@@ -281,7 +283,7 @@ template defineInWrappers(lang, input: untyped) =
 template defineOutWrappers(lang, output: untyped) =
   ## Introduces the injected definitions for passes that produce an AST.
   template terminal(x: untyped): untyped {.used, inject.} =
-    embed(output.storage, x)
+    newTerminal(output.storage, x)
   template build[N](n: typedesc[Production[lang, N]], info: SLocRef,
                     body: untyped): untyped {.used, inject.} =
     build(output, n, info, body)
@@ -414,7 +416,7 @@ template defineProcessors(dst: untyped) =
     # note: the signature is overly broad so that overload resolution
     # prefers the more specific adapters created for the programmer-provided
     # processors
-    genProcessor(n.index, typeof(n).N)
+    transform(n.index, typeof(n).N)
 
   proc `->`[X](r: RecordRef, T: typedesc[RecordRef[dst, X]]): T {.inject.} =
     let tab = getTable[typeof(r), T]()
@@ -554,10 +556,11 @@ macro inpass*(p: untyped) =
   ## Turns a procedure definition into a pass that takes arbitrary data as
   ## input and produces an AST for the specified language.
   ## The procedure's return type specifies the shape of the returned AST and
-  ## must must be the non-terminal of an IL. As a short-hand, just specifying
-  ## an IL is equivalent to specifying the IL's entry non-terminal.
+  ## must be the non-terminal of a language. As a short-hand, just specifying
+  ## a language is equivalent to specifying the language's entry non-terminal.
   ##
-  ## The return type of the transformed procedure is an AST.
+  ## The return type of the transformed procedure is an AST plus the specified
+  ## non-terminal.
   if p.kind != nnkProcDef:
     error(".inpass must be applied to a procedure definition", p)
 
@@ -570,8 +573,8 @@ macro inpass*(p: untyped) =
 
 macro pass*(p: untyped) =
   ## Turns a procedure definition into a language->language pass, that is a
-  ## pass, that takes an AST (fragment) of language A and produces an AST of
-  ## language B.
+  ## pass, that takes an AST and non-terminal reference of language A and
+  ## produces an AST and a non-terminal reference of language B.
   if p.kind != nnkProcDef:
     error(".inpass must be applied to a procedure definition", p)
 
@@ -586,7 +589,8 @@ macro pass*(p: untyped) =
 
 macro outpass*(p: untyped) =
   ## Turns a procedure definition into a language->* pass, that is, a pass
-  ## that takes an AST (fragment) of language A and produces a value.
+  ## that takes an AST and non-terminal reference of language A and produces
+  ## a value.
   if p.kind != nnkProcDef:
     error(".outpass must be applied to a procedure definition", p)
 

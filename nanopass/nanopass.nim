@@ -1,13 +1,19 @@
 ## Implements the nanopass framework, which is a collection of macro DSLs for
 ## defining intermediate languages (their syntax and grammar) and passes.
-
-# TODO:
-# * implement types integration
-# * implement meta-data support
-# * add a "compiler definition" macro
+##
+## This is the entrypoint of the library.
 
 import
-  nanopass/[asts, nplanggen, npmatch, npbuild, npparser, nppass, nppatterns, npunparser]
+  nanopass/[
+    asts,
+    nplanggen,
+    npmatch,
+    npbuild,
+    npparser,
+    nppass,
+    nppatterns,
+    npunparser
+  ]
 
 export asts
 export nppatterns.matches

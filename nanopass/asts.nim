@@ -1,5 +1,6 @@
-## Implements the nanopass framework specific storage types for ASTs. The types
-## are layered on top of `PackedTree <trees.html#PackedTree>`_.
+## Implements the nanopass framework specific storage types for ASTs, as well
+## as various fundamental, language-agnostic operations on ASTs. The types are
+## layered on top of `PackedTree <trees.html#PackedTree>`_.
 
 import passes/trees
 
@@ -35,8 +36,8 @@ type
       ## leaked implementation detail, don't use
 
   Production*[L: object, N: static string] = object
-    ## Represents a reference to an AST fragment that's a production of non-
-    ## terminal `N` of language `L`.
+    ## Represents a reference to a production of non-terminal `N` belonging to
+    ## language `L`.
     index*: NodeIndex
       ## leaked implementation detail, don't use
 
@@ -59,7 +60,7 @@ type
     len: uint32
 
   Cursor* = distinct NodeIndex
-    ## A cursor into a tree where without indirections.
+    ## A cursor into a tree without indirections.
   IndCursor* = distinct NodeIndex
     ## A cursor into a tree with indirections.
 
@@ -81,11 +82,12 @@ template tag*(n: AstNode): uint8 =
   cast[uint8](n.kind)
 
 template info*(n: AstNode): SLocRef =
-  ## The node's source location information reference.
+  ## The node's source location information.
   cast[SLocRef](uint32(n.kind) shr 8)
 
 template isAtom*(x: Tag): bool =
-  ## The predicate required for using an uint8 as a ``PackedTree`` tag.
+  ## Whether `x` is the tag of a leaf node.
+  # the predicate is required for using an uint8 as a ``PackedTree`` tag
   cast[uint8](x) >= RefTag
 
 {.push stacktrace: off, profiler: off.}
@@ -247,7 +249,7 @@ proc advance*(tree: Tree, cr: var IndCursor) =
   NodeIndex(cr) = next(tree, NodeIndex(cr))
 
 proc get*(tree: Tree, cr: IndCursor): NodeIndex =
-  if tree[NodeIndex(cr)].tag == 128:
+  if tree[NodeIndex(cr)].tag == RefTag:
     NodeIndex tree[NodeIndex(cr)].val
   else:
     NodeIndex cr
@@ -258,7 +260,7 @@ template pos*(cr: IndCursor): NodeIndex =
 type Savepoint = tuple[origin: IndCursor, stepped: bool]
 
 proc enter*(tree: Tree, cr: var IndCursor): Savepoint =
-  result = (cr, tree[NodeIndex(cr)].tag == 128)
+  result = (cr, tree[NodeIndex(cr)].tag == RefTag)
   if result.stepped:
     cr = IndCursor tree[NodeIndex(cr)].val
   else:

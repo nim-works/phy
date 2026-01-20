@@ -64,13 +64,14 @@ macro makeLanguageType(def: static LangDef, info: LangInfo, typName: untyped) =
   ## The type also stores various information about the language that are
   ## needed by the pass-related macros, encoded as types.
   let fields = nnkRecList.newTree()
-  # the metavars are at top level of the type, for easy access by
+  # the metavars are at the top level of the type, for easy access by
   # the programmer
   let prod = bindSym"Production"
   for name, it in def.terminals.pairs:
     for m in it.mvars.items:
       fields.add newIdentDefs(ident(m),
         nnkBracketExpr.newTree(bindSym"Value", ident(name)))
+
   for name, it in def.nterminals.pairs:
     for m in it.mvars.items:
       fields.add newIdentDefs(ident(m),
@@ -78,6 +79,7 @@ macro makeLanguageType(def: static LangDef, info: LangInfo, typName: untyped) =
           prod,
           ident(typName.strVal),
           newStrLitNode(name)))
+
   for name, it in def.records.pairs:
     for m in it.mvars.items:
       fields.add newIdentDefs(ident(m),

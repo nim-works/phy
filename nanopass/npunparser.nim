@@ -22,8 +22,8 @@ type
       ## currently active source location
 
 proc nameToIndex[L; Name: static string](): int {.compileTime.} =
-  ## Turns a record type name to the index of the corresponding set in
-  ## `Ctx.records`.
+  ## Returns the index of the set in `Ctx.records` corresponding to the given
+  ## record type name.
   var i = 0
   var tmp: L
   # the index being stable across compilation is not necessary
@@ -67,6 +67,7 @@ proc unparse[N: static string, L](ast: Ast[L, auto], c: var Ctx, id: int,
   ## Unparses the nanopass record `tup`. The full record is only emitted for
   ## the first occurrence - only the ID is emitted for all further occurrences.
   if containsOrIncl(c.records[static nameToIndex[L, N]()], id):
+    # the definition was emitted already, only emit a reference
     result = newSList([newSSymbol(":record"), newSSymbol(N), newSInt(id)])
   else:
     result = newSList()
@@ -159,8 +160,8 @@ macro unparse(def: static LangInfo, nterm: static string, ast, c: untyped) =
       ofb.add body
       caseStmt.add ofb
 
-  # for robustness, and to make spotting of problems easier, render unexpected
-  # nodes as errors
+  # to be resilient against malformed input, and to make spotting of problems
+  # easier, render unexpected nodes as errors
   caseStmt.add nnkElse.newTree(quote do:
     result = newSList(
       [newSSymbol(":error"), newSInt(int `ast`.tree.nodes[`c`.pos].tag)])

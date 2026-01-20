@@ -1,4 +1,4 @@
-## Provides the query-focused types representing the language in the nanopass
+## Provides the query-focused types representing a language in the nanopass
 ## framework, as well as the routines for creating instances thereof.
 
 import std/[hashes, sequtils, tables]
@@ -19,7 +19,7 @@ type
     tkNonTerminal
 
   LangType* = object
-    ## Terminals and non-terminals modeled as types.
+    ## Terminals, records, and non-terminals.
     name*: string
     mvar*: string
       ## name of a meta-variable that is used to range over the type
@@ -38,10 +38,10 @@ type
         ## all production forms of the non-terminal
 
   LangInfo* = object
-    ## Representation of a language definition that stores the information in
-    ## a way that make it easier to work with for the DSL macros.
-    # important: for compilation speed, the AST representation of the data
-    # should be as short and concise as possible
+    ## Representation of a language that stores the information in a way that
+    ## make it easy to work with for the DSL macros.
+    # important: to keep compilation time low, the AST representation of the
+    # data should be as short and concise as possible
     types*: seq[LangType]
     map*: Table[string, int]
       ## maps type and meta-var names to the corresponding type
@@ -150,6 +150,8 @@ proc ntags*(lang: LangInfo, typ: LangType): seq[int] =
       result.add ntags(lang, lang.types[it])
 
 proc render*(lang: LangInfo, form: SForm): string =
+  ## Renders `form` into the textual representation of syntax resembling how
+  ## the form is defined.
   result.add form.name
   result.add "("
   for i, it in form.elems.pairs:

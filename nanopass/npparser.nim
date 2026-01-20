@@ -1,5 +1,5 @@
-## Implements the routines for parsing an S-expression-based AST
-## representation into an AST.
+## Implements the routines for parsing S-expression-based AST representation
+## into ASTs.
 
 import
   std/[genasts, macros, strutils, tables, typetraits],
@@ -25,13 +25,6 @@ type
     curSLoc: SLocRef
       ## source location to use for parsed nodes
 
-# the core parser logic for a language is implemented in generic routines,
-# which themselves call internal macros; the external macro then only expands
-# to code calling said generic routines. The benefit: most of the logic for
-# parsing an AST is only generated once per language, even when more than one
-# parser is generated for a language. This is somewhat problematic for symbol
-# binding (for the terminal parsers), however, given how generics work
-
 macro mapTypeImpl(lang: static LangInfo, lname, typ: untyped): int =
   result = nnkWhenStmt.newTree()
   for i, it in lang.types.pairs:
@@ -42,11 +35,11 @@ macro mapTypeImpl(lang: static LangInfo, lname, typ: untyped): int =
   result.add nnkElse.newTree(quote do: {.error: "unreachable".})
 
 proc mapType[L, T](): int {.compileTime.} =
-  ## Maps the type `T` to the integer IDs its known under in `L`.
+  ## Maps the type `T` to the integer IDs identifying it in `L`.
   mapTypeImpl(idef(L), L, T)
 
 macro tags(lang: static LangInfo, typ: static int): set[uint8] =
-  ## Returns the node tags for the forms inhabiting `typ`.
+  ## Returns the node tags for the productions inhabiting `typ`.
   case lang.types[typ].kind
   of tkRecord:
     nnkCurly.newTree(newLit(uint8 lang.types[typ].rtag))
@@ -77,8 +70,8 @@ proc raiseError(line, col: int, msg: string) {.noreturn.} =
 
 template check[L](c: Ctx[L, auto], pos: NodeIndex, line, col: int,
                   t: typedesc) =
-  ## Makes sure the production at `pos` is one of the non-terminal identified
-  ## by `nterm`, raising an error if not.
+  ## Makes sure the production at `pos` is one part of the non-terminal
+  ## identified by `nterm`, raising an error if not.
   if c.tree[pos].tag notin tags(idef(typeof(L)), mapType[L, t]()):
     when t is Production:
       raiseError(line, col,
@@ -87,7 +80,7 @@ template check[L](c: Ctx[L, auto], pos: NodeIndex, line, col: int,
       raiseError(line, col,
         "expected '" & $t & "'")
 
-macro genTerminalParser(lang: static LangInfo) =
+macro parseTerminalImpl(lang: static LangInfo) =
   result = newStmtList()
   # emit the terminal handlers
   for it in lang.types.items:
@@ -104,7 +97,7 @@ proc parseTerminal[L, S](c: var Ctx[L, S], node: SexpNode,
                          line, col: int): AstNode =
   ## Implements fallback parsing of terminals.
   mixin idef
-  genTerminalParser(idef(L))
+  parseTerminalImpl(idef(L))
   raiseError(line, col,
     "'" & $node & "' is neither a valid language form nor terminal")
 
@@ -140,7 +133,7 @@ proc parseFieldsImpl[L](c: var Ctx[L, auto], p: var SexpParser,
 
     # parse the field's value...
     parse(c, p)
-    # ...then make sure it's what it should be
+    # ...then make sure its type is correct
     check(c, NodeIndex(start), p.getLine(), p.getColumn(), typeof(it))
 
     extract(c, it, start)
@@ -148,7 +141,7 @@ proc parseFieldsImpl[L](c: var Ctx[L, auto], p: var SexpParser,
     eat(p, tkParensRi)
 
 macro parseFields(lang: static LangInfo, c: var Ctx, name: string) =
-  ## Selects the record type base on the dynamic value of `name`, parses
+  ## Selects the record type based on the dynamic value of `name`, parses
   ## the record's fields, registers the resulting record with `c`, and
   ## appends a record reference to the AST.
   result = nnkCaseStmt.newTree(name)
@@ -370,8 +363,8 @@ macro parseFormImpl(lang: static LangInfo) =
   for name, forms in buckets.pairs:
     var m: NimNode # the match expression
 
-    # in order to produce some more helpful error message, the generated code is
-    # structured such that it also know *where* a grammar violation is, not
+    # in order to produce a more helpful error message, the generated code is
+    # structured such that it also knows *where* a grammar violation is, not
     # just that there is one
 
     for id in forms.items:
@@ -431,7 +424,8 @@ proc parseForm[L, S](c: var Ctx[L, S], p: var SexpParser,
   parseFormImpl(idef(L))
 
 proc parse[L, S](c: var Ctx[L, S], p: var SexpParser) =
-  ## Parses a production from `p` at the current position.
+  ## Parses a production from `p`, raising an error when there's a syntax
+  ## error, or when the production is illformed.
   if p.currToken == tkParensLe:
     # could be both a form or terminal
     let (line, col) = (p.getLine(), p.getColumn())
@@ -463,7 +457,7 @@ proc parseAst*[S, L, N](p: var SexpParser, T: typedesc[Production[L, N]]
   parse(c, p)
   check(c, NodeIndex(0), line, col, T)
 
-  # append the staging buffer to the main buffer and update the reference
+  # append the staging buffer to the main buffer and update the references
   # in `c.records`
   let pos {.used.} = c.tree.nodes.len
   c.tree.nodes.add c.staging.nodes

@@ -41,7 +41,7 @@ type
 
   LangDef* = object
     ## A checked and pre-processed language definition, carrying enough
-    ## source-level information necessary for implementing, e.g., inheritance.
+    ## source-level information necessary for implementing inheritance.
     terminals*: Table[string, Terminal]
       ## the terminals of the language
     nterminals*: Table[string, NonTerminal]
@@ -93,6 +93,8 @@ proc `$`(x: Form): string =
   for i, it in x.elems.pairs:
     if i > 0:
       result.add ", "
+    if it.repeat:
+      result.add "..."
     result.add it.typ
   result.add ")"
 
@@ -105,7 +107,8 @@ proc `==`(x, y: Elem): bool =
   x.typ == y.typ and x.repeat == y.repeat
 
 proc `==`(x, y: Form): bool =
-  ## Compares `x` and `y`, which must belong to the same language, for equality.
+  ## Compares `x` and `y`, which must belong to the same language, for
+  ## equality.
   x.name == y.name and x.elems == y.elems
 
 proc compare(def: LangDef, a, b: Form): Relation =
@@ -201,7 +204,8 @@ proc checkName(target: LangDef, vars: Table[string, string], name: string,
   elif name in target.nterminals:
     error(fmt"non-terminal with name {name} already exists", info)
   elif name in vars:
-    error(fmt"'{name}' is already the name of a meta-variable for '{vars[name]}'", info)
+    error(fmt"'{name}' is already the name of a meta-variable for '{vars[name]}'",
+          info)
 
 proc parseForm(n: NimNode): ParsedForm =
   ## Parses a form in the context of a language definition. No semantic checks
@@ -228,8 +232,9 @@ proc buildLanguage(add, sub: seq[NimNode],
                    config: seq[NimNode],
                    base: LangDef, info: NimNode): LangDef =
   ## The center-piece of language definition construction. Constructs a
-  ## language definition by applying the diff for terminals (`add` and `sub`)
-  ## and non- terminals (`def`) to `base`. `info` is used for error reporting.
+  ## language definition by applying the diff for terminals (`add` and `sub`),
+  ## records (`records`), and and non-terminals (`def`) to `base`. `info` is
+  ## used for error reporting.
   var base = base
   # ^^ base is modified in-place because it makes the implementation easier
 
@@ -542,7 +547,8 @@ proc buildLanguage(add, sub: seq[NimNode],
           for it in def.nterminals[name].forms.items:
             used.incl(it.semantic)
 
-    proc checkRelation(def: LangDef, form: Form, against: IntSet) =
+    proc checkRelation(def: LangDef, form: Form, against: IntSet,
+                       name: string) =
       # languages where there are non-terminals with forms that:
       # * share the same name and overlap up until and including a list
       # * share inhabitants
@@ -556,11 +562,12 @@ proc buildLanguage(add, sub: seq[NimNode],
         of Disjoint, Same:
           discard "all good"
         of Overlap:
-          error("the forms '$1' and '$2' overlap without being the same" %
-                [$form, $def.forms[f]], info)
+          error("overlapping productions '$1' and '$2' in non-terminal '$3'" %
+                [$form, $def.forms[f], name], info)
         of ProblematicPrefix:
-          error("the forms '$1' and '$2' are not disjoint at where a list is" %
-                [$form, $def.forms[f]], info)
+          error(("productions '$1' and '$2' of non-terminal '$3' are not " &
+                 "disjoint at where a list is") %
+                [$form, $def.forms[f], name], info)
 
     var used = initIntSet()
     var included: HashSet[string]
@@ -569,13 +576,15 @@ proc buildLanguage(add, sub: seq[NimNode],
       var gotUsed: IntSet
       var gotIncluded: HashSet[string]
       gather(result, name, v.typ, gotUsed, gotIncluded)
+      # compute the form production relations against the existing ones first:
+      for it in gotUsed.items:
+        checkRelation(result, result.forms[it], used, name)
+
       # add the gathered sets to the total sets:
       for it in gotUsed.items:
         if containsOrIncl(used, it):
           error("duplicate production '$1' in non-terminal '$2'" %
                 [$result.forms[it], name], info)
-        else:
-          checkRelation(result, result.forms[it], used)
 
       for it in gotIncluded.items:
         if containsOrIncl(included, it):
@@ -587,7 +596,7 @@ proc buildLanguage(add, sub: seq[NimNode],
         error("duplicate production '$1' in non-terminal '$2'" %
               [$result.forms[it.semantic], name], info)
       else:
-        checkRelation(result, result.forms[it.semantic], used)
+        checkRelation(result, result.forms[it.semantic], used, name)
 
   # process the extra configuration declarations:
   for it in config.items:

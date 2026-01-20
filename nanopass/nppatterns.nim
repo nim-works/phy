@@ -26,7 +26,7 @@ template matches*[T, U](x: T, _: typedesc[U]): bool =
       false
   elif U is PChoice:
     # why not just use `or`? Because that would unnecessarily expand the
-    # second `matches` invocation when the case first invocation was sucessful
+    # second `matches` invocation when the case first invocation was successful
     when matches(x, typeof(U.A)):
       true
     else:

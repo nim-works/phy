@@ -1,7 +1,7 @@
-## Implements the `build` macro, for constructing abstract syntax trees.
+## Implements the `build` macro, for constructing records and abstract
+## syntax trees.
 
 import std/[genasts, macros, strformat, tables]
-import passes/trees
 import nanopass/[asts, helper, nplang, nppatterns]
 
 type
@@ -196,19 +196,20 @@ proc buildRecord(lang: LangInfo, ast, info, e: NimNode): NimNode =
     `ast`.L.`mvar`(id: `ast`.records.`mvar`.high.uint32)
 
 proc buildForm(lang: LangInfo, typ: int, ast, info, e: NimNode): NimNode =
-  ## Emits a tree construction for the AST described by `e`, with the syntax
-  ## from `lang`.
+  ## Translates the form construction `e` in the context of `lang` from the
+  ## `build` language to NimSkull. `typ` is the non-terminal the form must
+  ## be a part of.
 
-  # the `build` macro is complex, as:
+  # the translation is complex, as:
   # * there may be multiple forms in a language that have the same name
   # * the interpolated operands' types are not known to the macro
   # * list expansion is allowed, at least a single one
-  # In effect, a sort of overload resolution has to be performed for picking
-  # which form the build syntax ultimately matches. Due to list expansion,
-  # this cannot always be known at compile-time, in which case disambiguation
-  # has to happen at *run-time*. In the abstract, the macro works by emitting
-  # a decision tree (using `when` statements) that selects the form based on
-  # the operands' types
+  # Overload resolution has to be performed for picking which concrete form
+  # the syntax actually represents. Due to list expansion, this cannot always
+  # be known at compile-time, in which case disambiguation has to happen at
+  # *run-time*. In the abstract, the macro works by emitting a decision tree
+  # (using `when` statements) that selects the form based on the
+  # operands' types
 
   proc newMismatchError(src, dst, info: NimNode): NimNode =
     result = quote do:
@@ -225,7 +226,6 @@ proc buildForm(lang: LangInfo, typ: int, ast, info, e: NimNode): NimNode =
         `append`(`ast`, `info`, `src`)
       else:
         `error`
-    copyLineInfoForTree(result, src)
 
   proc addAll(to, n: NimNode) =
     if n.kind == nnkStmtList:
@@ -325,8 +325,8 @@ proc buildForm(lang: LangInfo, typ: int, ast, info, e: NimNode): NimNode =
         return
           makeError("form doesn't match any of the productions expected here", n)
 
-      # `process` having a closure context is costly, so pass the necessary
-      # local state via an aggregate parameter to `emit`
+      # `process` having a closure context is costly, and therefore the necessary
+      # local state is passed via an aggregate parameter to `emit`
       type Context = tuple[start, expanded: NimNode]
 
       proc emit(lang: LangInfo, c: Context, t, n: NimNode, i: int): NimNode =
@@ -481,6 +481,8 @@ proc buildForm(lang: LangInfo, typ: int, ast, info, e: NimNode): NimNode =
         let expect = quote do: `ast`.L.`mvar`
         let error = newMismatchError(n, expect, n)
         let append = bindSym"append"
+        # the operand may either be a `Value` or match the actual value
+        # type directly
         result = quote do:
           when matches(`n`, `expect`) or `n` is `expect`.T:
             when `n` is `expect`.T:
@@ -533,8 +535,9 @@ proc buildForm(lang: LangInfo, typ: int, ast, info, e: NimNode): NimNode =
 
 macro buildImpl(lang: static LangInfo, name: static string,
                 ast, info, e: untyped): untyped =
-  ## Emits a tree construction for the AST described by `e`, with the syntax
-  ## from `lang`.
+  ## Translates the build expression `e`, constructing a form or record
+  ## fitting the type with name `name` in the context of `lang`, to a NimSkull
+  ## expression.
   let typ = lang.map[name]
   case lang.types[typ].kind
   of tkNonTerminal: buildForm(lang, typ, ast, info, e)

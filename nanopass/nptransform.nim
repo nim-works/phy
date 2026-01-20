@@ -1,6 +1,7 @@
-## Implements the auto-generation of transformers for language forms.
+## Implements the generation of transformers for language forms, records,
+## and types.
 
-import std/[macros, strformat, tables]
+import std/[macros, strutils, tables]
 import passes/[trees]
 import nanopass/[asts, helper, nplang]
 
@@ -29,9 +30,9 @@ proc append(to: var Tree, i: var int, tag: uint8, info: SLocRef,
 macro transform*(src, dst: static LangInfo, nterm: static string,
                  form: static int, input, output: Tree,
                  cursor: untyped): untyped =
-  ## Generates the transformation from the given source language form
-  ## to a compatible target language production of the non-terminal with
-  ## name `nterm`.
+  ## Transforms the input language form identified by `form` to a production
+  ## fitting fitting the target language non-terminal with name `nterm` and
+  ## appends the result to `output`.
   # find a target language form that's a production of the non-terminal and a
   # suitable morph target. Exact matches are preferred
   var target = -1
@@ -54,12 +55,10 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
       morphability = m
       target = it
 
-  template formatValue(to: var string, x: SForm, prec: string) =
-    to.add render(src, x)
-
   if morphability in {None, Ambiguous}:
     return
-      makeError(fmt"cannot generate transformer for '{src.forms[form]}'", cursor)
+      makeError("cannot generate transformer from '$1' to '$2'" %
+                [render(src, src.forms[form]), nterm], cursor)
 
   # important: the generated code being efficient is of major importance! Most
   # transformations will be auto-generated, and they should thus be as fast as
@@ -140,7 +139,7 @@ macro transformType*(src, dst: static LangInfo, nterm: static string,
                      typ: static int, input, output: Tree,
                      cursor: untyped): untyped =
   ## Transforms the instance of type `typ` (may be either a terminal or non-
-  ## terminal) at `cursor` to an AST fitting the destination non-terminal
+  ## terminal) at `cursor` to a production fitting the destination non-terminal
   ## `nterm` and appends the result to `output`.
   proc contains(lang: LangInfo, typ: LangType, search: int): bool =
     for it in typ.sub.items:
