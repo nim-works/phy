@@ -97,7 +97,7 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
     let got =
       case src.types[a.typ].kind
       of tkTerminal:
-        quote do: src.`s`(index: `input`[`pos`].val)
+        quote do: src.`s`(id: `input`[`pos`].val)
       of tkRecord:
         quote do: src.`s`(id: `input`[`pos`].val)
       of tkNonTerminal:
@@ -110,7 +110,7 @@ macro transform*(src, dst: static LangInfo, nterm: static string,
         let tag = dst.types[b.typ].ntag
         quote do:
           `append`(`output`, i, uint8(`tag`), `input`[`pos`].info,
-                   (`got` -> dst.`d`).index)
+                   (`got` -> dst.`d`).id)
       of tkRecord:
         let tag = dst.types[b.typ].rtag
         quote do:
@@ -155,7 +155,7 @@ macro transformType*(src, dst: static LangInfo, nterm: static string,
     case src.types[typ].kind
     of tkTerminal:
       quote do:
-        src.`smvar`(index: `input`[pos(`cursor`)].val)
+        src.`smvar`(id: `input`[pos(`cursor`)].val)
     of tkRecord:
       quote do:
         src.`smvar`(id: `input`[pos(`cursor`)].val)
@@ -177,7 +177,7 @@ macro transformType*(src, dst: static LangInfo, nterm: static string,
       result = quote do:
         let info = `input`[pos(`cursor`)].info
         let `tmp` = `got` -> dst.`dmvar`
-        `output`.nodes.add node(`tag`, info, `tmp`.index)
+        `output`.nodes.add node(`tag`, info, `tmp`.id)
         NodeIndex(`output`.nodes.high)
     of tkRecord:
       # a new node needs to be allocated so that a reference to it can

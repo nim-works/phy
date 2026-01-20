@@ -43,7 +43,7 @@ type
   Value*[T] = object
     ## Represents a reference to a value with type `T` that's a terminal in
     ## an AST.
-    index*: uint32
+    id*: uint32
       ## leaked implementation detail, don't use
 
   RecordRef*[L: object, N: static string] = object
@@ -171,7 +171,7 @@ template load[T, C](tree: Tree, c: C): T =
   mixin get, pos
   when T is Production: T(index: get(tree, c))
   elif T is RecordRef:  T(id: tree[pos(c)].val)
-  else:                 T(index: tree[pos(c)].val)
+  else:                 T(id: tree[pos(c)].val)
 
 iterator items*[T, C](s: ChildSlice[T, C]): T =
   mixin advance

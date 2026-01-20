@@ -532,7 +532,7 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
           else:
             case lang.types[typ.intVal].kind
             of tkTerminal:
-              quote do: `name`.`mvar`(index: `ast`[`pos`].val)
+              quote do: `name`.`mvar`(id: `ast`[`pos`].val)
             of tkRecord:
               quote do: `name`.`mvar`(id: `ast`[`pos`].val)
             of tkNonTerminal:

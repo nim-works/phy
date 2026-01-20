@@ -76,7 +76,7 @@ proc unparse[N: static string, L](ast: Ast[L, auto], c: var Ctx, id: int,
     for name, val in fieldPairs(tup):
       let node =
         when val is Value:
-          toSexp(unpack(ast.storage[], val.index, typeof(val).T))
+          toSexp(unpack(ast.storage[], val.id, typeof(val).T))
         elif val is RecordRef:
           unparse[typeof(val).N](ast, c, val.id.int, get(ast, val))
         elif val is Production:

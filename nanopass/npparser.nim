@@ -124,7 +124,7 @@ proc extract(c: var Ctx, to: var RecordRef, pos: int) =
   to.id = c.tree.nodes.pop().val
 
 proc extract(c: var Ctx, to: var Value, pos: int) =
-  to.index = c.tree.nodes.pop().val
+  to.id = c.tree.nodes.pop().val
 
 proc parseFieldsImpl[L](c: var Ctx[L, auto], p: var SexpParser,
                         tup: var tuple) =

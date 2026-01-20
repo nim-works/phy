@@ -96,7 +96,7 @@ proc append[L, U](ast: var Ast[L, auto], info: SLocRef, x: Value[U]) =
   ast.tree.nodes.add node(
     typeof(lookup[U, L.meta.term_map]()).V,
     info,
-    x.index)
+    x.id)
 
 proc append[L](ast: var Ast[L, auto], info: SLocRef, x: RecordRef) =
   ast.tree.nodes.add node(
@@ -115,9 +115,9 @@ proc append[L](ast: var Ast[L, auto], info: SLocRef, x: openArray) =
 template coerce[S, T, U](s: S, val: U, _: typedesc[Value[T]]): Value[T] =
   mixin pack
   when T is U:
-    Value[T](index: pack(s, val)) # no coercion is necessary
+    Value[T](id: pack(s, val)) # no coercion is necessary
   else:
-    Value[T](index: pack(s, T(val))) # try a coercion, an error is fine
+    Value[T](id: pack(s, T(val))) # try a coercion, an error is fine
 
 {.pop.}
 

@@ -31,7 +31,7 @@ template embed(storage, arg: untyped): untyped =
   ## Implements terminal value construction.
   mixin pack
   let tmp = arg
-  Value[typeof(tmp)](index: pack(storage[], tmp))
+  Value[typeof(tmp)](id: pack(storage[], tmp))
 
 macro pick(lang: static LangInfo, name: static string, se: untyped): untyped =
   ## Returns the actual record identified by `r` in storage `storage`.
@@ -132,7 +132,7 @@ template withCache(to: typedesc, inp, body: untyped): untyped =
   var res: to
   withValue c[], inp.id, val:
     res =
-      when to is Value:      to(index: val[])
+      when to is Value:      to(id: val[])
       elif to is RecordRef:  to(id: val[])
       elif to is Production: to(index: NodeIndex(val[]))
       else:                  {.error.}
@@ -141,7 +141,7 @@ template withCache(to: typedesc, inp, body: untyped): untyped =
     #       disables adding to the table
     let val = if true: body else: default(to)
     c[][inp.id] =
-      when to is Value:      val.index
+      when to is Value:      val.id
       elif to is RecordRef:  val.id
       elif to is Production: val.index.uint32
       else:                  {.error.}
@@ -302,7 +302,7 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
       template val[T](v: nanopass.Value[T]): T {.used.} =
         # TODO: return a `lent T` where ``unpack`` does too (this is tricky...)
         # XXX: consider renaming this template to `get`
-        unpack(`input`.storage[], v.index, typeof(T))
+        unpack(`input`.storage[], v.id, typeof(T))
       template get[N](r: RecordRef[src, N]): untyped {.used.} =
         get(`input`, r)
       template info[N](n: Production[src, N]): untyped {.used.} =
