@@ -434,12 +434,11 @@ proc buildLanguage(add, sub: seq[NimNode],
   # all production additions were made
   for name, nt in result.nterminals.pairs:
     proc gather(def: LangDef, top, name: string, used: var IntSet,
-                included: var seq[string]) =
+                included: var HashSet[string]) =
       if name == top:
         error(fmt"non-terminal '{top}' includes itself", info)
       else:
-        if name notin included:
-          included.add name
+        included.incl(name)
 
         if name in def.nterminals:
           for it in def.nterminals[name].vars.items:
@@ -448,11 +447,11 @@ proc buildLanguage(add, sub: seq[NimNode],
             used.incl(it.semantic)
 
     var used = initIntSet()
-    var included = newSeq[string]()
+    var included: HashSet[string]
 
     for v in nt.vars.items:
       var gotUsed: IntSet
-      var gotIncluded: seq[string]
+      var gotIncluded: HashSet[string]
       gather(result, name, vars[v], gotUsed, gotIncluded)
       # add the gathered sets to the total sets:
       for it in gotUsed.items:
@@ -461,10 +460,9 @@ proc buildLanguage(add, sub: seq[NimNode],
                 [$result.forms[it], name], info)
 
       for it in gotIncluded.items:
-        if it in included:
+        if containsOrIncl(included, it):
           error("duplicate production '$1' in non-terminal '$2'" %
                 [it, name], info)
-        included.add it
 
     for it in nt.forms.items:
       if containsOrIncl(used, it.semantic):

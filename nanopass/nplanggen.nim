@@ -121,14 +121,18 @@ proc defineLanguageImpl*(name, base, body: NimNode): NimNode =
   if body[0].kind == nnkCommentStmt:
     body.del(0)
 
-  let setup1 =
+  # don't use genAst for creating the makeLanguage call, as it messes with the
+  # source location
+  let setup =
     if base.isNil:
-      genAst(body): makeLanguage(quote do: body)
+      newCall(bindSym"makeLanguage", newCall(bindSym"quote", body))
     else:
-      genAst(body, base): makeLanguage(def(base), quote do: body)
-  result = genAst(setup1, name):
+      newCall(bindSym"makeLanguage",
+        newCall(ident"def", base),
+        newCall(bindSym"quote", body))
+  result = genAst(setup, name):
     const
-      def = setup1
+      def = setup
       tmp = buildLangInfo(def)
     makeLanguageType(def, tmp, name)
     genHelpers(name, def, tmp)
