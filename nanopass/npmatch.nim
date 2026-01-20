@@ -478,9 +478,9 @@ proc generateForMatch(lang: LangInfo, name, ast, sel, e, els: NimNode,
             config.fillForm(lang, top[0][0].intVal.int, backup, info))
         else:
           # complex case. The form ID is only known at run-time; dispatch over
-          # the entry-level node's kind for detecting the form
+          # the top-level node's tag
           let inner = nnkCaseStmt.newTree(
-            quote do: `ast`.nodes[pos(`backup`)].kind)
+            quote do: `ast`.nodes[pos(`backup`)].tag)
           for it in top[0].items:
             inner.add nnkOfBranch.newTree(it,
               config.fillForm(lang, it.intVal.int, backup, info))
