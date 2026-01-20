@@ -657,35 +657,79 @@ proc mergeInto(a, b: NimNode): NimNode =
   ## Merges the match expression `a` into the match expression `b`, using a
   ## simple top-down zip-like algorithm.
   proc canMerge(a, b: NimNode): bool =
-    if a[0] == b[0] and a[0].kind != nnkBracket: # same head?
-      true
+    case b.kind
+    of nnkCall:
+      # can only merge when the head is the same
+      a.kind == nnkCall and a[0] == b[0] and canMerge(a[^1], b[^1])
+    of nnkCurly:
+      case a.kind
+      of nnkCall:  a[0] == b[0]
+      of nnkCurly: true
+      else:        false
     else:
       false
 
-  case b.kind
-  of nnkCurly:
-    # merge the source matchers into the target matchers
-    if a.kind == nnkCall:
-      # `a` is a matcher tha covers the full set of values for the type; just
-      # append it at the end
-      b.add a
+  # XXX: merging match expressions doesn't work as it should. Given the rules:
+  #      ```
+  #        of If(x, x, x): ...
+  #        of If(_, _, _): ...
+  #      ```
+  #      the second rule should match everything that the `If(x, x, x)`
+  #      doesn't handle, but given the desired ergonomics of the `match` macro
+  #      and the limitations of NimSkull, the only way to achieve this right
+  #      now would be to emit the body of the second rule multiple times. Since
+  #      this approach can quickly result in significant code bloat, it's
+  #      decided against, and the second rule therefore only receives
+  #      `If(y, _, _)`
+
+  proc merge(a, b: NimNode): NimNode =
+    case b.kind
+    of nnkCall:
+      b[^1] = mergeInto(a[^1], b[^1])
+      b
+    of nnkCurly:
+      if a.kind == nnkCall:
+        # `a` is a matcher that covers the full set of values for the type;
+        # just append it at the end
+        b.add a
+      else:
+        # important: keep in mind that the order is significant
+        assert a.kind == nnkCurly
+        for i in 1..<a.len:
+          block search:
+            # go over the destination matchers
+            for j in countdown(b.len - 1, 1):
+              if b[j] == b[0] or b[j].kind == nnkEmpty:
+                # don't merge when there's a "catch all" matcher following the
+                # potential merge target
+                # XXX: this crude workaround is needed for upholding the "match
+                #      rules are ordered" behaviour
+                break
+              elif canMerge(a[i], b[j]):
+                b[j] = mergeInto(a[i], b[j])
+                break search
+            # cannot merge into any existing matcher
+            b.add a[i]
+      b
     else:
-      assert a.kind == nnkCurly
-      for i in 1..<a.len:
-        block search:
-          for j in 1..<b.len:
-            if canMerge(a[i], b[^1]):
-              b[^1] = mergeInto(a[i], b[^1])
-              break search
-          # cannot merge into any existing matcher
-          b.add a[i]
-    b
+      unreachable(b.kind)
+
+  case b.kind
   of nnkNilLit:
+    # `b` hasn't been initialized yet
     a
   of nnkCall:
-    # can only mean that the heads are the same
-    b[^1] = mergeInto(a[^1], b[^1])
-    b
+    if canMerge(a, b):
+      merge(a, b)
+    else:
+      # `b` covers all inhabitants already
+      nnkCurly.newTree(b[0], b, a)
+  of nnkCurly:
+    if canMerge(a, b):
+      merge(a, b)
+    else:
+      b.add a
+      b
   else:
     unreachable()
 
