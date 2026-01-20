@@ -375,7 +375,7 @@ template defineProcessors(dst: untyped) =
     genProcessor(n.index, typeof(n).N)
 
   proc `->`[X](r: RecordRef, T: typedesc[RecordRef[dst, X]]): T {.inject.} =
-    let tab = getTable[T, typeof(r)]()
+    let tab = getTable[typeof(r), T]()
     # XXX: cannot use `withValue` because of symbol binding issues...
     if r.id in tab[]:
       T(id: tab[][r.id])
