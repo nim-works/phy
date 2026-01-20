@@ -250,6 +250,61 @@ macro generatedImpl(def: untyped) =
   def.body = newCall(ident"->", def.params[1][0], copyNimTree(def.params[0]))
   result = def
 
+template defineInWrappers(lang, input: untyped) =
+  ## Introduces the injected definitions for passes that receive an AST.
+  template match[N](sel: Production[lang, N], branches: varargs[untyped]
+                   ): untyped {.used, inject.} =
+    match[lang, N](input.tree, Cursor(sel.index), sel, branches)
+
+  template slice[N](T: typedesc[Production[lang, N]]
+                   ): typedesc {.used, inject.} =
+    ChildSlice[T, Cursor]
+  template slice[N](T: typedesc[RecordRef[lang, N]]
+                   ): typedesc {.used, inject.} =
+    ChildSlice[T, Cursor]
+  template slice(T: typedesc[asts.Value[auto]]): typedesc {.used, inject.} =
+    ChildSlice[T, Cursor]
+
+  template val[T](v: nanopass.Value[T]): T {.used, inject.} =
+    # TODO: return a `lent T` where ``unpack`` does too (this is tricky...)
+    # XXX: consider renaming this template to `get`
+    unpack(input.storage[], v.id, typeof(T))
+  template get[N](r: RecordRef[lang, N]): untyped {.used, inject.} =
+    get(input, r)
+  template info[N](n: Production[lang, N]): untyped {.used, inject.} =
+    input.tree[n.index].info
+
+  template equal[N](a, b: Production[lang, N]): bool {.used, inject.} =
+    equal(input.tree, Cursor(a.index), Cursor(b.index))
+
+template defineOutWrappers(lang, output: untyped) =
+  ## Introduces the injected definitions for passes that produce an AST.
+  template terminal(x: untyped): untyped {.used, inject.} =
+    embed(output.storage, x)
+  template build[N](n: typedesc[Production[lang, N]], info: SLocRef,
+                    body: untyped): untyped {.used, inject.} =
+    build(output, n, info, body)
+  template build[N](n: typedesc[RecordRef[lang, N]], info: SLocRef,
+                    body: untyped): untyped {.used, inject.} =
+    build(output, n, info, body)
+  template match[N](sel: Production[lang, N], branches: varargs[untyped]
+                   ): untyped {.used, inject.} =
+    match[lang, N](output.tree, IndCursor(sel.index), sel, branches)
+  template slice[N](T: typedesc[Production[lang, N]]
+                   ): typedesc {.used, inject.} =
+    ChildSlice[T, IndCursor]
+  template slice[N](T: typedesc[RecordRef[lang, N]]
+                   ): typedesc {.used, inject.} =
+    ChildSlice[T, IndCursor]
+
+  template get[N](r: RecordRef[lang, N]): untyped {.used, inject.} =
+    get(`output`, r)
+  template info[N](n: Production[lang, N]): untyped {.used, inject.} =
+    output.tree[n.index].info
+
+  template equal[N](a, b: Production[lang, N]): bool {.used, inject.} =
+    equal(output.tree, IndCursor(a.index), IndCursor(b.index))
+
 proc assemblePass(src, dst, def, call: NimNode): NimNode =
   ## Assembles the final procedure definition for a pass. `def` is the original
   ## proc definition, `call` the call to the pass' implementation.
@@ -288,52 +343,10 @@ proc assemblePass(src, dst, def, call: NimNode): NimNode =
       template dst: untyped {.used.} = `dst`
 
   if hasIn:
-    body.add quote do:
-      template match[N](sel: Production[src, N], branches: varargs[untyped]): untyped {.used.} =
-        match[src, N](`input`.tree, Cursor(sel.index), sel, branches)
-
-      template slice[N](T: typedesc[Production[src, N]]): typedesc {.used.} =
-        ChildSlice[T, Cursor]
-      template slice[N](T: typedesc[RecordRef[src, N]]): typedesc {.used.} =
-        ChildSlice[T, Cursor]
-      template slice(T: typedesc[asts.Value[auto]]): typedesc {.used.} =
-        ChildSlice[T, Cursor]
-
-      template val[T](v: nanopass.Value[T]): T {.used.} =
-        # TODO: return a `lent T` where ``unpack`` does too (this is tricky...)
-        # XXX: consider renaming this template to `get`
-        unpack(`input`.storage[], v.id, typeof(T))
-      template get[N](r: RecordRef[src, N]): untyped {.used.} =
-        get(`input`, r)
-      template info[N](n: Production[src, N]): untyped {.used.} =
-        `input`.tree[n.index].info
-
-      template equal[N](a, b: Production[src, N]): bool {.used.} =
-        equal(`input`.tree, Cursor(a.index), Cursor(b.index))
+    body.add newCall(bindSym"defineInWrappers", ident"src", input)
 
   if hasOut:
-    let embed = bindSym"embed"
-    body.add quote do:
-      template terminal(x: untyped): untyped {.used.} =
-        `embed`(`output`.storage, x)
-      template build[N](n: typedesc[Production[dst, N]], info: SLocRef, body: untyped): untyped {.used.} =
-        build(`output`, n, info, body)
-      template build[N](n: typedesc[RecordRef[dst, N]], info: SLocRef, body: untyped): untyped {.used.} =
-        build(`output`, n, info, body)
-      template match[N](sel: Production[dst, N], branches: varargs[untyped]): untyped {.used.} =
-        match[dst, N](`output`.tree, IndCursor(sel.index), sel, branches)
-      template slice[N](T: typedesc[Production[dst, N]]): typedesc {.used.} =
-        ChildSlice[T, IndCursor]
-      template slice[N](T: typedesc[RecordRef[dst, N]]): typedesc {.used.} =
-        ChildSlice[T, IndCursor]
-
-      template get[N](r: RecordRef[dst, N]): untyped {.used.} =
-        get(`output`, r)
-      template info[N](n: Production[dst, N]): untyped {.used.} =
-        `output`.tree[n.index].info
-
-      template equal[N](a, b: Production[dst, N]): bool {.used.} =
-        equal(`output`.tree, IndCursor(a.index), IndCursor(b.index))
+    body.add newCall(bindSym"defineOutWrappers", ident"dst", output)
 
   # the source location accessors are always available
   if hasIn:
