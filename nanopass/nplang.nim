@@ -96,7 +96,7 @@ proc buildLangInfo*(def: LangDef): LangInfo =
   # the subtype info
   for it in def.forms.items:
     result.forms.add SForm(
-      name: it.tag,
+      name: it.name,
       ntag: it.id,
       elems: mapIt(it.elems, (result.map[it.typ], it.repeat))
     )

@@ -13,7 +13,7 @@ type
 
   Form* = object
     ## Semantic representation of a syntax form.
-    tag*: string # TODO: rename to name
+    name*: string
     id*: int
       ## the integer ID through which a tree node is identified as being an
       ## instance of the form
@@ -97,7 +97,7 @@ template findIt[T](s: seq[T], predicate: untyped): untyped =
   r
 
 proc `$`(x: Form): string =
-  result = x.tag
+  result = x.name
   result.add "("
   for i, it in x.elems.pairs:
     if i > 0:
@@ -115,7 +115,7 @@ proc `==`(x, y: Elem): bool =
 
 proc `==`(x, y: Form): bool =
   ## Compares `x` and `y`, which must belong to the same language, for equality.
-  x.tag == y.tag and x.elems == y.elems
+  x.name == y.name and x.elems == y.elems
 
 proc checkName(target: LangDef, vars: Table[string, string], name: string,
                info: NimNode) =
@@ -211,7 +211,7 @@ proc buildLanguage(add, sub: seq[NimNode],
   proc removeProd(def: var LangDef, n: NimNode, to: string) =
     proc find(def: LangDef, nt: NonTerminal, f: ParsedForm): int =
       for i, it in nt.forms.pairs:
-        if def.forms[it.semantic].tag == f.name and
+        if def.forms[it.semantic].name == f.name and
            it.vars.len == f.elems.len:
           block search:
             # compare the elements:
@@ -384,7 +384,7 @@ proc buildLanguage(add, sub: seq[NimNode],
 
   proc addProd(def: var LangDef, n: NimNode, to: string) =
     proc addForm(def: var LangDef, p: ParsedForm): OrigForm =
-      var form = Form(tag: p.name, id: -1) # the ID is computed later
+      var form = Form(name: p.name, id: -1) # the ID is computed later
 
       for i, (name, repeat, info) in p.elems.pairs:
         if name notin vars:
