@@ -1,7 +1,6 @@
 ## Implements the language definition parsing and processing.
 
 import std/[macros, intsets, sets, strformat, tables]
-from nanopass/asts import RefTag
 
 type
   # Core types capturing a defined language
@@ -14,9 +13,6 @@ type
   Form* = object
     ## Semantic representation of a syntax form.
     name*: string
-    id*: int
-      ## the integer ID through which a tree node is identified as being an
-      ## instance of the form
     elems*: seq[Elem]
 
   OrigForm* = object
@@ -29,9 +25,6 @@ type
   Terminal* = object
     mvars*: seq[string]
       ## the meta-variables for ranging over values of the type
-    tag*: int
-      ## the integer ID through which a tree node is identified as being
-      ## an instance of the terminal
 
   NonTerminal* = object
     mvars*: seq[string]
@@ -44,9 +37,6 @@ type
   Record* = object
     mvars*: seq[string]
       ## the meta-variables for ranging over the record instances
-    tag*: int
-      ## the integer ID through which a tree node is identified as
-      ## storing a reference to an instance of the record
     fields*: seq[tuple[name, mvar, typ: string]]
 
   LangDef* = object
@@ -81,10 +71,6 @@ type
     name: NimNode
     sub: seq[NimNode]
     add: seq[NimNode]
-
-const
-  FirstTerminalTag* = RefTag + 1
-    ## the start of the terminals' tag space
 
 template findIt[T](s: seq[T], predicate: untyped): untyped =
   ## Version of ``find`` that allows providing an inline predicate,
@@ -146,33 +132,6 @@ proc parseForm(n: NimNode): ParsedForm =
 proc addForm(def: var LangDef, form: Form): int =
   def.forms.add form
   result = def.forms.high
-
-proc computeNodeTags(def: var LangDef) =
-  ## Assigns node tags to forms and terminals.
-  var next = 0
-  for it in def.forms.items:
-    next = max(it.id + 1, next)
-  # ^^ while simple, this does waste ID space
-
-  for it in def.forms.mitems:
-    # TODO: report an error when the ID overflows the allowed range
-    if it.id == -1:
-      it.id = next
-      inc next
-
-  next = int FirstTerminalTag
-  for it in def.terminals.values:
-    next = max(it.tag + 1, next)
-
-  for it in def.terminals.mvalues:
-    if it.tag == -1:
-      it.tag = next
-      inc next
-
-  for it in def.records.mvalues:
-    if it.tag == -1:
-      it.tag = next
-      inc next
 
 proc buildLanguage(add, sub: seq[NimNode],
                    def: seq[NonTerminalDef],
@@ -372,8 +331,7 @@ proc buildLanguage(add, sub: seq[NimNode],
   for it in add.items:
     let name = processTerminal(it)
     checkName(result, vars, name, it)
-    var tm = Terminal(tag: -1)
-    # the node tag is filled in later
+    var tm = Terminal()
     for i in 1..<it.len:
       let mvar = it[i].strVal
       checkName(result, vars, mvar, it)
@@ -384,7 +342,7 @@ proc buildLanguage(add, sub: seq[NimNode],
 
   proc addProd(def: var LangDef, n: NimNode, to: string) =
     proc addForm(def: var LangDef, p: ParsedForm): OrigForm =
-      var form = Form(name: p.name, id: -1) # the ID is computed later
+      var form = Form(name: p.name)
 
       for i, (name, repeat, info) in p.elems.pairs:
         if name notin vars:
@@ -431,7 +389,7 @@ proc buildLanguage(add, sub: seq[NimNode],
     if it.add.len > 0 and name notin base.records:
       # it's a new record
       checkName(result, vars, name, it.name)
-      var rec = Record(tag: -1) # the tag is computed later
+      var rec = Record()
       for i in 1..<it.name.len:
         checkName(result, vars, it.name[i].strVal, it.name[i])
         rec.mvars.add it.name[i].strVal
@@ -473,7 +431,6 @@ proc buildLanguage(add, sub: seq[NimNode],
 
       result.records[name] = record
 
-  computeNodeTags(result)
   # TODO: properly set the entry non-terminal
   result.entry = "module"
 

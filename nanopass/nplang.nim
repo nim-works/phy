@@ -1,8 +1,8 @@
 ## Provides the query-focused types representing the language in the nanopass
 ## framework, as well as the routines for creating instances thereof.
 
-import std/[sequtils, tables]
-import nanopass/[nplangdef]
+import std/[hashes, sequtils, tables]
+import nanopass/[asts, nplangdef]
 
 type
   SForm* = object
@@ -52,16 +52,40 @@ type
   Static*[V: static int] = distinct int
     ## Carrier for a compile-time known integer value.
 
+proc add[T](s: var set[T], val: int): T =
+  ## Derives a value from `val` that's in range `T` and not yet present in `s`,
+  ## adding it to `s` and returning the value.
+  const Len = high(T) - low(T) + 1
+  let v = val mod Len
+  result = v + low(T)
+  # increment the starting value until an unoccupied slot is found. This is
+  # similar to open-addressing in a hash table
+  let start = v
+  var pos = start
+  while result in s:
+    let next = (pos + 1) mod Len
+    if next == start:
+      raise ValueError.newException("no slots left")
+    pos = next
+    result = pos + low(T)
+
+  s.incl(result)
+
 proc buildLangInfo*(def: LangDef): LangInfo =
   ## Creates the pass-centric language representation for `def`.
   result.map = initTable[string, int](4)
+
+  var formTags: set[range[0 .. (int(RefTag) - 1)]]
+    ## tags for forms
+  var leafTags: set[(int(RefTag) + 1) .. 255]
+    ## tags for leaf nodes
 
   for name, it in def.terminals.pairs:
     result.types.add LangType(
       name: name,
       mvar: it.mvars[0],
       kind: tkTerminal,
-      ntag: it.tag
+      ntag: add(leafTags, hash(name))
     )
     # add the name-to-type mappings:
     result.map[name] = high(result.types)
@@ -85,7 +109,7 @@ proc buildLangInfo*(def: LangDef): LangInfo =
       name: name,
       mvar: it.mvars[0],
       kind: tkRecord,
-      rtag: it.tag
+      rtag: add(leafTags, hash(name))
     )
     # add the name-to-type mappings:
     result.map[name] = high(result.types)
@@ -97,7 +121,7 @@ proc buildLangInfo*(def: LangDef): LangInfo =
   for it in def.forms.items:
     result.forms.add SForm(
       name: it.name,
-      ntag: it.id,
+      ntag: add(formTags, hash(it.name)),
       elems: mapIt(it.elems, (result.map[it.typ], it.repeat))
     )
 

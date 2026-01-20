@@ -4,7 +4,60 @@
 import std/[genasts, macros, tables]
 import nanopass/[asts, nplang, nplangdef, nppatterns]
 
-macro makeLanguageType(def: static LangDef, typName: untyped) =
+macro makeMetaType(def: static LangInfo, typname: untyped): typedesc =
+  ## Expands to the tuple type storing the various internal-only information
+  ## about a language.
+  result = nnkTupleTy.newTree()
+
+  let (csym, fsym) = (bindSym"PChoice", bindSym"PForm")
+  let nonTerminals = nnkTupleTy.newTree()
+  let terminals = nnkTupleConstr.newTree()
+  let recMap = nnkTupleConstr.newTree()
+  let records = nnkTupleTy.newTree()
+
+  for typ in def.types.items:
+    case typ.kind
+    of tkTerminal:
+      terminals.add nnkTupleConstr.newTree(
+        ident(typ.name),
+        nnkBracketExpr.newTree(bindSym"Static", newIntLitNode(typ.ntag)))
+    of tkRecord:
+      recMap.add nnkTupleConstr.newTree(
+        newDotExpr(copyNimTree(typName), ident(typ.mvar)),
+        nnkBracketExpr.newTree(bindSym"Static", newIntLitNode(typ.rtag)))
+
+      let tup = nnkTupleTy.newTree()
+      for (name, t) in typ.fields.items:
+        tup.add newIdentDefs(ident(name),
+          newDotExpr(typName, ident(def.types[t].mvar)))
+
+      # expose under the first meta-var there is for the type
+      records.add newIdentDefs(ident(typ.mvar),
+        nnkBracketExpr.newTree(ident"seq", tup))
+    of tkNonTerminal:
+      let ln = ident(typName.strVal)
+      var p = ident"void"
+      for f in typ.forms.items:
+        let id = def.forms[f].ntag
+        p = quote do:
+          `csym`[`p`, `fsym`[`id`]]
+
+      for v in typ.sub.items:
+        let id = ident(def.types[v].mvar)
+        p = quote do:
+          `csym`[`p`, `ln`.`id`]
+
+      nonTerminals.add newIdentDefs(ident(typ.name), p)
+
+  result.add newIdentDefs(ident"nt", nonTerminals)
+  if terminals.len > 0:
+    result.add newIdentDefs(ident"term_map", terminals)
+  if records.len > 0:
+    result.add newIdentDefs(ident"record_map", recMap)
+
+  result.add newIdentDefs(ident"records", records)
+
+macro makeLanguageType(def: static LangDef, info: LangInfo, typName: untyped) =
   ## Creates the type representing the language defined by `def`. This is the
   ## type the nanopass-framework user passes around.
   ##
@@ -38,64 +91,11 @@ macro makeLanguageType(def: static LangDef, typName: untyped) =
       ident(typName.strVal),
       newStrLitNode(def.entry)))
 
-  let ntType = nnkTupleTy.newTree()
-  let (csym, fsym) = (bindSym"PChoice", bindSym"PForm")
-  # add the descriptions for the non-terminals
-  for name, nt in def.nterminals.pairs:
-    let ln = ident(typName.strVal)
-    var p = ident"void"
-    for f in nt.forms.items:
-      let id = def.forms[f.semantic].id
-      p = quote do:
-        `csym`[`p`, `fsym`[`id`]]
-
-    for v in nt.vars.items:
-      let id = ident(v)
-      p = quote do:
-        `csym`[`p`, `ln`.`id`]
-
-    ntType.add newIdentDefs(ident(name), p)
-
   # everything meant for internal use is stored in an anonymous record in
   # the `meta` field, preventing name clashes and the fields showing up
   # in auto-complete suggestions
-  let metaType = nnkTupleTy.newTree()
-
-  # create the terminal->tag map:
-  let tup = nnkTupleConstr.newTree()
-  for name, it in def.terminals.pairs:
-    let n = it.tag
-    tup.add nnkTupleConstr.newTree(
-      ident(name),
-      nnkBracketExpr.newTree(bindSym"Static", newIntLitNode(n)))
-
-  metaType.add newIdentDefs(ident"term_map", tup)
-
-  # create the record->tag map:
-  block:
-    let tup = nnkTupleConstr.newTree()
-    for it in def.records.values:
-      tup.add nnkTupleConstr.newTree(
-        newDotExpr(copyNimTree(typName), ident(it.mvars[0])),
-        nnkBracketExpr.newTree(bindSym"Static", newIntLitNode(it.tag)))
-
-    if tup.len > 0:
-      metaType.add newIdentDefs(ident"record_map", tup)
-
-  # create the symbol storage type (a tuple of arrays-of-structs):
-  let st = nnkTupleTy.newTree()
-  for name, rec in def.records.pairs:
-    let tup = nnkTupleTy.newTree()
-    for (name, mvar, _) in rec.fields.items:
-      tup.add newIdentDefs(ident(name), newDotExpr(typName, ident(mvar)))
-
-    # expose under the first meta-var there is for the type
-    st.add newIdentDefs(ident(rec.mvars[0]),
-      nnkBracketExpr.newTree(ident"seq", tup))
-
-  metaType.add newIdentDefs(ident"records", st)
-
-  fields.add newIdentDefs(ident"meta", metaType)
+  fields.add newIdentDefs(ident"meta",
+    newCall(bindSym"makeMetaType", info, typName))
 
   result = nnkTypeSection.newTree(
     nnkTypeDef.newTree(
@@ -130,5 +130,5 @@ proc defineLanguageImpl*(name, base, body: NimNode): NimNode =
     const
       def = setup1
       tmp = buildLangInfo(def)
-    makeLanguageType(def, name)
+    makeLanguageType(def, tmp, name)
     genHelpers(name, def, tmp)
