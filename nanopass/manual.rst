@@ -16,14 +16,33 @@ according to well-defined grammars.
 The idea is that passes focus on small, specific tasks, with tree traversal
 boilerplate generated automatically.
 
-Concepts
+Glossary
 --------
 
-* a *language* (in the context of the nanopass framework) is a formal grammar.
-* a *terminal* is ...
-* a *form* is a named schema for a term, made up of zero or more sub-terms
-* a *non-terminal* is ...
-* a *meta-variable* is a name ranging over a terminal or non-terminal. It may be viewed as an alias.
+record
+  a heterogeneous map from names to values, whose shape (number of entries and
+  their names and types) is fixed
+
+terminal
+  in the context of the nanopass framework, a type that's defined outside a
+  language. This corresponds to a terminal in a formal grammar, hence the name
+
+form
+  a named schema for a term. Can also be viewed as a named tuple
+
+production
+  either a form, a record, or a terminal
+
+non-terminal
+  a set of productions
+
+meta-variable
+  ranges over the terms a type. In the nanopass framework, they're mostly
+  just short-hands for types
+
+language
+  a collection of terminals, records, and forms, plus the non-terminals for
+  connecting them together
 
 .. TODO rewrite this section. It should use the correct terminology while still
         being approachable to someone not overly familiar with formal grammars
@@ -45,11 +64,11 @@ type is bound to the identifier.
 
 .. note::
 
-  The type is not meant to be used as a type for values. Rather, it
-  acts as a namespace through which entities defined in the language are
-  accessed.
+  The type bound to the identifier is not meant to be used as a type for
+  values. Rather, it acts as a namespace through which entities defined in the
+  language are accessed.
 
-The body consists of a sequence of terminal and non-terminal definitions.
+The body consists of a sequence of terminal, record, and non-terminal definitions.
 
 .. code-block:: nim
     :test: "nim c $1"
@@ -57,13 +76,17 @@ The body consists of a sequence of terminal and non-terminal definitions.
   import nanopass/nanopass
 
   defineLanguage L0:
-    int(i)         # definition of a terminal
-    expr(e) ::= i  # definition of a non-terminal
+    int(i)                 # definition of a terminal
+    rec(r)  ::= (field: i) # definition of a record
+    expr(e) ::= i          # definition of a non-terminal
 
   # this defines a language `L0` with:
-  # * a single terminal of type `int`, ranged over by meta-variable `i`
+  # * a terminal of type `int`, ranged over by meta-variable `i`
+  # * a record type with name `rec`, ranged over by meta-variable `r`. The
+  #   record has a single field called `field`, whose values must be of
+  #   type `int`
   # * a non-terminal with name `expr`, ranged over by meta-variable `e`. Where
-  #   this non-terminal is expected, an `int` value is allowed
+  #   this non-terminal is expected, there must be value of type `int`
 
 Meta-variables must be unique.
 
@@ -99,7 +122,7 @@ regardless of the declarations' order.
     expr(e) ::= i
     int(i)
 
-Each non-terminals must have a unique name.
+No two non-terminals may have the same name.
 
 .. code-block:: nim
     :test: "nim c $1"
@@ -112,8 +135,30 @@ Each non-terminals must have a unique name.
     expr(e) ::= i
     expr(b) ::= i # error: 'expr' name already in use
 
-Non-terminals and meta-variables share a namespace, meaning that it's not
-possible to give a name to a non-terminal already used for a meta-variable,
+All types share the same namespace.
+
+.. code-block:: nim
+    :test: "nim c $1"
+    :status: 1
+
+  import nanopass/nanopass
+
+  defineLanguage L0:
+    int(i)
+    int(e) ::= i # a type with name 'int' already exists
+
+.. code-block:: nim
+    :test: "nim c $1"
+    :status: 1
+
+  import nanopass/nanopass
+
+  defineLanguage L0:
+    int(i)
+    int(e) ::= (field: i) # a type with name 'int' already exists
+
+Types and meta-variables also share a namespace, meaning that it's not
+possible to give a name to a type already used for a meta-variable,
 and vice versa.
 
 .. code-block:: nim
@@ -126,20 +171,8 @@ and vice versa.
     int(i)
     i(e) ::= i # error: 'i' already in use
 
-For terminals, the type expression must be an identifier, more complex
-expressions are not allowed.
 
-.. code-block:: nim
-    :test: "nim c $1"
-    :status: 1
-
-  import nanopass/nanopass
-
-  defineLanguage L0:
-    (ref int)(i) # error: not an identifier
-    expr(e) ::= i
-
-The identifier must also refer to a type that exists at the time
+For terminal types, the name refer to a NimSkull type that exists at the time
 `defineLanguage` is expanded.
 
 .. code-block:: nim
