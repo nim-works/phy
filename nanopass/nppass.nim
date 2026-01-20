@@ -18,8 +18,9 @@ macro isPartOf(lang: static LangInfo, lname, typ: untyped): bool =
 
 macro ctError(str: string, info: untyped) =
   ## Like the .error pragma, but with customizable source location information.
-  copyLineInfo(str, info)
-  nnkPragma.newTree(nnkExprColonExpr.newTree(ident"error", str))
+  let it = nnkExprColonExpr.newTree(ident"error", str)
+  copyLineInfo(it, info)
+  nnkPragma.newTree(it)
 
 template classify(x: typedesc): TypeClass =
   when x is Value:      tcValue

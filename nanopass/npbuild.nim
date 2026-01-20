@@ -214,8 +214,8 @@ proc buildForm(lang: LangInfo, typ: int, ast, info, e: NimNode): NimNode =
     result = quote do:
       {.error: "expected type fitting " & $`dst` & ", but got " &
                $typeof(`src`).}
-    # copy the line info to the pragma's operand
-    copyLineInfo(result[0][1], info)
+    # copy the line info to the expr-colon-expr
+    copyLineInfo(result[0], info)
 
   proc makeMatch(src, expect: NimNode): NimNode =
     let error = newMismatchError(src, expect, src)
@@ -250,14 +250,14 @@ proc buildForm(lang: LangInfo, typ: int, ast, info, e: NimNode): NimNode =
         let mvar = ident(typ.mvar)
         result = quote do:
           {.error: "expected '" & $`ast`.L.`mvar` & "', but got form".}
-        copyLineInfo(result[0][1], n)
+        copyLineInfo(result[0], n)
         return
       of tkRecord:
         # expected a record, but the constructor can only be that of a form
         let mvar = ident(typ.mvar)
         result = quote do:
           {.error: "expected '" & $`ast`.L.`mvar` & "', but got form".}
-        copyLineInfo(result[0][1], n)
+        copyLineInfo(result[0], n)
         return
       of tkNonTerminal:
         discard "all good"
