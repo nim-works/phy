@@ -105,7 +105,9 @@ proc `==`(x, y: Form): bool =
 
 proc checkName(target: LangDef, vars: Table[string, string], name: string,
                info: NimNode) =
-  if name in target.terminals:
+  if name == "entry":
+    error("cannot use name 'entry'; it's a reserved name", info)
+  elif name in target.terminals:
     error(fmt"terminal with name {name} already exists", info)
   elif name in target.records:
     error(fmt"record with name '{name}' already exists", info)
@@ -136,6 +138,7 @@ proc addForm(def: var LangDef, form: Form): int =
 proc buildLanguage(add, sub: seq[NimNode],
                    def: seq[NonTerminalDef],
                    records: seq[RecordDef],
+                   config: seq[NimNode],
                    base: LangDef, info: NimNode): LangDef =
   ## The center-piece of language definition construction. Constructs a
   ## language definition by applying the diff for terminals (`add` and `sub`)
@@ -327,6 +330,10 @@ proc buildLanguage(add, sub: seq[NimNode],
 
     result.records[name] = res
 
+  # inherit the entry point:
+  if base.entry != "" and base.entry in base.nterminals:
+    result.entry = base.entry
+
   # ---- phase 2: make all additions
   for it in add.items:
     let name = processTerminal(it)
@@ -469,15 +476,32 @@ proc buildLanguage(add, sub: seq[NimNode],
         error("duplicate production '$1' in non-terminal '$2'" %
               [$result.forms[it.semantic], name], info)
 
-  # TODO: properly set the entry non-terminal
-  result.entry = "module"
+  # process the extra configuration declarations:
+  for it in config.items:
+    it[0].expectKind nnkIdent
+    case it[0].strVal
+    of "entry":
+      it[1].expectKind nnkIdent
+      let entry = it[1].strVal
+      if entry notin result.nterminals:
+        error(fmt"no non-terminal with the name '{entry}' exists", it[1])
+      result.entry = entry
+    else:
+      error("identifier must be 'entry'", it[0])
+
+  if result.entry == "":
+    if def.len == 0:
+      error("cannot infer entry non-terminal, as none exists", info)
+    # use the last-defined non-terminal as the entry point
+    result.entry = def[^1].name[0].strVal
 
 proc makeLanguage*(body: NimNode): LangDef =
   ## Creates a language definition from the ``defineLanguage`` DSL code.
   body.expectMinLen 1
-  var add: seq[NimNode]
-  var def: seq[NonTerminalDef]
+  var terminals: seq[NimNode]
+  var nterminals: seq[NonTerminalDef]
   var records: seq[RecordDef]
+  var config: seq[NimNode]
 
   # second pass: process the productions
   proc extract(n: NimNode, list: var seq[NimNode]) =
@@ -507,10 +531,13 @@ proc makeLanguage*(body: NimNode): LangDef =
         else:
           var nt = NonTerminalDef(name: it[1])
           extract(it[2], nt.add)
-          def.add nt
+          nterminals.add nt
         continue
     of nnkCall:
-      add.add it
+      terminals.add it
+      continue
+    of nnkAsgn:
+      config.add it
       continue
     else:
       discard "report an error below"
@@ -519,14 +546,16 @@ proc makeLanguage*(body: NimNode): LangDef =
 
   # to keep the implementation simple, a non-extension language is treated
   # internally as an empty language definition being extended
-  buildLanguage(add, @[], def, records, default(LangDef), body)
+  buildLanguage(terminals, @[], nterminals, records, config, default(LangDef),
+                body)
 
 proc makeLanguage*(base: LangDef, body: NimNode): LangDef =
   ## Creates a language definition from the ``defineLanguage`` DSL code
   ## and `base`.
   var add, sub: seq[NimNode]
-  var def: seq[NonTerminalDef]
+  var nterminals: seq[NonTerminalDef]
   var records: seq[RecordDef]
+  var config: seq[NimNode]
 
   var body = body
   if body.kind != nnkStmtList:
@@ -576,7 +605,7 @@ proc makeLanguage*(base: LangDef, body: NimNode): LangDef =
         else:
           var nt = NonTerminalDef(name: it[1])
           extract(it[2], nt.add, nt.sub)
-          def.add nt
+          nterminals.add nt
 
         handled = true
     of nnkPrefix:
@@ -588,12 +617,15 @@ proc makeLanguage*(base: LangDef, body: NimNode): LangDef =
         handled = true
     of nnkCall:
       # non-terminal with no change in productions
-      def.add NonTerminalDef(name: it)
+      nterminals.add NonTerminalDef(name: it)
+      handled = true
+    of nnkAsgn:
+      config.add it
       handled = true
     else:
       discard
 
     if not handled:
-      error("expected `-a`, `+a`, or `a(...) ::= ...`", it[0])
+      error("expected `-a`, `+a`, `a(...) ::= ...`, or `a = ...", it[0])
 
-  buildLanguage(add, sub, def, records, base, body)
+  buildLanguage(add, sub, nterminals, records, config, base, body)
