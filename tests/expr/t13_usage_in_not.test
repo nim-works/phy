@@ -4,4 +4,4 @@ discard """
 """
 (Exprs
   (Decl (Ident "a") (Ident "false"))
-  (Call (Ident "not") (Ident "a"))))
+  (Call (Ident "not") (Ident "a")))

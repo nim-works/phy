@@ -4,4 +4,4 @@ discard """
 """
 (If (Ident "true")
   (FloatVal 0.5)
-  (As (IntVal 100) (UnionTy (IntTy) (FloatTy)))))
+  (As (IntVal 100) (UnionTy (IntTy) (FloatTy))))
