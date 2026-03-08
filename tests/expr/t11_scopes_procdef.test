@@ -1,6 +1,6 @@
 discard """
   description: "A `ProcDecl` body is part of a new scope"
-  argument: "c"
+  arguments: "c"
 """
 (Module
   (ProcDecl (Ident "test1") (UnitTy) (Params)
