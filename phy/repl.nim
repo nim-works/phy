@@ -36,6 +36,7 @@ import
     default_reporting,
     host_impl,
     tree_parser,
+    vmerrors,
     vmexec
   ],
   vm/[
@@ -99,8 +100,10 @@ proc process(ctx: var ModuleCtx, reporter: Reporter,
     # make sure the module is correct:
     let errors = validate(module)
     if errors.len > 0:
+      let os = newFileStream(stderr)
       for it in errors.items:
-        echo it
+        render(os, module, it)
+        os.writeLine("")
       echo "validation failure"
       return
 
