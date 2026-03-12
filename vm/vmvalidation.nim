@@ -7,8 +7,10 @@
 
 import
   std/[
+    options,
     packedsets,
-    strformat
+    strformat,
+    tables
   ],
   experimental/[
     results
@@ -31,12 +33,69 @@ type
     stack: seq[ValueType]        ## abstract operand stack
     targets: PackedSet[PrgCtr]   ## all positions that are jumped to
 
-  CheckResult = Result[void, string]
+  Entity* = enum
+    entNone
+    entInit   = "initializer"
+    entReloc  = "relocation"
+    entExport = "export"
+    entType   = "type"
+    entConst  = "constant"
+    entGlobal = "global"
+    entProc   = "procedure"
 
-# error messages should answer the question: "what is wrong?"
+  ErrorKind* = enum
+    ekGeneric
+    ekStack
+
+  ErrContext* = object
+    # there is some overlap between which fields are active for each entity,
+    # so no record case is used fields
+    entity*: Entity
+      ## the type of entity the problem is with
+    index*: int
+      ## the index/id of the problematic entity
+    instr*: Option[PrgCtr]
+      ## the absolute position of the problematic instruction, if any
+
+  ErrPayload* = object
+    ## A structured description of a validation error.
+    case kind*: ErrorKind
+    of ekGeneric:
+      msg*: string
+    of ekStack:
+      expected*: seq[ValueType]
+      got*: seq[ValueType]
+      full*: bool
+        ## whether `expected` represents the full stack, or just the top
+
+  Error* = object
+    ## A structured description of a validation error plus the context in
+    ## which the error happened.
+    ctx*: ErrContext
+    payload*: ErrPayload
+
+  LocalResult = Result[void, ErrPayload]
+  CheckResult = Result[void, Error]
 
 const
   errNotForwardJump = "not a forward jump"
+
+proc genericError(msg: sink string): ErrPayload {.inline.} =
+  ErrPayload(kind: ekGeneric, msg: msg)
+
+proc wrapError(ent: Entity, idx: int, p: sink ErrPayload): Error =
+  Error(ctx: ErrContext(entity: ent, index: idx), payload: p)
+
+proc wrapError(prc: ProcIndex, pc: PrgCtr, p: sink ErrPayload): Error =
+  Error(
+    ctx: ErrContext(entity: entProc, index: ord prc, instr: some(pc)),
+    payload: p)
+
+proc wrapError(ent: Entity, idx: int, msg: sink string): Error {.inline.} =
+  wrapError(ent, idx, genericError(msg))
+
+proc wrapError(prc: ProcIndex, pc: PrgCtr, msg: sink string): Error {.inline.} =
+  wrapError(prc, pc, genericError(msg))
 
 proc toValueType(t: VmType): ValueType =
   case t
@@ -57,10 +116,10 @@ proc test(a: seq|openArray, i: SomeInteger): bool =
   else:
     i >= 0 and i < a.len
 
-template check(cond: bool, msg: untyped) =
+template check(cond: bool, m: untyped) =
   ## Helper template for easier error propagation.
   if not cond:
-    return CheckResult.err(msg)
+    return LocalResult.err(genericError(m))
 
 template check(res: CheckResult) =
   ## Helper template for easier error propagation.
@@ -69,10 +128,14 @@ template check(res: CheckResult) =
     return tmp
 
 proc run(ctx: var ValidationState, env: VmModule, pos: PrgCtr, instr: Instr
-        ): CheckResult =
+        ): LocalResult =
   ## * applies the operand-stack effects of instruction `instr` at `pos`
   ## * verifies that the instruction is well-formed
   ## * verifies that the various preconditions and invariants hold
+  template stackError(expect, stack: seq[ValueType],
+                      isFull = false): ErrPayload =
+    ErrPayload(kind: ekStack, expected: expect, got: stack, full: isFull)
+
   template expect(num: int) =
     check ctx.stack.len >= num, "stack underflow"
 
@@ -80,13 +143,33 @@ proc run(ctx: var ValidationState, env: VmModule, pos: PrgCtr, instr: Instr
     ctx.stack.add typ
 
   template pop(typ: ValueType) =
-    expect(1)
-    check ctx.stack.pop() == typ, "unexpected type"
+    let t = typ
+    if ctx.stack.len == 0 or ctx.stack[^1] != t:
+      return LocalResult.err(stackError(@[t], ctx.stack))
+    else:
+      discard ctx.stack.pop()
+
+  template pop[I](types: array[I, ValueType]) =
+    let expect = types
+    let L = ctx.stack.len
+    if L < expect.len or
+       toOpenArray(ctx.stack, L - expect.len, L - 1) != expect:
+      return LocalResult.err(stackError(@expect, ctx.stack))
+    else:
+      ctx.stack.shrink(ctx.stack.len - expect.len)
+
+  template popEmpty[I](types: array[I, ValueType]) =
+    let expect = types
+    # the stack must match exactly
+    if expect != ctx.stack:
+      return LocalResult.err(stackError(@expect, ctx.stack, true))
+    else:
+      ctx.stack.shrink(0)
 
   template checked(s: seq, pos: untyped): untyped =
     let p = pos
     if test(s, pos): s[p]
-    else: return CheckResult.err("index out of bounds")
+    else: return LocalResult.err(genericError "index out of bounds")
 
   template checkedLocal(idx: int32): ValueType =
     let i = idx
@@ -94,7 +177,8 @@ proc run(ctx: var ValidationState, env: VmModule, pos: PrgCtr, instr: Instr
     checked(env.locals, env[ctx.prc].locals.a + i.uint32)
 
   template expectEmpty() =
-    check ctx.stack.len == 0, "stack is not empty"
+    if ctx.stack.len != 0:
+      return LocalResult.err(stackError(@[], ctx.stack, true))
 
   template jump(rel: int32) =
     ctx.active = false
@@ -138,15 +222,14 @@ proc run(ctx: var ValidationState, env: VmModule, pos: PrgCtr, instr: Instr
   of opcAddInt, opcSubInt, opcMulInt, opcDivInt, opcDivU, opcModInt, opcModU,
      opcBitAnd, opcBitOr, opcBitXor, opcShr, opcShl, opcEqInt, opcLtInt,
      opcLeInt, opcLeu, opcLtu, opcAshr:
-    pop(vtInt)
-    pop(vtInt)
+    pop([vtInt, vtInt])
     push(vtInt)
   of opcAddChck, opcSubChck:
     check imm8(instr) in 1..64, "width not in range 1..64"
-    pop(vtInt); pop(vtInt)
+    pop([vtInt, vtInt])
     push(vtInt); push(vtInt)
   of opcMulChck:
-    pop(vtInt); pop(vtInt)
+    pop([vtInt, vtInt])
     push(vtInt); push(vtInt)
   of opcMask, opcSignExtend:
     pop(vtInt)
@@ -156,17 +239,16 @@ proc run(ctx: var ValidationState, env: VmModule, pos: PrgCtr, instr: Instr
     pop(vtInt)
     push(vtInt)
   of opcAddFloat, opcSubFloat, opcMulFloat, opcDivFloat:
-    pop(vtFloat); pop(vtFloat)
+    pop([vtFloat, vtFloat])
     push(vtFloat)
   of opcNegFloat:
     pop(vtFloat)
     push(vtFloat)
   of opcOffset:
-    pop(vtInt)
-    pop(vtInt)
+    pop([vtInt, vtInt])
     push(vtInt)
   of opcEqFloat, opcLtFloat, opcLeFloat:
-    pop(vtFloat); pop(vtFloat)
+    pop([vtFloat, vtFloat])
     push(vtInt)
   of opcUIntToFloat, opcSIntToFloat:
     pop(vtInt)
@@ -185,39 +267,30 @@ proc run(ctx: var ValidationState, env: VmModule, pos: PrgCtr, instr: Instr
     pop(vtInt)
     push(vtFloat)
   of opcWrInt8, opcWrInt16, opcWrInt32, opcWrInt64:
-    pop(vtInt)
-    pop(vtInt)
+    pop([vtInt, vtInt])
   of opcWrFlt32, opcWrFlt64:
-    pop(vtFloat)
-    pop(vtInt)
+    pop([vtInt, vtFloat])
   of opcWrRef:
-    pop(vtInt)
-    pop(vtRef)
+    pop([vtInt, vtRef])
   of opcMemCopy:
-    pop(vtInt)
-    pop(vtInt)
-    pop(vtInt)
+    pop([vtInt, vtInt, vtInt])
   of opcMemClear:
-    pop(vtInt)
-    pop(vtInt)
+    pop([vtInt, vtInt])
   of opcJmp:
     expectEmpty()
     jump(imm32(instr))
   of opcBranch:
     let (rel, invert) = imm32_8(instr)
     check invert in {0, 1}, "'invert' flag not 0 or 1"
-    pop(vtInt)
-    expectEmpty()
+    popEmpty([vtInt])
     jump(rel)
   of opcRet:
     let expect = env.types.returnType(env[ctx.prc].typ)
-    if expect != tkVoid:
-      pop(toValueType expect)
-    expectEmpty()
+    if expect == tkVoid: expectEmpty()
+    else:                popEmpty([toValueType expect])
     ctx.active = false
   of opcRaise:
-    pop(vtInt)
-    expectEmpty()
+    popEmpty([vtInt])
     ctx.active = false
   of opcCall, opcIndCall:
     let (idx, num) = imm32_16(instr)
@@ -260,11 +333,11 @@ proc run(ctx: var ValidationState, env: VmModule, pos: PrgCtr, instr: Instr
   result.initSuccess()
 
 proc verify(ctx: ValidationState, env: VmModule, tbl: HOslice[uint32],
-            code: openArray[Instr]): CheckResult =
+            code: openArray[Instr]): LocalResult =
   ## Verifies the EH table `tbl`. Code is code of the procedure the table
   ## is associated with.
   if tbl.a >= tbl.b:
-    return CheckResult.ok() # EH table has no items
+    return LocalResult.ok() # EH table has no items
 
   check test(env.ehTable, tbl.a) and test(env.ehTable, tbl.b - 1),
         "EH table is illformed"
@@ -278,9 +351,9 @@ proc verify(ctx: ValidationState, env: VmModule, tbl: HOslice[uint32],
 
   result.initSuccess()
 
-proc verify*(hdr: ProcHeader, env: VmModule): CheckResult =
+proc verify*(hdr: ProcHeader, env: VmModule): LocalResult =
   ## Verifies that `hdr` is a valid procedure header.
-  const Error = "proc header is illformed"
+  const Error = "proc header is ill-formed"
   case hdr.kind
   of pkDefault:
     check hdr.code.b >= hdr.code.a, Error
@@ -293,12 +366,13 @@ proc verify*(hdr: ProcHeader, env: VmModule): CheckResult =
   of pkCallback:
     check test(env.names, hdr.code.a), Error
   of pkStub:
-    result = CheckResult.err("stub procedures are not allowed in modules")
+    result = LocalResult.err(genericError "procedures may not be stubs")
 
   check test(env.types.types, hdr.typ.uint32), "signature type is missing"
   result.initSuccess()
 
-proc verify*(env: VmModule, prc: ProcIndex, code: openArray[Instr]): CheckResult =
+proc verify*(env: VmModule, prc: ProcIndex, code: openArray[Instr]
+            ): CheckResult =
   ## Verifies that the `code` belonging to procedure `prc` is valid. The
   ## associated EH table and instructions are also verified.
   var ctx = ValidationState(prc: prc, length: code.len, active: true)
@@ -310,16 +384,28 @@ proc verify*(env: VmModule, prc: ProcIndex, code: openArray[Instr]): CheckResult
   # run abstract evaluation for all instructions:
   for pos, instr in code.pairs:
     let res = run(ctx, env, PrgCtr(pos), instr)
+    # the abstract execution state is invalid after an erroneous instruction,
+    # so quit verification after the first problem
     if res.isErr:
-      return CheckResult.err(fmt"at {pos}: {res.error}")
+      return CheckResult.err(
+        wrapError(prc, env[prc].code.a + PrgCtr(pos), res.takeErr()))
 
-  check not ctx.active, "control-flow falls through"
-  check verify(ctx, env, env[prc].eh, code) # EH table
+  if ctx.active:
+    return CheckResult.err(
+      wrapError(prc, env[prc].code.b, "control-flow falls through"))
+
+  let res = verify(ctx, env, env[prc].eh, code) # EH table
+  if res.isErr:
+    return CheckResult.err(wrapError(entProc, ord prc, res.takeErr()))
 
   result.initSuccess()
 
 proc verify*(types: TypeEnv): CheckResult =
   ## Verifies the type environment, making sure it is well-formed.
+  template check(cond: bool, msg: string) =
+    if not cond:
+      return CheckResult.err(wrapError(entType, i, msg))
+
   for i, it in types.types.pairs:
     check it.a <= it.b, "illformed signature entry"
     check test(types.params, it.a), "illformed signature entry"
@@ -330,7 +416,7 @@ proc verify*(types: TypeEnv): CheckResult =
 
   result.initSuccess()
 
-proc validate*(m: VmModule): seq[string] =
+proc validate*(m: VmModule): seq[Error] =
   ## Validates the full module `m`, returning a log of errors encountered.
   ## If the log is empty, the environment is valid.
   template handle(res: CheckResult) =
@@ -341,18 +427,20 @@ proc validate*(m: VmModule): seq[string] =
   handle verify(m.types)
 
   # make sure the constants' types are sane:
-  for it in m.constants.items:
+  for i, it in m.constants.pairs:
     if it.typ notin {vtInt, vtFloat}:
-      result.add fmt"{it.typ} is not valid for constant ({it})"
+      result.add wrapError(entConst, i, fmt"{it.typ} is not allowed")
 
   # make sure the globals' types are sane:
-  for it in m.globals.items:
+  for i, it in m.globals.pairs:
     if it.typ notin {vtInt, vtFloat}:
-      result.add fmt"{it.typ} is not valid for global ({it})"
+      result.add wrapError(entGlobal, i, fmt"{it.typ} is not allowed")
 
   # check all procedure headers first:
   for i, it in m.procs.pairs:
-    handle verify(it, m)
+    let got = verify(it, m)
+    if got.isErr:
+      result.add wrapError(entProc, i, got.takeErr())
 
   if result.len > 0:
     # don't validate the bytecode if there were any errors so far
@@ -367,30 +455,30 @@ proc validate*(m: VmModule): seq[string] =
   # check the export table:
   for i, it in m.exports.pairs:
     if not test(m.names, it.name):
-      result.add fmt"invalid export {i}: interface name doesn't exist"
+      result.add wrapError(entExport, i, "invalid interface name reference")
 
     case it.kind
     of expGlobal:
       if not test(m.globals, it.id):
-        result.add fmt"invalid export {i}: global {it.id} doesn't exist"
+        result.add wrapError(entExport, i, fmt"invalid global reference")
     of expProc:
       if not test(m.procs, it.id):
-        result.add fmt"invalid export {i}: procedure {it.id} doesn't exist"
+        result.add wrapError(entExport, i, fmt"invalid procedure reference")
 
   if m.memory mod 4096 != 0:
-    result.add "memory size must be a multiple of 4096"
+    result.add wrapError(entNone, 0, "memory size must be a multiple of 4096")
 
   for i, it in m.init.pairs:
     if it.data.len == 0:
-      result.add fmt"invalid init {i}: data must not be empty"
+      result.add wrapError(entInit, i, "initializer must not be empty")
     if it.at + it.data.len.uint64 > m.memory:
-      result.add fmt"invalid init {i}: destination outside allowed region"
+      result.add wrapError(entInit, i, "target memory range is out of bounds")
 
   for i, it in m.relocations.pairs:
     if not test(m.globals, it):
-      result.add fmt"invalid relocation {i}: global doesn't exist"
+      result.add wrapError(entReloc, i, "invalid global reference")
     elif m.globals[it].typ != vtInt:
-      result.add fmt"invalid relocation {i}: global must have type 'int'"
+      result.add wrapError(entReloc, i, "target global must have type 'int'")
     elif m.globals[it].val.uintVal > m.memory:
-      result.add fmt"invalid relocation {i}: the global's local address is" &
-                    " out of bounds"
+      result.add wrapError(entReloc, i,
+        fmt"the global's local address must be below {m.memory}")
