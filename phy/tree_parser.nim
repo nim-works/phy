@@ -138,6 +138,11 @@ proc parseSexp*[T](str: string, lit: var Literals): seq[TreeNode[T]] =
     if stack.len == 0:
       break
 
+  p.space()
+  if not p.isTok(tkEof):
+    p.raiseError("expected end-of-file, but got: " & $p.currToken)
+  p.close()
+
 proc fromSexp*[T](str: string): PackedTree[T] =
   ## Parses a tree from `str`, which must be the S-expression representation of
   ## a node tree. A `ParseError <#ParseError>`_ or ``ValueError`` is raised

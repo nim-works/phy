@@ -1,13 +1,14 @@
 discard """
-  description: "A `ProcDef` body is part of a new scope"
+  description: "A `ProcDecl` body is part of a new scope"
+  arguments: "c"
 """
-(Module)
-  (ProcDef (Ident "test1") (UnitTy) (Params)
+(Module
+  (ProcDecl (Ident "test1") (UnitTy) (Params)
     (Exprs
       (Decl (Ident "local") (IntVal 100))
       (Return)))
 
-  (ProcDef (Ident "test2") (UnitTy) (Params)
+  (ProcDecl (Ident "test2") (UnitTy) (Params)
     (Exprs
       (Decl (Ident "local") (IntVal 100))
-      (Return)))
+      (Return))))
