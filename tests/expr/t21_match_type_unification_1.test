@@ -6,4 +6,4 @@ discard """
   (Rule (As x (IntTy))
     (As 2 (UnionTy (IntTy) (BoolTy))))
   (Rule (As x (UnitTy))
-    (Ident "true"))))
+    (Ident "true")))

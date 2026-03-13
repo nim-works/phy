@@ -1,5 +1,5 @@
 discard """
-  description: "The "then" part of an if has an error"
+  description: "The 'then' part of an if has an error"
   reject: true
 """
 (If (Ident "true")

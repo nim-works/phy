@@ -12,4 +12,4 @@ discard """
         (Drop (Reinterp (Int 8) (Ptr) (Nil)))
         (Drop (Reinterp (Ptr) (UInt 8) (IntVal 1)))
         (Drop (Reinterp (UInt 8) (Ptr) (Nil)))
-        (Return))))))
+        (Return)))))
