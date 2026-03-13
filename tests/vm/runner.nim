@@ -136,7 +136,7 @@ of yrkStubCalled:
   output.addInt res.stub.int
 of yrkUnhandledException:
   output.add " "
-  output.add $res.exc
+  output.addInt res.exc.uintVal
 of yrkUser:
   discard "cannot happen"
 

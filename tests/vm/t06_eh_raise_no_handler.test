@@ -1,0 +1,8 @@
+discard """
+  output: "(UnhandledException 1)"
+"""
+.type P1 () -> void
+.start P1 main
+  LdImmInt 1
+  Raise
+.end

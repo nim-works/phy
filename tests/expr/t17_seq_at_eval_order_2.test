@@ -11,4 +11,4 @@ discard """
     (At x 0)
     (Exprs
       (Asgn x (Seq (SeqTy (IntTy)) (Seq (IntTy) 1 2 3)))
-      1)))))
+      1)))
