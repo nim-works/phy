@@ -1,0 +1,25 @@
+discard """
+  output: "(Done 1)"
+"""
+.type P1 () -> void
+.type P2 () -> int
+
+.start P1 raise
+  LdImmInt 1
+  Raise
+.end
+
+.start P1 raise2
+  Call raise 0
+  # the exception is not handled within this frame
+  Ret
+.end
+
+.start P2 main
+  Call raise2 0
+.eh handler
+  Unreachable
+.label handler
+  Except
+  Ret
+.end

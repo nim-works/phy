@@ -1,0 +1,19 @@
+discard """
+  output: "(Done 1)"
+"""
+.type P1 () -> void
+.type P2 () -> int
+
+.start P1 raise
+  LdImmInt 1
+  Raise
+.end
+
+.start P2 main
+  Call raise 0
+.eh handler
+  Unreachable
+.label handler
+  Except
+  Ret
+.end

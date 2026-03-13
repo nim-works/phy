@@ -430,6 +430,7 @@ proc process*(a: var AssemblerState, line: sink string) =
     of dirEh:
       # .eh <name>
       expect a.stack.len > 0, "only allowed in procedure"
+      s.space()
       let id = s.parseLabel(a)
       a.prc.ehTable.add (a.prc.code.high.uint32, id.uint32)
 
