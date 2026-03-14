@@ -37,6 +37,47 @@ proc formatValue(result: var string, t: ValueType, specifier: string) =
   of vtFloat: result.add "float"
   of vtRef:   result.add "ref"
 
+proc disassemble*(pos: int, instr: Instr, result: var string) =
+  ## Renders `instr` into its textual representation and writes the result
+  ## to `result`. `pos` is the relative position of the instruction.
+  result.add substr($instr.opcode, 3)
+  case instr.opcode
+  of opcStackAlloc, opcStackFree, opcWrInt8..opcWrRef, opcLdInt8..opcLdInt64,
+     opcLdImmInt, opcAddImm:
+    result.add " "
+    result.addInt imm32(instr)
+  of opcLdImmFloat:
+    result.add " "
+    result.addFloat cast[float32](imm32(instr))
+  of opcPopLocal, opcSetLocal, opcGetLocal:
+    result.add " lo"
+    result.addInt imm32(instr)
+  of opcGetGlobal:
+    result.add " g"
+    result.addInt instr.imm32
+  of opcLdConst:
+    result.add " c"
+    result.addInt instr.imm32
+  of opcMask, opcSignExtend, opcAddChck, opcSubChck, opcUIntToFloat,
+     opcFloatToUint, opcSIntToFloat, opcFloatToSInt:
+    result.add " "
+    result.addInt imm32_8(instr)[1]
+  of opcCall:
+    let (p, args) = imm32_16(instr)
+    result.add fmt" p{p} {args}"
+  of opcIndCall:
+    let (t, args) = imm32_16(instr)
+    result.add fmt" {TypeId t} {args}"
+  of opcJmp:
+    result.add fmt" L{pos + instr.imm32.int}"
+  of opcBranch:
+    let (a, b) = imm32_8(instr)
+    result.add fmt" L{pos + a.int} {b}"
+  of opcYield:
+    let (a, b) = imm32_16(instr)
+    result.add fmt" {a} {b}"
+  else:
+    discard
 
 proc disassemble*(env: VmModule, prc: ProcHeader, result: var string) =
   ## Turns the given `prc` into its text representation, appending the result
@@ -61,46 +102,8 @@ proc disassemble*(env: VmModule, prc: ProcHeader, result: var string) =
       # derive the label name from the local instruction position:
       result.add &".label L{i}\n"
 
-    result.add "  " & substr($instr.opcode, 3)
-    case instr.opcode
-    of opcStackAlloc, opcStackFree, opcWrInt8..opcWrRef, opcLdInt8..opcLdInt64,
-       opcLdImmInt, opcAddImm:
-      result.add " "
-      result.addInt imm32(instr)
-    of opcLdImmFloat:
-      result.add " "
-      result.addFloat cast[float32](imm32(instr))
-    of opcPopLocal, opcSetLocal, opcGetLocal:
-      result.add " lo"
-      result.addInt imm32(instr)
-    of opcGetGlobal:
-      result.add " g"
-      result.addInt instr.imm32
-    of opcLdConst:
-      result.add " c"
-      result.addInt instr.imm32
-    of opcMask, opcSignExtend, opcAddChck, opcSubChck, opcUIntToFloat,
-       opcFloatToUint, opcSIntToFloat, opcFloatToSInt:
-      result.add " "
-      result.addInt imm32_8(instr)[1]
-    of opcCall:
-      let (p, args) = imm32_16(instr)
-      result.add fmt" p{p} {args}"
-    of opcIndCall:
-      let (t, args) = imm32_16(instr)
-      result.add fmt" {TypeId t} {args}"
-    of opcJmp:
-      result.add " L"
-      result.add $(i + instr.imm32.int)
-    of opcBranch:
-      let (a, b) = imm32_8(instr)
-      result.add fmt" L{i + a.int} {b}"
-    of opcYield:
-      let (a, b) = imm32_16(instr)
-      result.add fmt" {a} {b}"
-    else:
-      discard
-
+    result.add "  "
+    disassemble(i, instr, result)
     result.add "\n"
 
     # emit the .eh directive for the attached exception handler, if any

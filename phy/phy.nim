@@ -50,6 +50,7 @@ import
     tree_parser,
     type_rendering,
     types,
+    vmerrors,
     vmexec
   ],
   vm/[
@@ -439,9 +440,13 @@ proc main(args: openArray[string]) =
     # make sure the environment is correct:
     let errors = validate(module)
     if errors.len > 0:
+      let os = newFileStream(stderr)
       echo "VM module validation failed"
       for it in errors.items:
-        echo "Error: ", it
+        os.write "Error: "
+        render(os, module, it)
+        os.writeLine ""
+
       quit(1)
 
     print(module)

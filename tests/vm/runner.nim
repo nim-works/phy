@@ -7,6 +7,9 @@ import
     strutils,
     tables
   ],
+  phy/[
+    vmerrors
+  ],
   vm/[
     assembler,
     vm,
@@ -42,8 +45,11 @@ proc closeModule(a: var AssemblerState): VmModule =
   result = a.close()
   let errors = validate(result)
   if errors.len > 0:
+    let os = newFileStream(stderr)
     for it in errors.items:
-      stderr.writeLine(it)
+      os.write("Error: ")
+      render(os, result, it)
+      os.writeLine("")
     quit(1)
 
   open = false
