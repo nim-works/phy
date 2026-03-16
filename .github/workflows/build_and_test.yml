@@ -168,3 +168,25 @@ jobs:
         env:
           TEST_FILE: tests/expr/t06_call_proc_with_tuple_return_type.test
           TEST_OUTPUT: "(TupleCons 100 200) : (TupleTy (IntTy) (IntTy))(Done 0)"
+
+  docs:
+    name: "Test documentation"
+    runs-on: "ubuntu-latest"
+
+    needs: context
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          filter: tree:0
+
+      - uses: nim-works/setup-nimskull@0.1.2
+        with:
+          nimskull-version: "${{ needs.context.outputs.nimskull-version }}"
+
+      - name: Build koch
+        run: nim c --outdir:bin koch.nim
+
+      - name: Build and test documentation
+        run: bin/koch docs
