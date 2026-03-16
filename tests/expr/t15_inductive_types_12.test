@@ -1,0 +1,17 @@
+discard """
+  description: "
+    The return type of n-ary constructors is usable as a pattern, matching
+    all values for the constructor.
+  "
+  output: "1 : (IntTy)"
+"""
+(Module
+  (DataTypeDecl typ
+    (Constr a (IntTy))
+    (Constr b (IntTy)))
+  (ProcDecl test (IntTy) (Params)
+    (Exprs
+      (Decl x (Call a 100))
+      (Match x
+        (Rule a 1)
+        (Rule b 2)))))
