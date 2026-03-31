@@ -35,7 +35,7 @@ proc hook_strstr(haystack, needle: cstring): cstring {.exportc: "strstr".} =
 
   result = nil # not found
 
-proc hook_strcmp(a, b: cstring): int {.exportc: "strcmp".} =
+proc hook_strcmp(a, b: cstring): cint {.exportc: "strcmp".} =
   # the most inefficient implementation imaginable
   let
     aLen = len(a)
@@ -47,7 +47,7 @@ proc hook_strcmp(a, b: cstring): int {.exportc: "strcmp".} =
     result = 1
   else:
     for i in 0..<aLen:
-      result = a[i].ord - b[i].ord
+      result = cint(a[i].ord - b[i].ord)
       if result != 0:
         return
 
