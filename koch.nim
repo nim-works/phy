@@ -17,6 +17,7 @@ Commands:
   generate <dir>              generates the various language-related modules
   build-defs                  verifies the language definitions and generates
                               the textual representation for them
+  docs                        builds all documentation
 """
   Programs = {
     "tester" : ("tools/tester.nim", true),
@@ -31,6 +32,10 @@ Commands:
 
   DefaultGenerated = "generated"
     ## the default path for the generated modules
+
+  RstList = @[
+    "nanopass/manual.rst"
+  ]
 
 var
   nimExe = findExe("nim")
@@ -54,6 +59,14 @@ proc compile(file: sink string, name: string, extra: varargs[string]): bool =
   ## directory, using `name` as the name.
   var args = @["c", "--nimcache:build/cache/" & name,
                "-o:bin/" & addFileExt(name, ExeExt)]
+  args.add extra
+  args.add file
+  result = run(nimExe, args)
+
+proc rstToHtml(file: sink string, dir: string, extra: varargs[string]): bool =
+  ## Runs RST-to-HTML conversion on `file`, using `dir` as the
+  ## output directory.
+  var args = @["rst2html", "--nimcache:build/docs/", "--outdir:" & dir]
   args.add extra
   args.add file
   result = run(nimExe, args)
@@ -184,6 +197,23 @@ proc buildDefs(args: string): bool =
 
   result = true
 
+proc buildDocs(args: string): bool =
+  ## Handles building and testing the various documentation.
+  if args.len > 0:
+    return false
+
+  let docroot = getCurrentDir() / "build" / "docs"
+  createDir(docroot)
+
+  for it in RstList.items:
+    # the output is not relevant at the moment, so it's simply dumped into the
+    # artifacts directory
+    if not rstToHtml(it, docroot):
+      echo "Failure"
+      quit(1)
+
+  result = true
+
 proc showHelp(): bool =
   ## Shows the help text.
   echo HelpText
@@ -213,6 +243,8 @@ while true:
         generate(opts.cmdLineRest)
       of "build-defs":
         buildDefs(opts.cmdLineRest)
+      of "docs":
+        buildDocs(opts.cmdLineRest)
       of "help":
         showHelp()
       else:
